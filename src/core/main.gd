@@ -1,19 +1,30 @@
 extends Node3D
-## Composition root. Command-line user args (after `--`):
-##   --world=prototype|city   --mode=free|trial|endurance   --bot=expert|novice
-##   --shot=<png path> --shot-at=<seconds>   --quality=0|1|2   --perf
+## Composition root and game-state machine:
+##   TITLE (attract-mode autopilot swings behind the menu) → PLAYING → PAUSED
+##   → RESULTS → PLAYING/TITLE.
+## Command-line user args (after `--`), used by tools and automated captures:
+##   --world=prototype|city   --mode=free|endurance|trial:<course>
+##   --bot=expert|novice   --shot=<png> --shot-at=<s,s,...>   --quality=0|1|2
+##   --perf   --touch   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
+
+enum State { TITLE, PLAYING, PAUSED, RESULTS }
 
 var world_kind := "city"
-var mode_name := "menu"
+var state := State.TITLE
 var player: Player
 var camera: SwingCamera
 var rig: CharacterRig
 var rope: RopeVisual
 var hud: Hud
 var touch: TouchControls
+var menus: Menus
+var audio: AudioDirector
+var atmosphere: Atmosphere
 var world: Node3D
+var mode: GameMode
 var ui: CanvasLayer
 var args := {}
+var _last_mode := ["free", ""]
 
 
 func _ready() -> void:
@@ -27,11 +38,10 @@ func _ready() -> void:
 		Settings.show_perf = true
 	Settings.apply()
 
-	_build_environment()
-	if world_kind == "prototype":
-		world = PrototypeWorld.new()
-	else:
-		world = CityWorld.new()
+	atmosphere = Atmosphere.new()
+	atmosphere.name = "Atmosphere"
+	add_child(atmosphere)
+	world = PrototypeWorld.new() if world_kind == "prototype" else CityWorld.new()
 	world.name = "World"
 	add_child(world)
 	if world.has_method("set_sky_colors"):
@@ -41,7 +51,6 @@ func _ready() -> void:
 	player.name = "Player"
 	add_child(player)
 	player.global_position = world.spawn_point()
-	player.spawn_transform = player.global_transform
 	player.last_safe_position = player.global_position
 	if world.has_method("build_all_near"):
 		var t0 := Time.get_ticks_msec()
@@ -53,18 +62,20 @@ func _ready() -> void:
 	player.add_child(rig)
 	rig.player = player
 	player.landed.connect(func(spd, _street): rig.on_landed(spd))
-
 	rope = RopeVisual.new()
 	rope.name = "Rope"
 	add_child(rope)
 	rope.player = player
-
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
 	camera.set_target(player)
 	if world.has_method("set_viewer"):
 		world.set_viewer(camera)
+	audio = AudioDirector.new()
+	audio.name = "Audio"
+	add_child(audio)
+	audio.attach_player(player)
 
 	ui = CanvasLayer.new()
 	add_child(ui)
@@ -75,31 +86,132 @@ func _ready() -> void:
 	touch = TouchControls.new()
 	ui.add_child(touch)
 	touch.camera = camera
-	touch.visible = DisplayServer.is_touchscreen_available() or args.has("touch")
+	touch.pause_pressed.connect(pause)
+	menus = Menus.new()
+	ui.add_child(menus)
+	menus.params = player.params
+	menus.start_mode.connect(start_mode)
+	menus.resume.connect(unpause)
+	menus.restart.connect(func(): start_mode(_last_mode[0], _last_mode[1]))
+	menus.quit_to_title.connect(to_title)
+	Settings.changed.connect(_apply_settings)
 
-	if args.has("bot"):
-		var style := SwingBot.Style.NOVICE if args["bot"] == "novice" else SwingBot.Style.EXPERT
-		var h: Vector3 = world.call("bot_heading") if world.has_method("bot_heading") else Vector3.FORWARD
-		player.bot = SwingBot.new(style, h)
-		if world.has_method("bot_goal"):
-			player.bot.goal_fn = world.bot_goal
 	if args.has("cam"):
-		# Fixed overview camera: --cam=x,y,z,look_x,look_y,look_z
-		var v := String(args["cam"]).split_floats(",")
-		camera.target = null
-		camera.global_position = Vector3(v[0], v[1], v[2])
-		camera.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
-		camera.cam.fov = float(args.get("fov", "60"))
-		camera.cam.far = 4000.0
-		player.input_enabled = false
-		if world.has_method("build_all_near"):
-			world.view_distance = 2000.0
-			world.build_all_near(Vector3(v[3], 0, v[5]), 1600.0)
+		_overview_camera()
+	if args.has("mode"):
+		var m := String(args["mode"]).split(":")
+		start_mode(m[0], m[1] if m.size() > 1 else "")
+	else:
+		to_title()
+	if args.has("bot"):
+		_attract(SwingBot.Style.NOVICE if args["bot"] == "novice" else SwingBot.Style.EXPERT)
+	if args.has("menu"):
+		match args["menu"]:
+			"settings": menus.show_settings(menus.show_title)
+			"courses": menus.show_courses()
+			"tuning": menus.show_tuning()
+			"pause": menus.show_pause()
 	if args.has("shot"):
 		var times: Array[float] = []
 		for x in String(args.get("shot-at", "3.0")).split(","):
 			times.append(float(x))
 		_capture_series(args["shot"], times)
+
+
+# --------------------------------------------------------------- states
+func to_title() -> void:
+	get_tree().paused = false
+	_end_mode()
+	state = State.TITLE
+	hud.mode_text = ""
+	hud.mode_sub = ""
+	hud.visible = false
+	touch.visible = false
+	_attract(SwingBot.Style.EXPERT)
+	menus.show_title()
+
+
+func start_mode(kind: String, arg: String) -> void:
+	get_tree().paused = false
+	_end_mode()
+	_last_mode = [kind, arg]
+	player.bot = null
+	player.input_enabled = true
+	match kind:
+		"trial":
+			var tt := TimeTrialMode.new()
+			_install(tt)
+			tt.setup_course(CourseBuilder.load_course(arg))
+			mode = tt
+		"endurance":
+			mode = EnduranceMode.new()
+			_install(mode)
+			player.respawn(world.spawn_point())
+		_:
+			mode = FreeSwingMode.new()
+			_install(mode)
+	mode.finished.connect(_on_finished)
+	mode.start()
+	state = State.PLAYING
+	menus.hide_all()
+	hud.visible = true
+	touch.visible = DisplayServer.is_touchscreen_available() or args.has("touch")
+	camera.snap()
+
+
+func _install(m: GameMode) -> void:
+	m.name = "Mode"
+	add_child(m)
+	m.setup(player, hud, audio, world)
+
+
+func _end_mode() -> void:
+	if mode:
+		if mode is TimeTrialMode:
+			(mode as TimeTrialMode).abandon()
+		mode.queue_free()
+		mode = null
+
+
+func pause() -> void:
+	if state != State.PLAYING:
+		return
+	state = State.PAUSED
+	get_tree().paused = true
+	touch.visible = false
+	menus.show_pause()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func unpause() -> void:
+	state = State.PLAYING
+	get_tree().paused = false
+	menus.hide_all()
+	touch.visible = DisplayServer.is_touchscreen_available() or args.has("touch")
+
+
+func _on_finished(result: Dictionary) -> void:
+	state = State.RESULTS
+	touch.visible = false
+	player.input_enabled = false
+	menus.show_results(result)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Title screen backdrop: the autopilot swings through the city.
+func _attract(style: int) -> void:
+	var bot := SwingBot.new(style, Vector3.FORWARD)
+	if world.has_method("bot_goal"):
+		bot.goal_fn = world.bot_goal
+	player.bot = bot
+
+
+func _apply_settings() -> void:
+	var p := Settings.preset()
+	if atmosphere and atmosphere.sun:
+		atmosphere.sun.shadow_enabled = p["shadows"]
+	if atmosphere and atmosphere.env:
+		atmosphere.env.glow_enabled = p["glow"]
 
 
 func _process(_dt: float) -> void:
@@ -109,16 +221,35 @@ func _process(_dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and not DisplayServer.is_touchscreen_available():
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	if event.is_action_pressed("pause") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if state == State.PLAYING:
+		if event is InputEventMouseButton and event.pressed and not DisplayServer.is_touchscreen_available():
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		if event.is_action_pressed("pause"):
+			if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+			pause()
+	elif state == State.PAUSED and event.is_action_pressed("pause"):
+		unpause()
 
 
-func _build_environment() -> void:
-	var atmosphere := Atmosphere.new()
-	atmosphere.name = "Atmosphere"
-	add_child(atmosphere)
+func _notification(what: int) -> void:
+	# Leaving the app (home button, call) pauses a run.
+	if OS.has_feature("mobile") and (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED):
+		pause()
+
+
+# ------------------------------------------------------------- captures
+func _overview_camera() -> void:
+	var v := String(args["cam"]).split_floats(",")
+	camera.target = null
+	camera.global_position = Vector3(v[0], v[1], v[2])
+	camera.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
+	camera.cam.fov = float(args.get("fov", "60"))
+	camera.cam.far = 4000.0
+	player.input_enabled = false
+	if world.has_method("build_all_near"):
+		world.view_distance = 2000.0
+		world.build_all_near(Vector3(v[3], 0, v[5]), 1600.0)
 
 
 ## Saves one PNG per time (path gets _<i> suffix when several), then quits.

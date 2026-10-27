@@ -3,9 +3,12 @@ extends Node
 
 signal changed
 
-const PATH := "user://save.json"
+const DEFAULT_PATH := "user://save.json"
 
-var data := {
+## Tests point this at a scratch file so they never touch a player's records.
+var path := DEFAULT_PATH
+var data := {}
+const DEFAULTS := {
 	"best_trial_times": {},  # course id -> seconds
 	"best_endurance_m": 0.0,
 	"best_chain": 0,
@@ -20,10 +23,16 @@ func _ready() -> void:
 	load_data()
 
 
+func use_file(p: String) -> void:
+	path = p
+	load_data()
+
+
 func load_data() -> void:
-	if not FileAccess.file_exists(PATH):
+	data = DEFAULTS.duplicate(true)
+	if not FileAccess.file_exists(path):
 		return
-	var f := FileAccess.open(PATH, FileAccess.READ)
+	var f := FileAccess.open(path, FileAccess.READ)
 	var parsed = JSON.parse_string(f.get_as_text())
 	if parsed is Dictionary:
 		for k in parsed:
@@ -31,7 +40,7 @@ func load_data() -> void:
 
 
 func save() -> void:
-	var f := FileAccess.open(PATH, FileAccess.WRITE)
+	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data, "  "))
 	changed.emit()

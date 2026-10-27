@@ -15,6 +15,11 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Never touch the player's real records.
+	var save_data := root.get_node_or_null("SaveData")
+	if save_data:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://test_save.json"))
+		save_data.use_file("user://test_save.json")
 	var filter := ""
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
