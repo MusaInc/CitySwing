@@ -1,163 +1,112 @@
-// Browser test of the web export, emulating an iPhone in landscape.
-//   node tools/web/web_test.mjs <url> <outdir> [webkit|chromium]
-// The page is opened with ?debug=1 so the game publishes its state to
-// window.__cs (line state, anchor screen position, a tappable building pixel…).
-// This is SIMULATED touch in desktop browser engines – not a physical iPhone.
+// Browser gameplay smoke test in an emulated landscape iPhone.
+// node tools/web/web_test.mjs <url> <outdir> [webkit|chromium]
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { webkit, chromium, devices } = require(process.env.PLAYWRIGHT ?? "/home/abdul/workspace/projects/FireDev/node_modules/playwright");
-
 const [baseUrl, out, engine = "webkit"] = process.argv.slice(2);
-const url = baseUrl + (baseUrl.includes("?") ? "&" : "?") + "debug=1";
-const dev = devices["iPhone 13 landscape"];
+if (!baseUrl || !out) throw new Error("usage: web_test.mjs <url> <outdir> [webkit|chromium]");
+const device = devices["iPhone 13 landscape"];
 const browser = await (engine === "chromium" ? chromium : webkit).launch({
   args: engine === "chromium" ? ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] : [],
 });
-const ctx = await browser.newContext({ ...dev });
-const page = await ctx.newPage();
+const context = await browser.newContext({ ...device });
+const page = await context.newPage();
 const logs = [];
-page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
-page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
-await page.addInitScript(() => {
-  const wrap = (fn) => async (...a) => {
-    const r = await fn(...a);
-    const inst = r.instance ?? r;
-    for (const v of Object.values(inst.exports ?? {})) if (v instanceof WebAssembly.Memory) window.__wasmMem = v;
-    return r;
-  };
-  WebAssembly.instantiate = wrap(WebAssembly.instantiate.bind(WebAssembly));
-  if (WebAssembly.instantiateStreaming) WebAssembly.instantiateStreaming = wrap(WebAssembly.instantiateStreaming.bind(WebAssembly));
-});
-const results = [];
-const check = (ok, msg) => { results.push([ok, msg]); console.log(`${ok ? "ok  " : "FAIL"} ${msg}`); };
-const vw = dev.viewport.width, vh = dev.viewport.height;
-const t0 = Date.now();
-await page.goto(url, { waitUntil: "load" });
-const shot = (n) => page.screenshot({ path: `${out}/${engine}_${n}.png` });
+page.on("console", m => logs.push(`[${m.type()}] ${m.text()}`));
+page.on("pageerror", e => logs.push(`[pageerror] ${e.message}`));
+const checks = [];
+const check = (ok, msg) => { checks.push([!!ok, msg]); console.log(`${ok ? "ok  " : "FAIL"} ${msg}`); };
 const state = () => page.evaluate(() => window.__cs ?? null);
-// Software rendering here can run at ~1 fps, so wait for game state, not wall time.
-async function waitFor(pred, ms = 20000) {
-  const end = Date.now() + ms;
-  let st = await state();
-  while (Date.now() < end && !pred(st)) { await page.waitForTimeout(200); st = await state(); }
-  return st;
+async function waitFor(predicate, timeout = 30000) {
+  const end = Date.now() + timeout;
+  let s = await state();
+  while (Date.now() < end && !predicate(s)) { await page.waitForTimeout(200); s = await state(); }
+  return s;
 }
-const mem = () => page.evaluate(() => ({
-  wasmMB: window.__wasmMem ? +(window.__wasmMem.buffer.byteLength / 1048576).toFixed(0) : null,
-  jsMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(0) : null,
-}));
-let rect = { x: 0, y: 0, w: vw, h: vh };
-const px = (fx, fy) => [rect.x + fx * rect.w, rect.y + fy * rect.h];
-
-let booted = false;
-for (let i = 0; i < 240 && !booted; i++) { await page.waitForTimeout(500); booted = logs.some((l) => l.includes("Initial city build")); }
-const loadS = (Date.now() - t0) / 1000;
-// Measure the canvas only once Godot has sized it (it starts at 300×150).
-rect = await page.evaluate(() => { const b = document.querySelector("canvas").getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
-console.log(`canvas rect ${JSON.stringify(rect)}`);
-check(booted, `engine booted and city built in ${loadS.toFixed(1)} s`);
-console.log(`memory after boot: ${JSON.stringify(await mem())}`);
-await page.waitForTimeout(2500);
+const started = Date.now();
+await page.goto(`${baseUrl}${baseUrl.includes("?") ? "&" : "?"}debug=1&seed=6`, { waitUntil: "load" });
+let s = await waitFor(v => v?.state === "title", 120000);
+check(s?.state === "title", `game booted in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+const rect = await page.evaluate(() => {
+  const b = document.querySelector("canvas").getBoundingClientRect();
+  return { x: b.x, y: b.y, w: b.width, h: b.height };
+});
+const at = (fx, fy) => [rect.x + fx * rect.w, rect.y + fy * rect.h];
+const shot = name => page.screenshot({ path: `${out}/${engine}_${name}.png` });
+check(rect.w >= 700 && rect.h >= 300 && rect.w > rect.h, `landscape canvas ${rect.w}x${rect.h}`);
 await shot("1_title");
-await page.touchscreen.tap(...px(0.5, 0.545));          // "Free Swing"
-let st = await waitFor((s) => s?.state === "playing");
-check(st?.state === "playing", `menu tap starts Free Swing (state=${st?.state})`);
-await page.waitForTimeout(4000);  // let the spawn camera settle
-await shot("2_rooftop_spawn");
-for (let i = 0; i < 12 && !(st?.suggest?.length); i++) { await page.waitForTimeout(300); st = await state(); }
-check(!!st?.suggest?.length, `a building is tappable on screen (${JSON.stringify(st?.suggest)})`);
-const web = px(...(st?.suggest ?? [0.65, 0.3]));
-const fired0 = st?.webs_fired ?? 0;
-
-// Touch helpers: real per-finger DOM TouchEvents dispatched on the canvas (what
-// Godot's web input reads), identical in Chromium and WebKit. Each event lists
-// every finger still down in `touches` and the moving/lifting one in
-// `changedTouches`.
+await page.touchscreen.tap(...at(0.5, 0.545));
+s = await waitFor(v => v?.state === "playing", 30000);
+check(s?.state === "playing", "Free Swing starts with an iPhone touch");
+await page.waitForTimeout(2500);
+await shot("2_rooftop");
+s = await state();
+const k = rect.h / 720;
+const swing = [rect.x + rect.w - 150 * k, rect.y + rect.h - 150 * k];
+const jump = [rect.x + rect.w - 338 * k, rect.y + rect.h - 92 * k];
+const pause = [rect.x + rect.w - 44 * k, rect.y + 44 * k];
 const active = new Map();
-async function send(type, id) {
+async function send(type, id, lifted) {
   const pts = [...active.entries()].map(([i, [x, y]]) => ({ id: i, x, y }));
-  const changed = type === "touchend" ? [{ id, x: lifted[0], y: lifted[1] }] : pts.filter((p) => p.id === id);
-  return page.evaluate(({ type, pts, changed }) => {
+  const changed = type === "touchend" ? [{ id, x: lifted[0], y: lifted[1] }] : pts.filter(p => p.id === id);
+  await page.evaluate(({ type, pts, changed }) => {
     const c = document.querySelector("canvas");
-    const mk = (p) => new Touch({ identifier: p.id, target: c, clientX: p.x, clientY: p.y, pageX: p.x, pageY: p.y, radiusX: 4, radiusY: 4, force: 1 });
+    const mk = p => new Touch({ identifier: p.id, target: c, clientX: p.x, clientY: p.y,
+      pageX: p.x, pageY: p.y, radiusX: 4, radiusY: 4, force: 1 });
     c.dispatchEvent(new TouchEvent(type, { touches: pts.map(mk), targetTouches: pts.map(mk),
       changedTouches: changed.map(mk), bubbles: true, cancelable: true }));
   }, { type, pts, changed });
 }
-let lifted = [0, 0];
-async function down(id, x, y) { active.set(id, [x, y]); return send("touchstart", id); }
-async function move(id, x, y) { active.set(id, [x, y]); return send("touchmove", id); }
-async function up(id) { lifted = active.get(id); active.delete(id); return send("touchend", id); }
-
-// Tap an invalid target (sky / too far / street): it must never fire a web,
-// and the game must say why.
-st = await waitFor((s) => s?.invalid?.length, 10000);
-if (st?.invalid?.length) {
-  const firedBefore = st.webs_fired ?? 0;
-  const [ix, iy, why] = st.invalid;
-  await page.touchscreen.tap(...px(ix, iy));
-  st = await waitFor((s) => s?.last_tap?.reason, 8000);
-  check(st?.last_tap?.reason === why && (st?.webs_fired ?? 0) === firedBefore,
-    `tap on an invalid target ("${why}") is rejected with feedback and fires nothing (got ${JSON.stringify(st?.last_tap)})`);
-} else {
-  check(false, "an invalid target exists on screen to tap");
-}
-let touchWorks = true;
-try { await down(1, ...web); } catch (e) { touchWorks = false; console.log(`synthetic touch unavailable in this engine: ${e.message}`); }
-if (!touchWorks) {
-  // WebKit here can't construct Touch objects, so only Playwright's real tap
-  // (press + lift) is possible: the web fires, then releases as the finger lifts.
-  await page.touchscreen.tap(...web);
-  st = await waitFor((s) => (s?.webs_fired ?? 0) > fired0);
-  check((st?.webs_fired ?? 0) > fired0, `tap on a building fires a web (single real tap; holds not simulatable in this engine)`);
-  st = await waitFor((s) => s?.line === 0);
-  check(st?.line === 0, `lifting the finger releases the web (line=${st?.line})`);
-} else {
-  st = await waitFor((s) => (s?.webs_fired ?? 0) > fired0 && s?.anchor?.length);
-  check((st?.webs_fired ?? 0) > fired0, `touch on the building fired a web`);
-  const af = st?.anchor ?? [];
-  if (af.length) {
-    const ax = rect.x + af[0] * rect.w, ay = rect.y + af[1] * rect.h;
-    const err = Math.hypot(ax - web[0], ay - web[1]);
-    check(err < 70, `anchor appears where the finger landed (${err.toFixed(0)} px off)`);
-  } else check(false, "anchor visible after the tap");
-  st = await waitFor((s) => s?.line === 2);
-  check(st?.line === 2, `holding the finger keeps the web attached (line=${st?.line})`);
-  await shot("3_holding_web");
-  // Second finger on the left: the movement stick, while the web is held.
-  await down(2, ...px(0.15, 0.75));
-  for (let i = 1; i <= 5; i++) { await move(2, px(0.15, 0.75)[0], px(0.15, 0.75)[1] - i * 10); await page.waitForTimeout(30); }
-  // Third finger: drag the LOOK pad to look around (never fires).
-  const k = rect.h / 720;
-  const look = [rect.x + rect.w - 292 * k, rect.y + rect.h - 104 * k];
-  const yaw0 = (await state())?.look_yaw ?? 0;
-  await down(3, ...look);
-  for (let i = 1; i <= 8; i++) { await move(3, look[0] - i * 12, look[1]); await page.waitForTimeout(30); }
-  st = await waitFor((s) => Math.abs((s?.look_yaw ?? 0) - yaw0) > 0.02, 8000);
-  check(Math.abs((st?.look_yaw ?? 0) - yaw0) > 0.02, `dragging the LOOK pad turns the camera (Δ=${((st?.look_yaw ?? 0) - yaw0).toFixed(3)})`);
-  check(st?.line === 2, `camera drag doesn't release the web (line=${st?.line})`);
-  await up(3);
-  await up(2);
-  await page.waitForTimeout(250);
-  st = await state();
-  check(st?.line === 2, `lifting other fingers keeps the web (line=${st?.line})`);
-  const swings0 = st?.swings ?? 0;
+const down = async (id, x, y) => { active.set(id, [x, y]); await send("touchstart", id); };
+const move = async (id, x, y) => { active.set(id, [x, y]); await send("touchmove", id); };
+const up = async id => { const xy = active.get(id); active.delete(id); await send("touchend", id, xy); };
+if (engine === "chromium") {
+  const fired = s?.webs_fired ?? 0;
+  await down(1, ...swing);
+  s = await waitFor(v => (v?.webs_fired ?? 0) > fired && v?.line === 2, 30000);
+  check((s?.webs_fired ?? 0) > fired && s?.line === 2, "holding SWING attaches a web");
+  check(s?.touch_web === 1, "the holding finger owns the web");
+  await shot("3_holding_swing");
+  const oldYaw = s?.look_yaw ?? 0;
+  await down(2, ...at(0.77, 0.33));
+  s = await waitFor(v => v?.touch_web === 2 && v?.line !== 0, 20000);
+  check(s?.touch_web === 2, "another right-side touch reattaches");
   await up(1);
-  st = await waitFor((s) => s?.line === 0);
-  check(st?.line === 0 && (st?.swings ?? 0) > swings0, `lifting the web finger releases it (line=${st?.line}, swings=${st?.swings})`);
+  s = await waitFor(v => v?.touch_web === 2, 8000);
+  check(s?.line !== 0, "lifting the old finger keeps the new web");
+  await down(3, ...jump);
+  s = await state();
+  check(s?.touch_web === 2, "JUMP does not steal the web");
+  await up(3);
+  const stick = at(0.15, 0.77);
+  await down(4, ...stick);
+  await move(4, stick[0], stick[1] - 55 * k);
+  await page.waitForTimeout(500);
+  await up(4);
+  s = await state();
+  check(Math.abs((s?.look_yaw ?? 0) - oldYaw) < 0.01, "touches do not orbit the camera");
+  await up(2);
+  s = await waitFor(v => v?.line === 0, 15000);
+  check(s?.line === 0, "lifting the owning finger releases the web");
   await shot("4_released");
+} else {
+  // Linux WebKit cannot construct held Touch objects; Playwright sends real taps.
+  const fired = s?.webs_fired ?? 0;
+  await page.touchscreen.tap(...swing);
+  s = await waitFor(v => (v?.webs_fired ?? 0) > fired || v?.last_tap?.reason === "waiting", 15000);
+  check((s?.webs_fired ?? 0) > fired,
+    "Safari touch on SWING fires a web from the rooftop");
+  s = await waitFor(v => v?.line === 0, 12000);
+  check(s?.line === 0, "Safari tap release leaves no held web");
+  await shot("3_after_tap");
 }
-await page.touchscreen.tap(rect.x + rect.w - 44 * (rect.h / 720), rect.y + 44 * (rect.h / 720));
-st = await waitFor((s) => s?.state === "paused");
-check(st?.state === "paused", `pause button opens the menu (state=${st?.state})`);
+await page.touchscreen.tap(...pause);
+s = await waitFor(v => v?.state === "paused", 15000);
+check(s?.state === "paused", "pause touch opens the menu");
 await shot("5_pause");
-const m = await mem();
-console.log(`memory at end: ${JSON.stringify(m)}  fps(sw render)=${st?.fps}`);
-const bad = logs.filter((l) => /SCRIPT ERROR|pageerror|ERROR:/i.test(l));
-check(bad.length === 0, `no script/page errors (${bad.length})`);
-for (const l of [...new Set(bad)].slice(0, 10)) console.log("   " + l);
-const warn = [...new Set(logs.filter((l) => /WARNING|WebGL/i.test(l)))].slice(0, 6);
-for (const l of warn) console.log("   note: " + l);
-console.log(`RESULT ${engine}: ${results.filter((r) => r[0]).length}/${results.length} passed, boot ${loadS.toFixed(1)} s, wasm ${m.wasmMB} MB`);
+const errors = [...new Set(logs.filter(l => /SCRIPT ERROR|pageerror|ERROR:/i.test(l)))];
+check(errors.length === 0, `no runtime errors (${errors.length})`);
+for (const error of errors.slice(0, 8)) console.log(`  ${error}`);
+console.log(`RESULT ${engine}: ${checks.filter(c => c[0]).length}/${checks.length} passed`);
 await browser.close();
-process.exit(results.every((r) => r[0]) ? 0 : 1);
+process.exit(checks.every(c => c[0]) ? 0 : 1);

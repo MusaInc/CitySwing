@@ -16,9 +16,9 @@ no story: the whole game is mastering momentum, timing and line choice.
   an inelastic jerk.
 - **Gravity 19 m/s²** (tunable) so 40 m ropes swing at a readable pace;
   quadratic + linear drag bleed energy, so momentum has to be *earned*.
-- **Reeling conserves angular momentum** (`r·v_t = const`), so reeling in
-  through the bottom of the arc pumps energy into the swing, as on a playground
-  swing. This is the core skill move.
+- **Automatic tightening conserves angular momentum** (`r·v_t = const`). The
+  web shortens through the bottom of the arc, pumping energy into the swing.
+  A ground launch tightens sooner to lift the player clear of the street.
 - **Release never touches velocity.** You fly off with exactly what the swing
   gave you.
 - **Limited control authority**: tangential "kick" on the rope (4.5 m/s²),
@@ -40,16 +40,18 @@ and the in-game **Pause → Tuning** panel edits them live on the device. See
 | | Touch (landscape) | Controller | Keyboard/mouse |
 |---|---|---|---|
 | Move / steer | left thumb, floating stick | left stick | WASD |
-| Web | **tap and hold the building surface you want** (exact point under the finger); lift that finger to release; tap another building to re-attach | RT (assisted aim) | hold Space / LMB (assisted aim) |
-| Look | drag empty sky, or the **LOOK** pad (never fires) | right stick | mouse |
+| Web | Hold **SWING** or touch the right side; it catches an available target automatically, including after a jump. Lift the owning finger to release; press with another finger to reattach. Settings offer precise building taps. | RT (assisted aim) | hold Space / LMB (assisted aim) |
+| Look | automatic follow camera | right stick | captured mouse |
 | Jump / wall-kick / mid-air flip | **JUMP** | A | Shift |
 | Pause | ⏸ | Start | Esc |
 
 There are no reel buttons: a taut web tightens itself through the bottom of
 each arc (angular-momentum pumping), so well-timed consecutive swings build
 speed, and it winches to keep the arc off the street. Each finger keeps its
-own role (stick, web, look), tracked by touch ID. Invalid taps (sky, street,
-too far, blocked by another building) never fire; a red cross says why.
+own role (stick, web, jump), tracked by touch ID. If no assisted target is
+available, holding SWING arms the web until one appears. In precise tap mode,
+invalid building taps (sky, street, too far, blocked) show a red cross; the
+SWING button remains an assisted fallback.
 
 ## Modes
 
@@ -99,7 +101,7 @@ tools/filmstrip.sh <name> "2,4,6" --mode=free --bot=expert   # visual review und
 godot --headless --fixed-fps 60 -s res://tools/trace_bot.gd -- expert 30 canyon   # autopilot trace
 ```
 
-Tests (`tests/`, 35 of them) cover the model analytically (pendulum period,
+Tests (`tests/`, 55 of them) cover the model analytically (pendulum period,
 energy, angular momentum, slack/snap, release, drag, steering limits), the
 real controller in Jolt (targeting, tunnelling, wall-kick, respawn, an expert
 autopilot chaining 420 m vs a novice hitting the street), the generated city

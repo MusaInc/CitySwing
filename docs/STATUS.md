@@ -2,17 +2,21 @@
 
 ## Overhaul (latest)
 
-- Tap-to-web: camera ray through the touched pixel; exact collision point;
-  range + line-of-sight checks; rejections never redirect. Per-finger roles.
+- Assisted SWING touch catches the best valid anchor while held; if none is in
+  range it launches and catches the next one automatically. Optional precise
+  building taps use the camera ray, range and line-of-sight checks.
 - Stable follow camera (behind travel, rate-limited yaw, no flips/orbits).
-- Jump 16 m/s (apex 6.7 m). Reel buttons removed; automatic web pull.
+- Jump 16 m/s (apex 6.7 m). Reel buttons removed; automatic web pull also
+  tightens slack line during ground launches. Eight street and rooftop launch
+  scenarios clear cleanly in the scene tests.
 - Rope wraps round corners (cuts if < 6 m line would remain); crash stun with
   a Verlet ragdoll (keeps the web on the rope) and recovery.
 - New Blender character (lofted anatomy, techwear, goggles, harness, spool,
   scarf, grip hands), spring-damped physical animation, flips on release.
 - Free Swing starts on a random valid rooftop facing a promising route.
-- 53 native tests; browser tests: Chromium 13/13 (simulated multi-touch),
-  WebKit 8/8 (single real taps – WebKit on Linux can't simulate held touches).
+- 55 native tests; browser tests: Chromium 12/12 (simulated held multi-touch),
+  WebKit 7/7 (real single taps; Linux WebKit cannot simulate held touches).
+- Safari preview: https://musastudios.co.uk/cityswing/ (workspace sign-in).
 - **Not yet tried on a physical iPhone.**
 
 ## Original milestones
@@ -27,7 +31,7 @@
 | 4 | Presentation | **Done (first pass)** | Blender-generated character in streetwear with wrist launcher and backpack spool, posed per frame from physics; golden-hour sky, fog, AgX; facade/water/ground shaders; synthesised audio driven by speed, tension and height; haptics; three modes; menus, settings, live tuning, stats; benchmark mode. |
 | 5 | iOS delivery | **Prepared, not built** | Xcode project exports from Linux (`tools/export_ios.sh`). Linux export of the same project passes the packaged self-test (3 courses, 18 sounds, 11 kit meshes, character, Mobile renderer). Mac/Xcode/TestFlight steps in `docs/IOS_BUILD.md`. |
 
-`tools/build.sh` runs the whole chain (import, 35 tests, Linux export
+`tools/build.sh` runs the whole chain (import, 55 tests, Linux export
 self-test, iOS export) in about 40 s on the VPS.
 
 ## Measured on the VPS (not device numbers)
