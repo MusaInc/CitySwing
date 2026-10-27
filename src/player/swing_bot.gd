@@ -30,10 +30,12 @@ func drive(p: Player, dt: float) -> Dictionary:
 	var pos := p.global_position
 	var v := p.s.velocity
 	var dir := heading
+	var goal := Vector3.ZERO
 	if goal_fn.is_valid():
-		var g: Vector3 = goal_fn.call(p)
-		dir = Vector3(g.x - pos.x, 0.0, g.z - pos.z).normalized()
-	var out := {"move": Vector3.ZERO, "aim": (dir + Vector3.UP * 0.2).normalized(), "grapple": _hold,
+		goal = goal_fn.call(p)
+		dir = Vector3(goal.x - pos.x, 0.0, goal.z - pos.z).normalized()
+	var aim := (dir + Vector3.UP * 0.2).normalized()
+	var out := {"move": Vector3.ZERO, "aim": aim, "grapple": _hold,
 		"reel": 0.0, "jump": false}
 	_cooldown -= dt
 	var vh := Vector3(v.x, 0.0, v.z)

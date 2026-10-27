@@ -451,6 +451,19 @@ func is_water(p: Vector3) -> bool:
 	return false
 
 
+func mean_height_near(p: Vector2, radius: float) -> float:
+	var total := 0.0
+	var n := 0
+	for b in buildings:
+		if b["kind"] != "normal":
+			continue
+		var t: Array = b["tiers"][0]
+		if Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5).distance_to(p) < radius:
+			total += b["tiers"][-1][5]
+			n += 1
+	return total / n if n > 0 else 0.0
+
+
 func tallest_near(p: Vector2, radius: float) -> float:
 	var best := 0.0
 	for b in buildings:

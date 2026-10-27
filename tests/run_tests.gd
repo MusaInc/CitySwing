@@ -7,6 +7,7 @@ var failures := 0
 var passes := 0
 var _current := ""
 var _current_failed := false
+var _checks := 0
 
 
 func _initialize() -> void:
@@ -40,11 +41,15 @@ func _run() -> void:
 				continue
 			_current = f.get_basename() + "." + name
 			_current_failed = false
+			_checks = 0
 			if suite.has_method("setup"):
 				await suite.setup()
 			await suite.call(name, self)
 			if suite.has_method("teardown"):
 				await suite.teardown()
+			if _checks == 0:
+				_current_failed = true
+				print("        ✗ no assertions ran – the test crashed or returned early")
 			if _current_failed:
 				failures += 1
 				print("  FAIL  ", _current)
@@ -60,6 +65,7 @@ func _run() -> void:
 
 
 func check(cond: bool, msg: String) -> bool:
+	_checks += 1
 	if not cond:
 		_current_failed = true
 		print("        ✗ ", msg)
