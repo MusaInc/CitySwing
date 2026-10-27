@@ -124,6 +124,55 @@ func test_running_feet_plant_instead_of_sliding(t) -> void:
 	t.check(mean_slide < mean_body * 0.4, "the stance foot is (mostly) planted, not skating along")
 
 
+func test_running_up_and_down_kerbs(t) -> void:
+	# Kerb-height steps up (0.15 → 0.6 m) and back down, then a wall.
+	var steps := Node3D.new()
+	world.add_child(steps)
+	for i in 4:
+		var h := 0.15 * (i + 1)
+		PrototypeWorld.add_box(steps, Vector3(20 + i * 1.2, h * 0.5, 60), Vector3(1.2, h, 4), Color.GRAY, false)
+		PrototypeWorld.add_box(steps, Vector3(20 + (7 - i) * 1.2, h * 0.5, 60), Vector3(1.2, h, 4), Color.GRAY, false)
+	PrototypeWorld.add_box(steps, Vector3(40, 2.0, 60), Vector3(1, 4, 4), Color.GRAY, false)
+	await get_tree().physics_frame
+	player.respawn(Vector3(14, 1.0, 60))
+	(player.bot as _Drive).move = Vector3.RIGHT * 0.5
+	var top := 0.0
+	var steps_up := [0]
+	player.stepped_up.connect(func(_h): steps_up[0] += 1)
+	var worst_sink := 0.0   # ankle below the surface under it
+	var worst_float := 0.0  # planted ankle above it
+	var float_sum := 0.0
+	var planted := 0
+	var space := world.get_world_3d().direct_space_state
+	for i in 60 * 5:
+		await get_tree().process_frame
+		top = maxf(top, player.global_position.y)
+		if not player.is_on_floor():
+			continue
+		for sd in ["l", "r"]:
+			var p := _pos("foot_" + sd)
+			var rq := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.6, p + Vector3.DOWN * 2.0, 1 | (1 << 3))
+			var hit := space.intersect_ray(rq)
+			if hit.is_empty():
+				continue
+			var above: float = p.y - (hit.position as Vector3).y - CharacterRig.ANKLE_H
+			worst_sink = maxf(worst_sink, -above)
+			if rig._plant.has(sd) and rig._toe[sd] < 0.05:
+				worst_float = maxf(worst_float, above)
+				float_sum += absf(above)
+				planted += 1
+	var x := player.global_position.x
+	steps.queue_free()
+	var mean_float := float_sum / maxf(planted, 1)
+	t.note("steps: %d step-ups, top %.2f m, ended at x=%.1f; ankle sink %.1f cm; flat planted foot off the surface %.1f cm mean, %.1f cm worst (%d samples)" % [
+		steps_up[0], top - 0.9, x, worst_sink * 100.0, mean_float * 100.0, worst_float * 100.0, planted])
+	t.check(steps_up[0] >= 4 and top - 0.9 > 0.55, "running climbs kerb-height steps")
+	t.check(x > 28.5 and x < 40.0, "comes back down the far side and the 4 m wall still blocks")
+	t.check(worst_sink < 0.06, "feet never sink into the steps")
+	t.check(planted > 40 and mean_float < 0.015, "planted feet sit on the step surface")
+	t.check(worst_float < 0.07, "lock-in transients stay small (no visible hover)")
+
+
 func test_ragdoll_joints_bend_the_right_way(t) -> void:
 	player.respawn(Vector3(0, 30, -14))
 	await get_tree().physics_frame

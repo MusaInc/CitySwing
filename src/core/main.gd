@@ -350,7 +350,8 @@ func _publish_web_state(dt: float) -> void:
 		"webs_fired": _webs_fired, "look_yaw": camera.look_yaw, "y": player.global_position.y,
 		"grounded": player.is_on_floor(),
 		"cam_yaw": camera.yaw, "player_y": player.global_position.y,
-		"target_ready": player.targeting.has_target, "armed": player._armed_touch != -1}
+		"target_ready": player.targeting.has_target, "armed": player._armed_touch != -1,
+		"rig": rig.debug_state()}
 	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
 
 

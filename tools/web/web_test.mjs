@@ -40,6 +40,14 @@ s = await waitFor(v => v?.state === "playing", 30000);
 check(s?.state === "playing", "Free Swing starts with an iPhone touch");
 await page.waitForTimeout(2500);
 await shot("2_rooftop");
+// Character: the skinned body loaded and, standing on the roof, both feet
+// are planted on the surface (leg IK + ground raycasts).
+s = await waitFor(v => v?.grounded && v?.rig?.planted === 2, 20000);
+await page.waitForTimeout(3000);  // judge the settled stance, not the lock-in frame
+s = await state();
+check(s?.rig?.skinned, "skinned character body loaded");
+check(s?.rig?.planted === 2 && s?.rig?.foot_gap < 0.03,
+  `both feet planted on the rooftop (gap ${((s?.rig?.foot_gap ?? 1) * 100).toFixed(1)} cm)`);
 s = await state();
 const k = rect.h / 720;
 const swing = [rect.x + rect.w - 150 * k, rect.y + rect.h - 150 * k];
@@ -67,6 +75,10 @@ if (engine === "chromium") {
   check((s?.webs_fired ?? 0) > fired && s?.line === 2, "holding SWING attaches a web");
   check(s?.touch_web === 1, "the holding finger owns the web");
   await shot("3_holding_swing");
+  const taut = await waitFor(v => (v?.rig?.hand_line ?? -1) >= 0 || v?.line !== 2, 15000);
+  check((taut?.rig?.hand_line ?? -1) >= 0 && taut.rig.hand_line < 0.1,
+    `web hand stays on the rope line (${((taut?.rig?.hand_line ?? -1) * 100).toFixed(1)} cm off)`);
+  s = await state();
   const oldYaw = s?.look_yaw ?? 0;
   await down(2, ...at(0.77, 0.33));
   s = await waitFor(v => v?.touch_web === 2 && v?.line !== 0, 20000);

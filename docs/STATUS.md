@@ -1,6 +1,26 @@
-# Status: 2026-10-27 (character overhaul)
+# Status: 2026-10-27 (foot contact + kerbs)
 
-## Character visual + movement overhaul (latest)
+## Foot contact and kerbs (latest)
+
+- **Planted feet** (`CharacterRig._plant_feet`): a stance foot locks where it
+  touches the ground (raycast), the leg is solved onto it with two-bone IK,
+  and the heel rolls up over the ball of the foot for toe-off and on long
+  running contacts. Swing feet reach down for the ground before contact and
+  never dip into it; the hips drop when a planted foot is out of reach.
+  Stance-foot slide at 11 m/s: 31% → 7% of body speed.
+- Gait fixes: toe-off used to tilt the toes *up*; the swing leg now arrives
+  already sweeping back (Hermite swing), so touchdown no longer skates.
+- **Step-up** (`Player._try_step_up`): running bodies climb anything up to
+  0.35 m (kerbs, stairs, rooftop lips) instead of stopping dead; taller
+  obstacles are still walls. The visual body eases up over the step.
+  Expert feel report unchanged (59 km/h airborne, 0 crashes).
+- `tools/pose_lab.gd` has a `steps` scenario; new native test
+  `test_running_up_and_down_kerbs` (67 native tests).
+- Browser test: the debug bridge publishes `rig` (skinned, planted feet, foot
+  gap, web hand off the rope line); Chromium 15/15, WebKit 9/9 against a
+  local server.
+
+## Character visual + movement overhaul
 
 - **Model** (`tools/blender/build_character.py`): one continuous skinned body
   (torso, neck, arms, legs; ~9k tris) built from lofted anatomy (V-taper torso,
@@ -23,8 +43,8 @@
   release, wall run, crash, landing) for review.
 - Tests: 66 native (4 new in tests/test_animation.gd), Chromium 12/12, WebKit 7/7.
 
-Limits: foot planting is procedural (no ground IK on slopes/steps; contact
-slide ~30% of body speed); face is stylised; not yet seen on an iPhone.
+Limits: face is stylised; not yet seen on an iPhone. (Foot contact: see the
+section above.)
 
 ## Swing feel pass (latest)
 

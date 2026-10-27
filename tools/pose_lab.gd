@@ -4,9 +4,9 @@ extends SceneTree
 ## motion reads clearly), saved as frames + one contact sheet per scenario.
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
-## Scenarios: idle run jump swing release wallrun crash land
+## Scenarios: idle run steps jump swing release wallrun crash land jumpclose
 
-const ALL := ["idle", "run", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose"]
+const ALL := ["idle", "run", "steps", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose"]
 
 var player: Player
 var rig: CharacterRig
@@ -45,6 +45,10 @@ func _go() -> void:
 	PrototypeWorld.add_box(stage, Vector3(0, -0.5, 0), Vector3(600, 1, 600), Color(0.42, 0.43, 0.45), false, true)
 	PrototypeWorld.add_box(stage, Vector3(0, 40, -40), Vector3(16, 80, 16), Color(0.75, 0.72, 0.68))
 	PrototypeWorld.add_box(stage, Vector3(40, 10, 30), Vector3(30, 20, 30), Color(0.6, 0.55, 0.5))
+	for i in 4:  # kerb-height steps up, then down again (the "steps" scenario)
+		var h := 0.15 * (i + 1)
+		PrototypeWorld.add_box(stage, Vector3(-10 + i * 1.2, h * 0.5, 60), Vector3(1.2, h, 4), Color(0.55, 0.52, 0.5), false)
+		PrototypeWorld.add_box(stage, Vector3(-10 + (7 - i) * 1.2, h * 0.5, 60), Vector3(1.2, h, 4), Color(0.55, 0.52, 0.5), false)
 	player = Player.new()
 	player.params = load("res://config/swing_params.tres").duplicate()
 	root.add_child(player)
@@ -164,6 +168,17 @@ func _sc_crash() -> void:
 	_reset(Vector3(0, 30, -14), Vector3(0, 0, -58))
 	_cam_off = Vector3(7.0, 0.8, 3.0)
 	await _film("crash", 5.0, [0.25, 0.35, 0.5, 0.8, 1.2, 1.6, 2.0, 2.5, 3.0, 3.5, 4.2, 4.9])
+
+
+func _sc_steps() -> void:
+	var sc := _reset(Vector3(-14, 1.0, 60))
+	_cam_off = Vector3(0, 0.3, 3.4)
+	sc.move = Vector3.RIGHT * 0.3
+	var shots := []
+	for i in 12:
+		shots.append(1.0 + i * 0.35)
+	await _film("steps", 5.4, shots)
+	sc.move = Vector3.ZERO
 
 
 func _sc_land() -> void:

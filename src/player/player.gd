@@ -28,6 +28,7 @@ signal trick
 signal stun_started(speed: float)
 signal stun_ended
 signal launched
+signal stepped_up(height: float)
 ## Let go inside the sweet spot (see SwingParams "Release"). streak counts
 ## consecutive perfect releases without touching the ground.
 signal perfect_release(streak: int)
@@ -38,6 +39,7 @@ const HAND_OFFSET := Vector3(0.0, 0.7, 0.0)
 const BUILDINGS_MASK := 1 | (1 << 1)
 const GRAPPLE_LAYER := 1 << 1
 const MAX_WRAPS := 4
+const STEP_MAX := 0.35  # kerbs, stairs and rooftop lips climbed while running
 ## Input smoothing time constant: the body can't redirect itself instantly.
 const MOVE_SMOOTH := 0.09
 
@@ -288,6 +290,8 @@ func _physics_process(dt: float) -> void:
 		rope_snapped.emit(s.snap_speed)
 	floor_snap_length = 0.0 if (s.attached or s.velocity.y > 0.5) else 0.4
 	velocity = (s.position - start) / dt
+	if s.grounded and not s.attached and s.velocity.y < 0.5:
+		_try_step_up(velocity * dt)
 	move_and_slide()
 	_resolve_contacts(dt)
 	if s.attached and params.rope_wrapping:
@@ -304,6 +308,33 @@ func _physics_process(dt: float) -> void:
 		air_time += dt
 	if global_position.y < params.kill_plane_y:
 		respawn()
+
+
+## A running body blocked by something no taller than STEP_MAX steps onto
+## it instead of stopping dead: up, across, back down onto a walkable top.
+## The horizontal motion is consumed here; move_and_slide then only settles
+## the body on the new floor. Taller obstacles are walls, as before.
+func _try_step_up(motion: Vector3) -> void:
+	var h := Vector3(motion.x, 0.0, motion.z)
+	if h.length() < 1e-4 or not test_move(global_transform, h):
+		return
+	var up := Vector3.UP * STEP_MAX
+	if test_move(global_transform, up):
+		return
+	var raised := global_transform.translated(up)
+	var ahead := h.normalized() * maxf(h.length(), 0.08)  # enough to clear the edge
+	if test_move(raised, ahead):
+		return
+	var over := raised.translated(ahead)
+	var hit := KinematicCollision3D.new()
+	if not test_move(over, Vector3.DOWN * (STEP_MAX + 0.05), hit) or hit.get_normal().y < 0.7:
+		return
+	var rise := over.origin.y + hit.get_travel().y - global_position.y
+	if rise < 0.02:
+		return
+	global_position = over.origin + hit.get_travel()
+	velocity = Vector3(0.0, minf(velocity.y, 0.0), 0.0)
+	stepped_up.emit(rise)
 
 
 func _resolve_contacts(dt: float) -> void:
