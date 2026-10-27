@@ -15,6 +15,10 @@ extends Resource
 
 @export_group("Rope")
 @export var grapple_range: float = 75.0
+## How fast the fired line travels (m/s). Attaching isn't instant: lead your shots.
+@export var line_speed: float = 280.0
+## Anchors must be at least this far above the player (unless standing).
+@export var min_anchor_height: float = 3.0
 @export var min_rope_length: float = 4.0
 @export var max_rope_length: float = 75.0
 ## Rope length on attach as a fraction of current distance (<1 gives an immediate tug).
