@@ -3,7 +3,7 @@ extends Node3D
 ##   --world=prototype|city   --mode=free|trial|endurance   --bot=expert|novice
 ##   --shot=<png path> --shot-at=<seconds>   --quality=0|1|2   --perf
 
-var world_kind := "prototype"
+var world_kind := "city"
 var mode_name := "menu"
 var player: Player
 var camera: SwingCamera
@@ -31,9 +31,11 @@ func _ready() -> void:
 	if world_kind == "prototype":
 		world = PrototypeWorld.new()
 	else:
-		world = load("res://src/world/city_world.gd").new()
+		world = CityWorld.new()
 	world.name = "World"
 	add_child(world)
+	if world.has_method("set_sky_colors"):
+		world.set_sky_colors(Atmosphere.ZENITH, Atmosphere.HORIZON)
 
 	player = Player.new()
 	player.name = "Player"
@@ -41,6 +43,10 @@ func _ready() -> void:
 	player.global_position = world.spawn_point()
 	player.spawn_transform = player.global_transform
 	player.last_safe_position = player.global_position
+	if world.has_method("build_all_near"):
+		var t0 := Time.get_ticks_msec()
+		world.build_all_near(player.global_position, 420.0)
+		print("Initial city build: %d chunks in %d ms" % [world.loaded_chunk_count(), Time.get_ticks_msec() - t0])
 
 	rig = CharacterRig.new()
 	rig.name = "Rig"
@@ -77,6 +83,18 @@ func _ready() -> void:
 		player.bot = SwingBot.new(style, h)
 		if world.has_method("bot_goal"):
 			player.bot.goal_fn = world.bot_goal
+	if args.has("cam"):
+		# Fixed overview camera: --cam=x,y,z,look_x,look_y,look_z
+		var v := String(args["cam"]).split_floats(",")
+		camera.target = null
+		camera.global_position = Vector3(v[0], v[1], v[2])
+		camera.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
+		camera.cam.fov = float(args.get("fov", "60"))
+		camera.cam.far = 4000.0
+		player.input_enabled = false
+		if world.has_method("build_all_near"):
+			world.view_distance = 2000.0
+			world.build_all_near(Vector3(v[3], 0, v[5]), 1600.0)
 	if args.has("shot"):
 		var times: Array[float] = []
 		for x in String(args.get("shot-at", "3.0")).split(","):
@@ -98,35 +116,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _build_environment() -> void:
-	var env := Environment.new()
-	var sky := Sky.new()
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.32, 0.5, 0.78)
-	sky_mat.sky_horizon_color = Color(0.86, 0.8, 0.74)
-	sky_mat.ground_horizon_color = Color(0.7, 0.66, 0.62)
-	sky_mat.ground_bottom_color = Color(0.3, 0.3, 0.32)
-	sky.sky_material = sky_mat
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.9
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.78, 0.76, 0.75)
-	env.fog_density = 0.0016
-	env.fog_aerial_perspective = 0.6
-	var we := WorldEnvironment.new()
-	we.environment = env
-	add_child(we)
-	var sun := DirectionalLight3D.new()
-	sun.name = "Sun"
-	sun.rotation_degrees = Vector3(-38, -35, 0)
-	sun.light_color = Color(1.0, 0.93, 0.82)
-	sun.light_energy = 1.25
-	sun.shadow_enabled = Settings.preset()["shadows"]
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 160.0
-	add_child(sun)
+	var atmosphere := Atmosphere.new()
+	atmosphere.name = "Atmosphere"
+	add_child(atmosphere)
 
 
 ## Saves one PNG per time (path gets _<i> suffix when several), then quits.
