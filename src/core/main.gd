@@ -115,6 +115,10 @@ func _ready() -> void:
 			"courses": menus.show_courses()
 			"tuning": menus.show_tuning()
 			"pause": menus.show_pause()
+	if args.has("nohud"):
+		ui.visible = false
+	if args.has("selftest"):
+		_selftest.call_deferred()
 	if args.has("shot"):
 		var times: Array[float] = []
 		for x in String(args.get("shot-at", "3.0")).split(","):
@@ -240,6 +244,33 @@ func _notification(what: int) -> void:
 	# Leaving the app (home button, call) pauses a run.
 	if OS.has_feature("mobile") and (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED):
 		pause()
+
+
+## Export validation: confirms the packaged build loaded everything it needs.
+func _selftest() -> void:
+	await get_tree().process_frame
+	var problems: Array[String] = []
+	var courses := 0
+	for id in CourseBuilder.COURSES:
+		if not CourseBuilder.load_course(id).is_empty():
+			courses += 1
+	if courses != CourseBuilder.COURSES.size():
+		problems.append("courses %d/%d" % [courses, CourseBuilder.COURSES.size()])
+	var sounds := audio._shots.size() + audio._loops.size()
+	if sounds != AudioDirector.SHOTS.size() + AudioDirector.LOOPS.size():
+		problems.append("audio %d/%d" % [sounds, AudioDirector.SHOTS.size() + AudioDirector.LOOPS.size()])
+	var props: int = world.prop_meshes.size() if world is CityWorld else -1
+	if world is CityWorld and props < 11:
+		problems.append("kit meshes %d/11" % props)
+	if (rig.bones["chest"] as Node3D).get_child_count() == 0 or not ResourceLoader.exists(CharacterRig.MODEL_PATH):
+		problems.append("character model")
+	for sh in ["building", "ground", "water", "sky", "traffic"]:
+		if not ResourceLoader.exists("res://src/world/shaders/%s.gdshader" % sh):
+			problems.append("shader " + sh)
+	print("SELFTEST courses=%d sounds=%d kit=%d renderer=%s %s" % [courses, sounds, props,
+		ProjectSettings.get_setting("rendering/renderer/rendering_method"),
+		"OK" if problems.is_empty() else "FAIL " + ", ".join(problems)])
+	get_tree().quit(0 if problems.is_empty() else 1)
 
 
 # ------------------------------------------------------------- captures
