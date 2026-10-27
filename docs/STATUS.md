@@ -1,4 +1,30 @@
-# Status: 2026-10-27 (swing feel + progression)
+# Status: 2026-10-27 (character overhaul)
+
+## Character visual + movement overhaul (latest)
+
+- **Model** (`tools/blender/build_character.py`): one continuous skinned body
+  (torso, neck, arms, legs; ~9k tris) built from lofted anatomy (V-taper torso,
+  pecs/lats/traps, glutes, thigh/calf shape), voxel-remeshed so joints bend as
+  one surface, auto-weighted on a 17-bone armature matching the rig. Rigid
+  parts: head with eyes/brows/nose/lips/ears/hair and goggles, gloved
+  segmented hands + fists, sneakers, back spool, web gauntlet. ~19k visible
+  tris in total. The scarf was removed (it read as a stiff rod in motion).
+  Jacket colours/unlockable suits still work (same vertex colours).
+- **Rig** (`character_rig.gd`): the physics-driven pivots stay the source of
+  truth and are mapped onto the skeleton each frame (bound in an A-pose).
+  New: two-bone IK web arm (hand on the line), second hand grips under heavy
+  load, body stretches when taut / tucks when slack, jolt on catching the
+  web; stance/swing gait matched to ground speed (planted feet, toe-off, knee
+  drive, hip bob, sprint lean, braking and turn lean), richer idle; jump
+  push-off and readable flight poses; dive only in fast steep descents; wall
+  run pose; get-up after crashes.
+- **Ragdoll**: knee/elbow hinge direction and hip/shoulder cones.
+- `tools/pose_lab.gd` films scripted scenarios (idle, run, jump, swing,
+  release, wall run, crash, landing) for review.
+- Tests: 66 native (4 new in tests/test_animation.gd), Chromium 12/12, WebKit 7/7.
+
+Limits: foot planting is procedural (no ground IK on slopes/steps; contact
+slide ~30% of body speed); face is stylised; not yet seen on an iPhone.
 
 ## Swing feel pass (latest)
 

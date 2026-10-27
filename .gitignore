@@ -3,3 +3,4 @@ build/
 *.tmp
 /screenshots/
 export_credentials.cfg
+__pycache__/

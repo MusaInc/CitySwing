@@ -2,7 +2,9 @@ class_name VerletRagdoll
 extends RefCounted
 ## Lightweight ragdoll for crash reactions: 16 joint particles, distance
 ## constraints (rigid torso, fixed bone lengths, minimum spans that stop
-## elbows/knees folding flat), swept-ray collision against buildings/street,
+## elbows/knees folding flat), anatomical joint limits (knees and elbows only
+## hinge the right way; hips and shoulders stay inside a cone of motion),
+## swept-ray collision against buildings/street,
 ## and the pelvis softly pinned to the physics capsule. Visual only – the
 ## Player's CharacterBody stays the single source of truth for movement.
 ## Only runs while a crash is in progress (~1–3 s), never for idle bodies.
@@ -99,6 +101,7 @@ func _step(anchor: Vector3) -> void:
 	var f := _torso_frame()
 	for n in TORSO:
 		pos[n] = f * (_torso_rest[n] as Vector3)
+	_joint_limits(f)
 	# Limbs, root to tip: bones end every step at exactly their length – never
 	# stretched or squashed, whatever collisions or the pelvis pin did.
 	for l in links:
@@ -108,6 +111,70 @@ func _step(anchor: Vector3) -> void:
 		var d2: Vector3 = (pos[l[1]] as Vector3) - a2
 		if d2.length() > 1e-5:
 			pos[l[1]] = a2 + d2.normalized() * float(l[2])
+	# Hinges last: mirroring a knee/elbow across its limb line keeps both bone
+	# lengths, so nothing after this can bend them the wrong way again.
+	var fw := -_torso_frame().basis.z
+	for sd in ["l", "r"]:
+		_hinge("hip_" + sd, "kn_" + sd, "an_" + sd, fw)
+		_hinge("sh_" + sd, "el_" + sd, "wr_" + sd, -fw)
+
+
+## Hip/shoulder cones, in the torso frame
+## (x right, y up, z back).
+func _joint_limits(f: Transform3D) -> void:
+	var b := f.basis
+	var fwd := -b.z
+	for sd in ["l", "r"]:
+		var side := -1.0 if sd == "l" else 1.0
+		# Hip: thigh may swing forward up to ~120° but only ~30° back, ~50° out
+		# and barely across the body.
+		_cone("hip_" + sd, "kn_" + sd, b, Vector3(0.75, 0.5, 0.5), side)
+		# Shoulder: wide, but not far behind the back.
+		_cone("sh_" + sd, "el_" + sd, b, Vector3(1.0, 1.0, 0.7), side)
+		# Knee bends backward (shin behind the thigh line); elbow bends forward
+		# (elbow sits behind the shoulder→wrist line).
+
+
+## Keeps `tip` inside a cone around the root: limits = (max |x| outward-ish,
+## max y up, max z back) for the unit direction in the torso frame.
+func _cone(root: String, tip: String, b: Basis, lim: Vector3, side: float) -> void:
+	var r: Vector3 = pos[root]
+	var d: Vector3 = (pos[tip] as Vector3) - r
+	var len := d.length()
+	if len < 1e-5:
+		return
+	var l := b.inverse() * (d / len)
+	var across := -l.x * side  # toward the other side of the body
+	var changed := false
+	if l.y > lim.y:
+		l.y = lim.y
+		changed = true
+	if l.z > lim.z:
+		l.z = lim.z
+		changed = true
+	if absf(l.x) > lim.x:
+		l.x = signf(l.x) * lim.x
+		changed = true
+	if across > 0.35:
+		l.x = -0.35 * side
+		changed = true
+	if changed:
+		pos[tip] = r + (b * l.normalized()) * len
+
+
+## The middle joint must sit on the `bend` side of the root→end line.
+func _hinge(root: String, mid: String, end: String, bend: Vector3) -> void:
+	var a: Vector3 = pos[root]
+	var m: Vector3 = pos[mid]
+	var e: Vector3 = pos[end]
+	var ax := e - a
+	if ax.length_squared() < 1e-6:
+		return
+	var closest := a + ax * clampf((m - a).dot(ax) / ax.length_squared(), 0.0, 1.0)
+	var off := m - closest
+	var b := bend - ax.normalized() * bend.dot(ax.normalized())
+	if off.dot(b) < 0.0:
+		pos[mid] = closest - off  # mirror the joint to the side it can bend
 
 
 func _torso_frame() -> Transform3D:
