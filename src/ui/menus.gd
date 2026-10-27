@@ -142,6 +142,21 @@ func show_results(r: Dictionary) -> void:
 		"endurance":
 			headline = "%d m" % int(r["distance"])
 			detail = "%s   ·   best %d m" % [r["reason"], int(r["best"])]
+		"benchmark":
+			headline = "%.1f fps" % r["avg_fps"]
+			detail = "%s · %s quality · target %d fps" % [r["device"], r["quality"], r["target_fps"]]
+			box.add_child(_label(headline, 76, Color.WHITE))
+			box.add_child(_label(detail, 22, Color(1, 1, 1, 0.75)))
+			box.add_child(_label("avg %.1f ms · 1%% worst %.1f ms · worst %.1f ms · %d/%d frames over 33 ms" % [
+				r["avg_ms"], r["p99_ms"], r["worst_ms"], r["frames_over_33ms"], r["frames"]], 20, Color(1, 1, 1, 0.7)))
+			box.add_child(_label("%d draw calls · %dk primitives · CPU %.1f ms process + %.1f ms physics (averages)" % [
+				int(r["avg_draw_calls"]), int(r["avg_prims"] / 1000.0), r["cpu_process_ms"], r["cpu_physics_ms"]], 18,
+				Color(1, 1, 1, 0.55)))
+			box.add_child(_label("Saved to benchmark.json", 16, Color(1, 1, 1, 0.45)))
+			var bb := _button("Title", func(): quit_to_title.emit())
+			box.add_child(bb)
+			bb.grab_focus.call_deferred()
+			return
 		_:
 			headline = "%.2f km" % (r.get("distance", 0.0) / 1000.0)
 			detail = "Free swing"
@@ -196,6 +211,7 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_row("Music", _slider(Settings.music_volume, 0.0, 1.0, 0.05, func(v): Settings.music_volume = v; Settings.save())))
 	box.add_child(_row("Effects", _slider(Settings.sfx_volume, 0.0, 1.0, 0.05, func(v): Settings.sfx_volume = v; Settings.save())))
 	box.add_child(_label("Graphics changes to draw distance apply on next launch.", 16, Color(1, 1, 1, 0.5)))
+	box.add_child(_button("Run 45 s benchmark", func(): start_mode.emit("benchmark", "")))
 	var b := _button("Back", back)
 	box.add_child(b)
 	q.grab_focus.call_deferred()

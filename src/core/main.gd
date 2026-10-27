@@ -155,6 +155,9 @@ func start_mode(kind: String, arg: String) -> void:
 			mode = EnduranceMode.new()
 			_install(mode)
 			player.respawn(world.spawn_point())
+		"benchmark":
+			mode = BenchmarkMode.new()
+			_install(mode)
 		_:
 			mode = FreeSwingMode.new()
 			_install(mode)
