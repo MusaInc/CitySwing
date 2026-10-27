@@ -12,6 +12,7 @@ signal landed(speed: float, on_street: bool)
 signal impact(speed: float)
 signal rope_snapped(speed: float)
 signal respawned
+signal wall_kicked
 
 enum Line { IDLE, FLYING, ATTACHED }
 
@@ -126,6 +127,13 @@ func _physics_process(dt: float) -> void:
 		_let_go()
 	_grapple_held = held
 	_advance_line(dt, origin)
+
+	if controls.jump and not is_on_floor() and is_on_wall():
+		var n := get_wall_normal()
+		s.velocity += Vector3(n.x, 0.0, n.z).normalized() * params.wall_kick_speed
+		s.velocity.y = maxf(s.velocity.y, 0.0) + params.wall_kick_up
+		controls.jump = false
+		wall_kicked.emit()
 
 	# Integrate the model from the body's real position.
 	s.position = global_position

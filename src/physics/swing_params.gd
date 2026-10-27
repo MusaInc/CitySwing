@@ -50,6 +50,9 @@ extends Resource
 ## Speed above run_speed decays at this rate (m/s²) so landings keep some flow.
 @export var ground_overspeed_decel: float = 14.0
 @export var jump_speed: float = 9.5
+## Jumping while touching a wall in the air kicks off it (recovery move).
+@export var wall_kick_speed: float = 11.0
+@export var wall_kick_up: float = 8.0
 
 @export_group("Impacts")
 ## Speed into a surface above which a hard-impact event fires (bonk, haptics).

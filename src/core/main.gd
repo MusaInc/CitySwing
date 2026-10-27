@@ -75,8 +75,13 @@ func _ready() -> void:
 		var style := SwingBot.Style.NOVICE if args["bot"] == "novice" else SwingBot.Style.EXPERT
 		var h: Vector3 = world.call("bot_heading") if world.has_method("bot_heading") else Vector3.FORWARD
 		player.bot = SwingBot.new(style, h)
+		if world.has_method("bot_goal"):
+			player.bot.goal_fn = world.bot_goal
 	if args.has("shot"):
-		_capture_later(args["shot"], float(args.get("shot-at", "3.0")))
+		var times: Array[float] = []
+		for x in String(args.get("shot-at", "3.0")).split(","):
+			times.append(float(x))
+		_capture_series(args["shot"], times)
 
 
 func _process(_dt: float) -> void:
@@ -124,10 +129,17 @@ func _build_environment() -> void:
 	add_child(sun)
 
 
-func _capture_later(path: String, seconds: float) -> void:
-	await get_tree().create_timer(seconds).timeout
-	await RenderingServer.frame_post_draw
-	var img := get_viewport().get_texture().get_image()
-	img.save_png(path)
-	print("SCREENSHOT ", path)
+## Saves one PNG per time (path gets _<i> suffix when several), then quits.
+## Times are simulated seconds, so runs under --fixed-fps are deterministic.
+func _capture_series(path: String, times: Array[float]) -> void:
+	var elapsed := 0.0
+	for i in times.size():
+		while elapsed < times[i]:
+			await get_tree().process_frame
+			elapsed += get_process_delta_time()
+		await RenderingServer.frame_post_draw
+		var img := get_viewport().get_texture().get_image()
+		var out := path if times.size() == 1 else path.get_basename() + "_%d.png" % i
+		img.save_png(out)
+		print("SCREENSHOT ", out)
 	get_tree().quit()

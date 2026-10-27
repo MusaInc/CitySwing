@@ -132,3 +132,29 @@ class _Hold:
 	func drive(_p, _dt) -> Dictionary:
 		return {"move": Vector3.ZERO, "aim": (Vector3.FORWARD + Vector3.UP).normalized(), "grapple": hold,
 			"reel": 0.0, "jump": false}
+
+
+func test_wall_kick_pushes_off(t) -> void:
+	# Hang against the +x face of tower 1 (x in [-24,-8]) and jump.
+	var bot := _Jump.new()
+	player.bot = bot
+	player.global_position = Vector3(-7.4, 40, -60)
+	player.s.velocity = Vector3(-5, 0, 0)
+	for i in 6:
+		await get_tree().physics_frame
+	bot.jump = true
+	await get_tree().physics_frame
+	bot.jump = false
+	for i in 20:
+		await get_tree().physics_frame
+	t.check(player.global_position.x > -4.0, "kicked away from the wall (x=%.1f)" % player.global_position.x)
+
+
+class _Jump:
+	extends RefCounted
+	var jump := false
+	var kicked := false
+	func drive(_p, _dt) -> Dictionary:
+		kicked = kicked or jump
+		var mv := Vector3.ZERO if kicked else Vector3(-1, 0, 0)
+		return {"move": mv, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": jump}

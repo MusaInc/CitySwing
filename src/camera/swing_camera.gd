@@ -32,6 +32,7 @@ var _dist := 6.0
 var _since_look := 10.0
 var _roll := 0.0
 var _fov_kick := 0.0
+var _anchor_bias := Vector3.ZERO
 var _snapped := false
 
 
@@ -94,11 +95,19 @@ func _process(dt: float) -> void:
 		# Pitch drifts to show where we're heading: down when diving, level when rising.
 		var dive := clampf(-v.y / 30.0, -0.5, 1.0)
 		var want_pitch := deg_to_rad(default_pitch - 14.0 * dive)
+		if target.line_state == Player.Line.ATTACHED:
+			# On the rope, look up the line of the swing so the next anchors stay in view.
+			want_pitch = deg_to_rad(default_pitch + 7.0 - 6.0 * dive)
 		pitch = lerp_angle(pitch, want_pitch, 1.0 - exp(-0.8 * dt))
 
 	var ahead := (v * look_ahead_time).limit_length(look_ahead_max)
 	ahead.y *= 0.4
 	var focus_goal := target.global_position + Vector3.UP * height + ahead
+	if target.line_state == Player.Line.ATTACHED:
+		_anchor_bias = _anchor_bias.lerp((target.s.anchor - target.global_position).normalized() * 1.6, 1.0 - exp(-3.0 * dt))
+	else:
+		_anchor_bias = _anchor_bias.lerp(Vector3.ZERO, 1.0 - exp(-2.0 * dt))
+	focus_goal += _anchor_bias
 	_dist = lerpf(_dist, lerpf(near_distance, far_distance, t), 1.0 - exp(-2.0 * dt))
 	var basis := Basis.from_euler(Vector3(pitch, yaw, 0.0))
 	if _snapped:
