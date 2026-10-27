@@ -73,9 +73,15 @@ func test_world_builds_collision_and_streams(t) -> void:
 	var viewer := Node3D.new()
 	add_child(viewer)
 	viewer.global_position = spawn
-	for i in 60:
+	# Generation is threaded: wait on the result (up to 3 s of real time), not
+	# a frame count – headless frames are so fast that a busy machine could
+	# starve the workers for all of them.
+	var t0 := Time.get_ticks_msec()
+	var frames := 0
+	while frames < 60 or (w.loaded_chunk_count() < 8 and Time.get_ticks_msec() - t0 < 3000):
 		w.update_streaming(viewer.global_position, 8)
 		await get_tree().process_frame
+		frames += 1
 	var near := w.loaded_chunk_count()
 	t.note("chunks loaded around spawn: %d, mean gen %.1f ms" % [near, w.gen_ms_total / maxf(w.chunks_built, 1)])
 	t.check(near >= 8, "chunks stream in around the viewer")
