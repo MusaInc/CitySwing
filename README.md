@@ -39,12 +39,17 @@ and the in-game **Pause → Tuning** panel edits them live on the device. See
 
 | | Touch (landscape) | Controller | Keyboard/mouse |
 |---|---|---|---|
-| Move / steer / kick | left thumb, floating stick | left stick | WASD |
-| Aim camera | right thumb, drag empty space | right stick | mouse |
-| Fire + hold rope / release | hold **SWING**, lift to release (slide to keep aiming) | RT | hold Space / LMB |
-| Reel in / out | **IN** / **OUT** | RB / LB | E / Q |
-| Jump / wall-kick | **JUMP** | A | Shift |
+| Move / steer | left thumb, floating stick | left stick | WASD |
+| Web | **tap and hold the building surface you want** (exact point under the finger); lift that finger to release; tap another building to re-attach | RT (assisted aim) | hold Space / LMB (assisted aim) |
+| Look | drag empty sky, or the **LOOK** pad (never fires) | right stick | mouse |
+| Jump / wall-kick / mid-air flip | **JUMP** | A | Shift |
 | Pause | ⏸ | Start | Esc |
+
+There are no reel buttons: a taut web tightens itself through the bottom of
+each arc (angular-momentum pumping), so well-timed consecutive swings build
+speed, and it winches to keep the arc off the street. Each finger keeps its
+own role (stick, web, look), tracked by touch ID. Invalid taps (sky, street,
+too far, blocked by another building) never fire; a red cross says why.
 
 ## Modes
 

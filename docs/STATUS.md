@@ -1,4 +1,21 @@
-# Status: 2026-10-27
+# Status: 2026-10-27 (gameplay overhaul)
+
+## Overhaul (latest)
+
+- Tap-to-web: camera ray through the touched pixel; exact collision point;
+  range + line-of-sight checks; rejections never redirect. Per-finger roles.
+- Stable follow camera (behind travel, rate-limited yaw, no flips/orbits).
+- Jump 16 m/s (apex 6.7 m). Reel buttons removed; automatic web pull.
+- Rope wraps round corners (cuts if < 6 m line would remain); crash stun with
+  a Verlet ragdoll (keeps the web on the rope) and recovery.
+- New Blender character (lofted anatomy, techwear, goggles, harness, spool,
+  scarf, grip hands), spring-damped physical animation, flips on release.
+- Free Swing starts on a random valid rooftop facing a promising route.
+- 53 native tests; browser tests: Chromium 13/13 (simulated multi-touch),
+  WebKit 8/8 (single real taps – WebKit on Linux can't simulate held touches).
+- **Not yet tried on a physical iPhone.**
+
+## Original milestones
 
 ## Milestones
 

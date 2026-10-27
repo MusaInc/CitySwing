@@ -127,6 +127,21 @@ func _ready() -> void:
 			"pause": menus.show_pause()
 	if args.has("nohud"):
 		ui.visible = false
+	if OS.has_feature("web"):
+		_web_debug = str(JavaScriptBridge.eval("new URLSearchParams(location.search).get('debug')", true)) == "1"
+		var url_seed = JavaScriptBridge.eval("new URLSearchParams(location.search).get('seed')", true)
+		if url_seed != null and str(url_seed).is_valid_int():
+			_spawn_rng.seed = int(str(url_seed))  # reproducible spawns for browser tests
+		player.grapple_fired.connect(func(_t, _h): _webs_fired += 1)
+		touch.web_feedback.connect(func(p, ok, reason):
+			var vsz := get_viewport().get_visible_rect().size
+			_last_tap = {"ok": ok, "reason": reason, "fired": _webs_fired, "at": [p.x / vsz.x, p.y / vsz.y]})
+		if _web_debug:
+			# Keeps publishing while the game is paused (menus are tested too).
+			var pub := _DebugPublisher.new()
+			pub.process_mode = Node.PROCESS_MODE_ALWAYS
+			pub.main = self
+			add_child(pub)
 	if args.has("selftest"):
 		_selftest.call_deferred()
 	if args.has("shot"):
@@ -257,6 +272,70 @@ func _apply_settings() -> void:
 		atmosphere.env.glow_enabled = p["glow"]
 
 
+var _web_debug := false
+var _web_debug_t := 0.0
+var _webs_fired := 0
+var _last_tap := {}
+
+
+## Web builds opened with ?debug=1 publish game state to window.__cs so a
+## browser test can check that taps attach where they land. Off otherwise.
+func _publish_web_state(dt: float) -> void:
+	_web_debug_t += dt
+	if _web_debug_t < 0.25:
+		return
+	_web_debug_t = 0.0
+	var vs := get_viewport().get_visible_rect().size
+	var cam := camera.cam
+	var anchor_frac := []
+	if player.line_state != Player.Line.IDLE:
+		var a := player.rope_anchor() if player.line_state == Player.Line.ATTACHED else player.line_target
+		if not cam.is_position_behind(a):
+			var sp := cam.unproject_position(a) / vs
+			anchor_frac = [sp.x, sp.y]
+	var suggest := []
+	var invalid := []
+	if state == State.PLAYING:
+		# Any pixel that is robustly not a valid target (sky / too far / street):
+		# its neighbours give the same verdict.
+		for y in range(int(vs.y * 0.04), int(vs.y * 0.9), 40):
+			for x in range(int(vs.x * 0.45), int(vs.x * 0.95), 48):
+				var r := player.screen_target(cam, Vector2(x, y))
+				if r["ok"]:
+					continue
+				var same := true
+				for d in [Vector2(20, 0), Vector2(-20, 0), Vector2(0, 20), Vector2(0, -20)]:
+					if player.screen_target(cam, Vector2(x, y) + d)["reason"] != r["reason"]:
+						same = false
+						break
+				if same:
+					invalid = [x / vs.x, y / vs.y, r["reason"]]
+					break
+			if not invalid.is_empty():
+				break
+	if state == State.PLAYING and player.line_state == Player.Line.IDLE:
+		# A pixel well inside a valid surface (its neighbours are valid too), so
+		# it stays valid while the camera settles.
+		for y in range(int(vs.y * 0.2), int(vs.y * 0.6), 24):
+			for x in range(int(vs.x * 0.5), int(vs.x * 0.85), 32):
+				var ok := true
+				for d in [Vector2.ZERO, Vector2(20, 0), Vector2(-20, 0), Vector2(0, 20), Vector2(0, -20)]:
+					if not player.screen_target(cam, Vector2(x, y) + d)["ok"]:
+						ok = false
+						break
+				if ok:
+					suggest = [x / vs.x, y / vs.y]
+					break
+			if not suggest.is_empty():
+				break
+	var st := {"state": ["title", "playing", "paused", "results"][state], "line": player.line_state,
+		"swings": player.swings, "speed": player.speed(), "anchor": anchor_frac, "suggest": suggest, "invalid": invalid, "last_tap": _last_tap,
+		"touch_web": player.web_touch_id, "stunned": player.stunned, "fps": Engine.get_frames_per_second(),
+		"webs_fired": _webs_fired, "look_yaw": camera.look_yaw,
+		"cam_yaw": camera.yaw}
+	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
+
+
 func _process(_dt: float) -> void:
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
@@ -335,3 +414,10 @@ func _capture_series(path: String, times: Array[float]) -> void:
 		img.save_png(out)
 		print("SCREENSHOT ", out)
 	get_tree().quit()
+
+
+class _DebugPublisher:
+	extends Node
+	var main: Node
+	func _process(dt: float) -> void:
+		main._publish_web_state(dt)
