@@ -39,6 +39,12 @@ func _ready() -> void:
 			var btn := InputEventJoypadButton.new()
 			btn.button_index = b[1]
 			InputMap.action_add_event(action, btn)
-	var mouse := InputEventMouseButton.new()
-	mouse.button_index = MOUSE_BUTTON_LEFT
-	InputMap.action_add_event("grapple", mouse)
+	if DisplayServer.is_touchscreen_available():
+		# Menus are Godot GUI controls, which only react to mouse events: let
+		# taps emulate the mouse. Gameplay touches go through TouchControls, so
+		# a mouse-button grapple binding would fire the rope on every menu tap.
+		Input.emulate_mouse_from_touch = true
+	else:
+		var mouse := InputEventMouseButton.new()
+		mouse.button_index = MOUSE_BUTTON_LEFT
+		InputMap.action_add_event("grapple", mouse)

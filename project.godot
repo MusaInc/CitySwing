@@ -47,8 +47,10 @@ common/max_physics_steps_per_frame=4
 
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"
+renderer/rendering_method.web="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=1
 occlusion_culling/use_occlusion_culling=true
+occlusion_culling/use_occlusion_culling.web=false
 lights_and_shadows/directional_shadow/size=2048
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=1
