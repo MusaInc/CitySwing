@@ -100,7 +100,9 @@ func _process(dt: float) -> void:
 			want_pitch = deg_to_rad(default_pitch + 7.0 - 6.0 * dive)
 		pitch = lerp_angle(pitch, want_pitch, 1.0 - exp(-0.8 * dt))
 
-	var ahead := (v * look_ahead_time).limit_length(look_ahead_max)
+	# Look-ahead is capped relative to the trailing distance so the hero never
+	# leaves frame, however fast or close the camera is.
+	var ahead := (v * look_ahead_time).limit_length(minf(look_ahead_max, _dist * 0.45))
 	ahead.y *= 0.4
 	var focus_goal := target.global_position + Vector3.UP * height + ahead
 	if target.line_state == Player.Line.ATTACHED:

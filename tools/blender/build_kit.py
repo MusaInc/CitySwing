@@ -364,8 +364,8 @@ def character():
     reset()
     skin = mat("skin", (0.78, 0.56, 0.42), 0.6)
     hair = mat("hair", (0.1, 0.07, 0.05), 0.8)
-    hood = mat("hoodie", (0.93, 0.42, 0.18), 0.8)      # burnt orange
-    hood_dk = mat("hoodie_dark", (0.66, 0.26, 0.1), 0.8)
+    hood = mat("hoodie", (0.86, 0.12, 0.1), 0.75)      # signal red: reads against stone and sky
+    hood_dk = mat("hoodie_dark", (0.5, 0.06, 0.06), 0.8)
     jog = mat("joggers", (0.13, 0.15, 0.19), 0.85)
     stripe = mat("stripe", (0.9, 0.9, 0.88), 0.7)
     shoe = mat("sneaker", (0.94, 0.94, 0.92), 0.6)

@@ -98,6 +98,10 @@ func _ready() -> void:
 
 	if args.has("cam"):
 		_overview_camera()
+	if args.has("closeup"):
+		camera.near_distance = 2.6
+		camera.far_distance = 3.4
+		camera.height = 0.6
 	if args.has("mode"):
 		var m := String(args["mode"]).split(":")
 		start_mode(m[0], m[1] if m.size() > 1 else "")
