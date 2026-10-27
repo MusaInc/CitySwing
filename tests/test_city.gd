@@ -120,11 +120,19 @@ func test_expert_swings_through_generated_city(t) -> void:
 		swings.append(p.swings)
 		p.queue_free()
 		await get_tree().process_frame
+	var raw_d := dists.duplicate()
+	var raw_t := touches.duplicate()
 	dists.sort()
 	touches.sort()
 	swings.sort()
 	t.check(dists[1] > 300.0, "median run covers real distance through the city (%.0f m)" % dists[1])
 	t.check(swings[1] >= 8, "median run chains swings on generated geometry")
-	t.check(touches[1] <= 2, "median run rarely touches the street")
+	# Per distance: runs got much longer once walls became lethal and the
+	# autopilot learned to read them, so a fixed count would punish distance.
+	var rates: Array[float] = []
+	for k in raw_t.size():
+		rates.append(100.0 * raw_t[k] / maxf(raw_d[k], 1.0))
+	rates.sort()
+	t.check(rates[1] <= 1.0, "median run rarely touches the street (%.2f per 100 m)" % rates[1])
 	w.queue_free()
 	await get_tree().process_frame

@@ -145,7 +145,9 @@ func refresh_pick(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.Sta
 		# kept, then the static score (aim agreement, rope length, …).
 		var sc: float = gain / 25.0 + clampf(exit_v.y / 25.0, -0.3, 0.5) \
 			+ clampf(r["min_y"] - from_state.position.y + 10.0, -10.0, 10.0) * 0.02 + _candidates[i][0]
-		if not r["released"]:
+		if r["landed"]:
+			sc -= 0.4  # ends on a roof: safe, but the flow stops
+		elif not r["released"]:
 			sc -= 0.8  # never came back up inside the window: a plunge, not a swing
 		sc -= maxf(0.0, STREET_CLEARANCE - r["min_y"]) * 0.0  # skimming the street
 		if sc > best:
@@ -174,11 +176,11 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 
 ## Flies a swing from `anchor` with the real model: through the bottom of the
 ## arc, a release once it has been rising for 0.35 s, then 0.6 s of free
-## flight. clear = no building or street on the way; exit_v = velocity at the
+## flight (window scaled to the rope's swing period). clear = no building or street on the way; exit_v = velocity at the
 ## release; min_y = lowest point; path = sampled body positions.
 static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, anchor: Vector3,
 		p: SwingParams, exclude: Array[RID], _heading: Vector3) -> Dictionary:
-	var out := {"clear": false, "released": false, "exit_v": Vector3.ZERO, "min_y": from_state.position.y,
+	var out := {"clear": false, "released": false, "landed": false, "exit_v": Vector3.ZERO, "min_y": from_state.position.y,
 		"path": PackedVector3Array()}
 	var s := SwingPhysics.State.new()
 	s.position = from_state.position
@@ -197,7 +199,11 @@ static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhy
 	var prev_vy := s.velocity.y
 	var path: PackedVector3Array = out["path"]
 	path.append(s.position)
-	for i in 80:
+	# Long ropes swing slowly: cover at least a quarter period (to the bottom
+	# of the arc) with margin, plus the flight after the release.
+	var quarter := PI * 0.5 * sqrt(attach_length / maxf(p.gravity, 1.0))
+	var steps := int(clampf(quarter * 1.5 + 0.8, 2.6, 4.5) / dt)
+	for i in steps:
 		var a := s.position
 		if released < 0.0:
 			c.reel = SwingPhysics.auto_tighten(s, p, attach_length)  # same pull as the real player
@@ -207,8 +213,18 @@ static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhy
 		q.to = s.position + dir.normalized() * 0.4  # body radius
 		# (Street contact is caught by the ray – the street is in the mask – so a
 		# launch from street level isn't rejected just for starting low.)
-		if not space.intersect_ray(q).is_empty():
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty():
 			out["path"] = path
+			# Touching down on a rooftop is a landing, not a crash; facades
+			# and the street are crashes.
+			var col = hit.get("collider")
+			var street: bool = col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & (1 << 3)) != 0
+			if (hit.normal as Vector3).y > 0.6 and not street:
+				out["clear"] = true
+				out["landed"] = true
+				if not out["released"]:
+					out["exit_v"] = s.velocity
 			return out
 		if i % 2 == 0:
 			path.append(s.position)

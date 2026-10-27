@@ -21,6 +21,9 @@ var _banner_t := 0.0
 var _font: Font
 var _font_black: Font
 var _reticle_spin := 0.0
+var _ko_t := 0.0           # knockout flash + banner (s remaining, real time)
+var _ko_kmh := 0
+const KO_TIME := 2.2
 var _reticle_pos := Vector2.INF
 var _speed_smooth := 0.0
 var _frame_ms := 0.0
@@ -54,6 +57,12 @@ func on_perfect(streak: int) -> void:
 	_lines_boost = 1.0
 
 
+## Wall knockout: red flash from the edges and a shaking KNOCKED OUT.
+func on_knockout(speed: float) -> void:
+	_ko_t = KO_TIME
+	_ko_kmh = int(speed * 3.6)
+
+
 func flash(text: String, seconds := 2.0) -> void:
 	banner = text
 	_banner_t = seconds
@@ -65,6 +74,7 @@ func _process(dt: float) -> void:
 	_perfect_t = maxf(_perfect_t - dt, 0.0)
 	_lines_boost = maxf(_lines_boost - dt * 1.6, 0.0)
 	_reticle_spin += dt * 1.4
+	_ko_t = maxf(_ko_t - dt / maxf(Engine.time_scale, 0.05), 0.0)
 	for m in _marks:
 		m["t"] += dt
 	_marks = _marks.filter(func(m): return m["t"] < (0.45 if m["ok"] else 0.9))
@@ -91,7 +101,7 @@ func _draw() -> void:
 			var ap := cam.unproject_position(a)
 			draw_arc(ap, 7.0, 0, TAU, 20, gold, 2.5, true)
 			draw_circle(ap, 2.5, gold)
-	if not touch_mode or Settings.aim_mode != "tap":
+	if (not touch_mode or Settings.aim_mode != "tap") and not player.stunned:
 		# Reticle on the web pick: where SWING will attach.
 		var t := player.targeting
 		var aim_pt := t.pick if t.pick_ok else t.point
@@ -155,6 +165,8 @@ func _draw() -> void:
 		draw_string(_font_black, pp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.82, 0.4, a))
 	if pointer != Vector3.INF:
 		_draw_pointer(cam)
+	if _ko_t > 0.0:
+		_draw_knockout()
 	if hint != "":
 		var hs := 24
 		var hw := _font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, hs).x
@@ -184,6 +196,28 @@ func _draw() -> void:
 		for l in lines:
 			_text(Vector2(size.x * 0.3, y), l, 14, Color(0.7, 1.0, 0.7), shadow)
 			y += 18.0
+
+
+func _draw_knockout() -> void:
+	var age := KO_TIME - _ko_t
+	var a := clampf(_ko_t / 0.6, 0.0, 1.0)
+	# Edge vignette: strong at the hit, fading.
+	var hit := exp(-age * 3.0)
+	for i in 6:
+		var inset := i * 14.0
+		var col := Color(0.85, 0.05, 0.04, (0.32 - i * 0.05) * (0.35 + 0.65 * hit) * a)
+		draw_rect(Rect2(Vector2(inset, inset), size - Vector2(inset, inset) * 2.0), col, false, 16.0)
+	var shake := Vector2(sin(age * 53.0), sin(age * 47.0 + 1.0)) * 7.0 * exp(-age * 4.0)
+	var pop := 1.0 + 0.6 * exp(-age * 12.0)
+	var fs := int(56 * pop)
+	var txt := "KNOCKED OUT"
+	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var p := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.36) + shake
+	draw_string(_font_black, p + Vector2(3, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.5 * a))
+	draw_string(_font_black, p, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.32, 0.26, a))
+	var sub := "WALL · %d KM/H" % _ko_kmh
+	var sw := _font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	_text(Vector2(size.x / 2.0 - sw / 2.0, size.y * 0.36 + 32), sub, 18, Color(1, 1, 1, 0.8 * a), Color(0, 0, 0, 0.4 * a))
 
 
 ## Speed: a 270° gauge (full at 144 km/h) that warms from white to gold

@@ -300,8 +300,25 @@ def wall_kick():
                                 + bandpass(noise(d), 800, 4000) * env(n, 0.002, 0.15) * 0.5, 0.8))
 
 
+def knockout():
+    # Wall knockout: a deep body slam with a falling pitch, a crunchy burst,
+    # then a soft ringing-ears tone that fades out.
+    d = 1.8
+    n = int(d * SR)
+    f = np.linspace(75, 38, n)
+    slam = np.sin(2 * np.pi * np.cumsum(f) / SR) * env(n, 0.001, 0.45) * 1.4
+    crunch = bandpass(noise(d), 400, 2600) * env(n, 0.001, 0.09) * 1.2 + lp_fast(noise(d), 900) * env(n, 0.001, 0.2)
+    ring = (np.sin(2 * np.pi * 3150 * t(d)) + 0.5 * np.sin(2 * np.pi * 3190 * t(d))) * env(n, 0.08, 1.6) * 0.06
+    write("knockout.wav", norm(slam + crunch + ring, 0.95))
+
+
+ALL = (wind_loop, rope_tension_loop, city_ambience, music_loop, grapple_fire, grapple_attach, grapple_miss,
+       release, rope_snap, landing, roll, impact, splash, checkpoint, finish, fail, ui_click, wall_kick, knockout)
+
 if __name__ == "__main__":
-    for fn in (wind_loop, rope_tension_loop, city_ambience, music_loop, grapple_fire, grapple_attach, grapple_miss,
-               release, rope_snap, landing, roll, impact, splash, checkpoint, finish, fail, ui_click, wall_kick):
-        fn()
+    # gen_audio.py <outdir> [name ...]: only the named generators (default all).
+    only = set(sys.argv[2:])
+    for fn in ALL:
+        if not only or fn.__name__ in only:
+            fn()
     print("AUDIO DONE")

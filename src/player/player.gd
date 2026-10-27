@@ -26,6 +26,10 @@ signal respawned
 signal wall_kicked
 signal trick
 signal stun_started(speed: float)
+## Head-on wall hit: knocked out (stun_started follows). normal = the wall's.
+signal knockout(speed: float, normal: Vector3)
+## JUMP pressed just before a knockout-speed wall hit: kicked off it instead.
+signal wall_saved(speed: float)
 signal stun_ended
 signal launched
 signal stepped_up(height: float)
@@ -67,6 +71,10 @@ var web_touch_id := -1
 var wraps: Array = []
 
 var stunned := false
+var knocked_out := false
+var ko_normal := Vector3.ZERO
+var ko_velocity := Vector3.ZERO  # velocity just before the hit
+var _kick_window := 0.0
 var _stun_time := 0.0
 var _settle_time := 0.0
 var spawn_transform := Transform3D.IDENTITY
@@ -251,8 +259,7 @@ func _physics_process(dt: float) -> void:
 	targeting.update(get_world_3d().direct_space_state, origin, aim_dir, s.velocity, params,
 		is_on_floor(), [get_rid()], _move_smooth)
 	if line_state == Line.IDLE or line_state == Line.ATTACHED:
-		s.position = global_position
-		targeting.refresh_pick(get_world_3d().direct_space_state, s, params, [get_rid()], dt)
+		targeting.refresh_pick(get_world_3d().direct_space_state, _launch_state(), params, [get_rid()], dt)
 
 	# Assisted grapple (button/autopilot). Touch webs are driven by fire_at/release_web.
 	# While stunned the hand stays clenched on the line: input can't release it.
@@ -273,7 +280,9 @@ func _physics_process(dt: float) -> void:
 		web_touch_id = id
 	_advance_line(dt, origin)
 
+	_kick_window = maxf(_kick_window - dt, 0.0)
 	if controls.jump and not is_on_floor():
+		_kick_window = params.wall_save_window  # a wall in the next instant: kick off it
 		if is_on_wall():
 			var n := get_wall_normal()
 			s.velocity += Vector3(n.x, 0.0, n.z).normalized() * params.wall_kick_speed
@@ -341,6 +350,7 @@ func _try_step_up(motion: Vector3) -> void:
 
 
 func _resolve_contacts(dt: float) -> void:
+	var pre_hit := s.velocity
 	var worst_into := 0.0
 	var wall_n := Vector3.ZERO  # normal of the hardest wall hit this tick
 	var wall_ratio := 0.0       # its share of the speed going into the wall (1 = head-on)
@@ -381,18 +391,36 @@ func _resolve_contacts(dt: float) -> void:
 			stun(speed_in)
 	elif on_floor:
 		on_street = floor_street
-	if worst_into > params.ragdoll_impact_speed and wall_n != Vector3.ZERO \
-			and wall_ratio < params.wall_glance_ratio and not stunned:
-		# A fast glancing hit is a wall tap, not a crash: kick off the facade
-		# and keep flowing (and keep the chain). Only head-on hits ragdoll.
+	var facade := wall_n != Vector3.ZERO and worst_into > params.hard_impact_speed and not stunned
+	if facade and wall_ratio < params.wall_glance_ratio:
+		# A glancing hit is a wall tap, not a crash: kick off the facade and
+		# keep flowing (and keep the chain).
 		var out := Vector3(wall_n.x, 0.0, wall_n.z).normalized()
 		s.velocity += out * worst_into * params.wall_glance_bounce
 		s.velocity.y = maxf(s.velocity.y, 0.0) + params.wall_kick_up * 0.6
 		wall_kicked.emit()
 		trick.emit()
-	elif worst_into > params.ragdoll_impact_speed and wall_n != Vector3.ZERO \
-			and worst_into < params.wall_run_max_speed and not stunned:
-		# Head-on, but survivable: hit the facade feet-first and run up it.
+	elif facade and worst_into >= params.wall_run_max_speed and _kick_window > 0.0:
+		# Head-on and fast, but JUMP was timed: plant the feet and spring off
+		# the facade, keeping most of the speed along it.
+		_kick_window = 0.0
+		if line_state == Line.ATTACHED:
+			_let_go()
+		var out := Vector3(wall_n.x, 0.0, wall_n.z).normalized()
+		var along := pre_hit - out * pre_hit.dot(out)
+		along.y = 0.0
+		s.velocity = along * 0.8 + out * minf(worst_into * 0.45, 16.0)
+		s.velocity.y = maxf(pre_hit.y, 0.0) * 0.5 + params.wall_kick_up
+		impact.emit(params.hard_impact_speed)
+		wall_kicked.emit()
+		wall_saved.emit(worst_into)
+		trick.emit()
+	elif facade and worst_into >= params.wall_run_max_speed:
+		# Head-on and fast: knocked out.
+		impact.emit(worst_into)
+		_knockout(worst_into, wall_n, pre_hit)
+	elif facade:
+		# Head-on, but slow enough: hit the facade feet-first and run up it.
 		# Horizontal momentum is gone (that's the cost); the chain survives.
 		if line_state == Line.ATTACHED:
 			_let_go()
@@ -510,6 +538,20 @@ func _ground_launch() -> void:
 		launched.emit()
 
 
+## The state a web fired now would start from: on the ground, firing also
+## launches (see _ground_launch), so the swing starts from that jump.
+func _launch_state() -> SwingPhysics.State:
+	var st := SwingPhysics.State.new()
+	st.position = global_position
+	st.velocity = s.velocity
+	if is_on_floor() and not stunned:
+		var fwd := Vector3(aim_dir.x, 0.0, aim_dir.z).normalized()
+		if fwd.length_squared() > 0.5 and Vector3(st.velocity.x, 0, st.velocity.z).length() < 6.0:
+			st.velocity += fwd * 6.0
+		st.velocity.y = maxf(st.velocity.y, params.jump_speed)
+	return st
+
+
 func _fire(origin: Vector3) -> void:
 	if line_state != Line.IDLE or stunned:
 		return
@@ -621,6 +663,24 @@ func stun(impact_speed: float) -> void:
 	stun_started.emit(impact_speed)
 
 
+## Head-on into a wall: the web lets go and the body bounces off the facade
+## limp (the rig's ragdoll takes the hit), drops, and stays down for at least
+## knockout_time.
+func _knockout(into: float, wall_n: Vector3, pre: Vector3) -> void:
+	_let_go()
+	var out := Vector3(wall_n.x, 0.0, wall_n.z).normalized()
+	ko_normal = out
+	ko_velocity = pre
+	var along := pre - out * pre.dot(out)
+	along.y = 0.0
+	s.velocity = along * 0.3 + out * minf(into * 0.16, 7.0) + Vector3.UP * minf(pre.y, 2.0)
+	chain = 0
+	perfect_streak = 0
+	knocked_out = true
+	knockout.emit(into, out)
+	stun(into)
+
+
 ## Recovery is decided here (gameplay), not by the visual rig: dangling from
 ## the web the body shakes it off after 0.9 s; otherwise it gets up once it has
 ## come to rest on something; if wedged somewhere it respawns.
@@ -630,13 +690,15 @@ func _update_stun(dt: float) -> void:
 		_settle_time += dt
 	else:
 		_settle_time = 0.0
-	if (line_state == Line.ATTACHED and _stun_time > 0.9) or (_stun_time > 1.2 and _settle_time > 0.6):
+	var down := params.knockout_time if knocked_out else 1.2
+	if (line_state == Line.ATTACHED and _stun_time > 0.9 and not knocked_out) or (_stun_time > down and _settle_time > 0.6):
 		recover()
-	elif _stun_time > 6.0:
+	elif _stun_time > 8.0:
 		respawn()
 
 
 func recover() -> void:
+	knocked_out = false
 	if stunned:
 		stunned = false
 		stun_ended.emit()
@@ -647,6 +709,7 @@ func respawn(at: Variant = null) -> void:
 	_armed_touch = -1
 	_launch_pending = false
 	stunned = false
+	knocked_out = false
 	_grapple_held = true  # require a fresh press
 	global_position = at if at is Vector3 else last_safe_position
 	s.velocity = Vector3.ZERO

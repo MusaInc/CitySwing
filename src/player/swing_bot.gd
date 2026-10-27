@@ -4,7 +4,10 @@ extends RefCounted
 ## (move / aim / grapple held / reel / jump). Used by the automated skill tests,
 ## and for attract-mode / screenshot capture. Two styles:
 ##   EXPERT – fires near the apex, releases on the upswing at ~30° above
-##            horizontal, lets go when the line catches a corner.
+##            horizontal, lets go when the line catches a corner, and sees
+##            walls coming: a knockout-speed hit less than ~0.9 s ahead
+##            means let go / re-web on a line that clears it, steering
+##            along the facade.
 ##   NOVICE – fires late while dropping, lets go around the bottom of the arc.
 
 enum Style { EXPERT, NOVICE }
@@ -17,6 +20,7 @@ var _hold := false
 var _cooldown := 0.0
 var _ground_time := 0.0
 var _stall := 0.0
+var _trust := 0.0  # s left trusting a web fired to avoid a wall
 var _rng := RandomNumberGenerator.new()
 
 
@@ -38,6 +42,7 @@ func drive(p: Player, dt: float) -> Dictionary:
 	var out := {"move": Vector3.ZERO, "aim": aim, "grapple": _hold,
 		"reel": 0.0, "jump": false}
 	_cooldown -= dt
+	_trust -= dt
 	var vh := Vector3(v.x, 0.0, v.z)
 
 	if p.is_on_floor() and not p.s.attached:
@@ -51,6 +56,29 @@ func drive(p: Player, dt: float) -> Dictionary:
 		out["grapple"] = _hold
 		return out
 	_ground_time = 0.0
+
+	var hit := _wall_ahead(p) if style == Style.EXPERT else []
+	var wall: Vector3 = hit[0] if hit else Vector3.ZERO
+	if wall != Vector3.ZERO:
+		# Steer along the facade, not into it.
+		var along := dir - wall * dir.dot(wall)
+		along.y = 0.0
+		if along.length_squared() > 0.01:
+			dir = along.normalized()
+		out["move"] = dir
+		if p.line_state == Player.Line.ATTACHED and _trust <= 0.0:
+			_hold = false  # this web is what's carrying us in
+			_cooldown = 0.0
+			out["grapple"] = false
+			return out
+		if p.line_state == Player.Line.IDLE and p.targeting.pick_ok:
+			_hold = true  # the pick's swing is predicted to clear: trust it
+			_trust = 0.7
+			out["grapple"] = true
+			return out
+		if hit[1] < p.params.wall_save_window * 0.8:
+			out["jump"] = true  # no way round it: kick off it
+			return out
 
 	if p.line_state == Player.Line.IDLE:
 		_hold = false
@@ -106,3 +134,41 @@ func drive(p: Player, dt: float) -> Dictionary:
 		out["move"] = dir * (1.0 if style == Style.EXPERT else 0.2)
 	out["grapple"] = _hold
 	return out
+
+
+## [wall normal, seconds to impact] if a knockout-speed head-on hit is under
+## ~0.9 s ahead, following the real path (the swing's curve on the web);
+## [] otherwise.
+func _wall_ahead(p: Player) -> Array:
+	if p.s.velocity.length() < p.params.wall_run_max_speed * 0.9:
+		return []
+	var s := SwingPhysics.State.new()
+	s.position = p.global_position
+	s.velocity = p.s.velocity
+	s.attached = p.s.attached
+	s.anchor = p.s.anchor
+	s.rope_length = p.s.rope_length
+	s.taut = p.s.taut
+	var c := SwingPhysics.Controls.new()
+	var rq := PhysicsRayQueryParameters3D.new()
+	rq.collision_mask = Player.BUILDINGS_MASK
+	rq.exclude = [p.get_rid()]
+	var space := p.get_world_3d().direct_space_state
+	for i in 18:
+		var a := s.position
+		var v := s.velocity
+		SwingPhysics.step(s, c, p.params, 0.05)
+		rq.from = a
+		rq.to = s.position + (s.position - a).normalized() * 0.4
+		var hit := space.intersect_ray(rq)
+		if hit.is_empty():
+			continue
+		var n: Vector3 = hit.normal
+		if absf(n.y) > 0.6:
+			return []  # a roof or ledge top, not a facade
+		var into := -v.dot(n)
+		if into < p.params.wall_run_max_speed * 0.9 or into / maxf(v.length(), 0.1) < p.params.wall_glance_ratio * 0.9:
+			return []
+		var frac := (hit.position as Vector3).distance_to(a) / maxf(a.distance_to(s.position), 0.01)
+		return [Vector3(n.x, 0.0, n.z).normalized(), (i + clampf(frac, 0.0, 1.0)) * 0.05]
+	return []

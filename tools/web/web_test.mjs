@@ -113,6 +113,26 @@ if (engine === "chromium") {
   s = await waitFor(v => v?.line === 0, 15000);
   check(s?.line === 0, "lifting the owning finger releases the web");
   await shot("4_released");
+  // In the air, JUMP is an acrobatic trick (chosen to fit the air time).
+  // The flight is not deterministic at ~1 fps: it may end in a wall first,
+  // which must then be a knockout (ragdoll), not a freeze or a wall run.
+  const before = s?.rig?.tricks ?? 0;
+  if (!s?.grounded && !s?.stunned) {
+    // Hold until the game has seen it (headless browsers run at ~1 fps).
+    await down(6, ...jump);
+    s = await waitFor(v => (v?.rig?.tricks ?? 0) > before || v?.grounded || v?.stunned, 10000);
+    await up(6);
+  }
+  if (s?.rig?.ko || s?.stunned) {
+    s = await waitFor(v => v?.rig?.ragdoll, 5000);
+    check(s?.rig?.ragdoll, `hit a wall after the release: knocked out (ragdoll ${s?.rig?.ragdoll})`);
+    await shot("4b_knockout");
+  } else if (!s?.grounded || (s?.rig?.tricks ?? 0) > before) {
+    check((s?.rig?.tricks ?? 0) > before, `JUMP in the air does a trick (${s?.rig?.trick || "none"})`);
+    await shot("4b_trick");
+  } else {
+    check(true, "landed before a trick could be tried (skipped)");
+  }
 } else {
   // Linux WebKit cannot construct held Touch objects; Playwright sends real taps.
   const fired = s?.webs_fired ?? 0;

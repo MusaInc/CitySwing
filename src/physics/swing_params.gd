@@ -89,17 +89,24 @@ extends Resource
 @export var hard_impact_speed: float = 14.0
 ## Speed into the floor above which the landing is a "roll" rather than a step.
 @export var roll_landing_speed: float = 18.0
-## Speed into a wall above which the body goes limp (ragdoll + recovery).
+## Speed into anything that is not a facade (ledge corners, roof edges, …)
+## above which the body goes limp. Facades: see the wall settings below.
 @export var ragdoll_impact_speed: float = 28.0
 ## Fast wall hits at a shallower angle than this (speed into the wall ÷ total
-## speed; 0.7 ≈ 44°) are wall taps that bounce you off instead of crashing.
-@export_range(0.0, 1.0) var wall_glance_ratio: float = 0.7
+## speed; 0.6 ≈ 37°) are wall taps that bounce you off instead of crashing.
+@export_range(0.0, 1.0) var wall_glance_ratio: float = 0.6
 ## Share of the into-wall speed returned as an outward push on a wall tap.
 @export_range(0.0, 1.0) var wall_glance_bounce: float = 0.35
-## Head-on wall hits between ragdoll_impact_speed and this become a wall run:
+## Head-on facade hits between hard_impact_speed and this become a wall run:
 ## the body plants its feet and runs up the facade at into-speed × wall_run_up.
-## Above it, the body crashes (ragdoll).
-@export var wall_run_max_speed: float = 50.0
+## Above it (≈79 km/h into the wall) you are knocked out: the web lets go and
+## the body ragdolls off the wall.
+@export var wall_run_max_speed: float = 22.0
+## Minimum time a knockout keeps you down (then: settled on something).
+@export var knockout_time: float = 2.2
+## JUMP pressed up to this long before a knockout-speed wall hit kicks you
+## off the wall instead (the skill escape).
+@export var wall_save_window: float = 0.22
 @export_range(0.0, 1.0) var wall_run_up: float = 0.55
 ## Vertical landing speed above which the body crumples (ragdoll + recovery).
 @export var ragdoll_fall_speed: float = 30.0

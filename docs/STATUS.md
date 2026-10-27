@@ -1,6 +1,44 @@
-# Status: 2026-10-27 (web choice, camera, UI)
+# Status: 2026-10-28 (lethal walls, air acrobatics)
 
-## Web choice, camera and UI (latest)
+## Lethal walls, air acrobatics, arms (latest)
+
+- **Walls knock you out**: a head-on facade hit at ≥22 m/s (≈79 km/h into
+  the wall, ≥37° from glancing) is a knockout: the web lets go, the body
+  bounces off the facade as a ragdoll (limbs keep their speed and slap the
+  wall, head whips back, tumble away from the wall), falls, and stays down
+  ≥2.2 s before the get-up. Hit-stop (70 ms) → slow motion (0.55 s at 0.3×)
+  → ease back (`ImpactFx`), camera shake + FOV punch, red edge flash and
+  KNOCKED OUT · WALL n KM/H, synthesised slam + ringing (`knockout.wav`),
+  heavy haptic. Slower head-on hits are still wall runs; glancing ones taps.
+- **Skill escape**: JUMP within 0.22 s before a knockout hit kicks off the
+  wall instead (keeps speed along the facade).
+- The expert autopilot reads walls (flies its real path ~0.9 s ahead:
+  re-webs on a clear pick, else times the kick); novices don't.
+  Feel report (6 × 40 s): expert 72 km/h airborne, 95% airborne, chain 21,
+  street 1.5/run, 0.3 crashes/run (was 66 km/h, chain 7.7, street 1.7);
+  novice 1.5 knockouts/run. Prototype range: experts clear 2/5 (median
+  352 m), novices are knocked out at the first tower (52 m); tests restated
+  (see test_swing_scene / test_city comments). Courses re-recorded.
+- Web pick fixes: prediction window scales with rope length (long ropes
+  were judged before reaching the bottom), touching down on a roof is a
+  landing not a crash, and from the ground it predicts from the launch.
+- **Air poses** (phase-blended): launch, apex gather, falling balance, a
+  belly-down freefall arch with "W" arms, head-first streamlined dive with
+  arms overhead, landing prep near the ground. Elbows/knees keep a bend.
+- **Tricks** (JUMP in the air, wall taps, perfect releases with air to
+  spare): front tuck, back layout, corkscrew, aerial (cartwheel), full
+  twist, front pike, double front, double-twisting layout – picked for the
+  air time left and the motion (sideways speed → aerial, …), never the same
+  twice running, eased slow–fast–slow, landing mid-trick eases out.
+- **Run arms**: loose fists (open palms read as waving), elbow held near
+  90°, hands hip → chin. Closed hands in the air too.
+- Pose lab: tricks, freefall, dive, knockout, run_34, release34 scenarios.
+- Tests: 72 native (knockout, timed save, slow wall run, hit-stop restores
+  time); browser Chromium 17/17 (a release then either a trick on JUMP or a
+  wall knockout – not deterministic at ~1 fps; both runs here were
+  knockouts), WebKit 9/9.
+
+## Web choice, camera and UI
 
 - **Stick steers the web**: pushing the left stick turns the assisted
   search toward its direction (fully at ~75% deflection).

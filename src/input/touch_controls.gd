@@ -216,7 +216,7 @@ func _draw() -> void:
 	for t in touches.values():
 		if t.get("action", "") == "jump":
 			jump_down = true
-	var ready := player != null and player.targeting.has_target and player.line_state == Player.Line.IDLE
+	var ready := player != null and player.targeting.has_target and player.line_state == Player.Line.IDLE and not player.stunned
 	for action in buttons:
 		var b: Dictionary = buttons[action]
 		var c := button_center(action)

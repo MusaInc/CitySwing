@@ -6,7 +6,7 @@ extends Node
 
 const DIR := "res://assets/audio/"
 const LOOPS := ["wind_loop", "rope_tension_loop", "city_ambience", "music_loop"]
-const SHOTS := ["grapple_fire", "grapple_attach", "grapple_miss", "release_whoosh", "rope_snap", "land", "roll",
+const SHOTS := ["knockout", "grapple_fire", "grapple_attach", "grapple_miss", "release_whoosh", "rope_snap", "land", "roll",
 	"impact", "splash", "checkpoint", "finish", "fail", "ui_click", "wall_kick"]
 
 var player: Player

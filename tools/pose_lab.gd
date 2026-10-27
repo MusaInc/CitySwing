@@ -5,8 +5,9 @@ extends SceneTree
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
 ## Scenarios: idle run steps jump swing release wallrun crash land jumpclose
+##   tricks freefall dive knockout
 
-const ALL := ["idle", "run", "steps", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose"]
 
 var player: Player
 var rig: CharacterRig
@@ -130,6 +131,12 @@ func _sc_run() -> void:
 	for i in 12:
 		cyc.append(2.0 + i / 30.0)
 	await _film("run_cycle", 2.5, cyc)
+	_cam_off = Vector3(2.2, 0.5, 2.2)  # three-quarter, close: arm swing and clearance
+	var cyc34 := []
+	for i in 8:
+		cyc34.append(0.2 + i / 30.0)
+	await _film("run_34", 0.5, cyc34)
+	_cam_off = Vector3(0, 0.2, 3.6)
 	await _film("run_stop", 1.4, [0.1, 0.25, 0.4, 0.6, 0.9, 1.3], {0.05: func(): sc.move = Vector3.ZERO})
 	var sc2 := _reset(Vector3(-20, 1.0, 20))
 	sc2.move = Vector3.RIGHT * 0.25
@@ -156,6 +163,10 @@ func _sc_release() -> void:
 	_cam_off = Vector3(0, 0.3, 5.5)
 	player.fire_at(Vector3(0, 72, -32.0), 1)
 	await _film("release", 4.0, [1.3, 1.5, 1.7, 1.9, 2.1, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9], {1.6: func(): player.release_web()})
+	_reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
+	_cam_off = Vector3(3.5, 0.8, 3.5)  # three-quarter view: arm depth reads
+	player.fire_at(Vector3(0, 72, -32.0), 1)
+	await _film("release34", 3.0, [1.7, 1.9, 2.1, 2.4, 2.7, 2.9], {1.6: func(): player.release_web()})
 
 
 func _sc_wallrun() -> void:
@@ -168,6 +179,38 @@ func _sc_crash() -> void:
 	_reset(Vector3(0, 30, -14), Vector3(0, 0, -58))
 	_cam_off = Vector3(7.0, 0.8, 3.0)
 	await _film("crash", 5.0, [0.25, 0.35, 0.5, 0.8, 1.2, 1.6, 2.0, 2.5, 3.0, 3.5, 4.2, 4.9])
+
+
+## Every air trick from the same take-off (one sheet each).
+func _sc_tricks() -> void:
+	for name in CharacterRig.TRICKS:
+		_reset(Vector3(-20, 90, 200), Vector3(9, 9, 0))
+		_cam_off = Vector3(0, 0.6, 6.5)
+		await process_frame
+		rig.start_trick(name)
+		var dur: float = rig._trick_dur
+		var shots := []
+		for i in 9:
+			shots.append(0.05 + dur * i / 8.0)
+		await _film("trick_" + name, dur + 0.15, shots)
+
+
+func _sc_freefall() -> void:
+	_reset(Vector3(-20, 140, 200), Vector3(5, 0, 0))
+	_cam_off = Vector3(0, 1.0, 6.0)
+	await _film("freefall", 3.4, [0.2, 0.6, 1.0, 1.4, 1.8, 2.2, 2.6, 3.0, 3.3])
+
+
+func _sc_dive() -> void:
+	_reset(Vector3(-20, 140, 200), Vector3(22, -24, 0))
+	_cam_off = Vector3(0, 1.0, 6.0)
+	await _film("dive", 1.6, [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4])
+
+
+func _sc_knockout() -> void:
+	_reset(Vector3(0, 30, -20), Vector3(0, 1, -35))
+	_cam_off = Vector3(7.0, 0.8, 3.0)
+	await _film("knockout", 4.0, [0.3, 0.36, 0.42, 0.5, 0.6, 0.75, 0.95, 1.2, 1.6, 2.1, 2.8, 3.8])
 
 
 func _sc_steps() -> void:

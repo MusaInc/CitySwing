@@ -19,6 +19,7 @@ var hud: Hud
 var touch: TouchControls
 var menus: Menus
 var audio: AudioDirector
+var impact_fx: ImpactFx
 var atmosphere: Atmosphere
 var world: Node3D
 var mode: GameMode
@@ -94,6 +95,17 @@ func _ready() -> void:
 	touch.player = player
 	touch.web_feedback.connect(hud.web_feedback)
 	player.perfect_release.connect(hud.on_perfect)
+	# Wall knockout: hit-stop + slow-mo, camera jolt, red flash, the slam.
+	impact_fx = ImpactFx.new()
+	impact_fx.name = "ImpactFx"
+	add_child(impact_fx)
+	player.knockout.connect(func(spd: float, _n: Vector3):
+		impact_fx.knockout(spd)
+		camera.shake(clampf(spd / 45.0, 0.25, 0.7))
+		hud.on_knockout(spd)
+		audio.play("knockout", linear_to_db(clampf(spd / 35.0, 0.5, 1.0)))
+		Settings.haptic(160, 1.0))
+	player.respawned.connect(func(): impact_fx.cancel())
 	hud.touch_mode = DisplayServer.is_touchscreen_available() or args.has("touch")
 	touch.pause_pressed.connect(pause)
 	menus = Menus.new()

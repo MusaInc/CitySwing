@@ -74,10 +74,34 @@ var _yaw_rate := 0.0
 var _prev_facing_angle := 0.0
 var _run_phase := 0.0
 var _land_squash := 0.0
-var _flip := 0.0           # visual somersault angle (rad) about the body's right axis
-var _flip_rate := 0.0
-var _trick_time := 0.0
+var _flip := 0.0           # landing-roll angle (rad) about the body's right axis
 var _roll_time := 0.0
+## Air tricks (visual only). Each: duration, rotations (rad) about the body's
+## right (flip, + = backward), up (twist) and forward (cartwheel) axes, and a
+## shape the limbs hold through it. Rotation follows an eased curve – slow
+## out of the take-off, whipping through the middle, settling upright.
+const TRICKS := {
+	"front_tuck": {"dur": 0.62, "flip": -TAU, "twist": 0.0, "roll": 0.0, "shape": "tuck"},
+	"back_layout": {"dur": 0.85, "flip": TAU, "twist": 0.0, "roll": 0.0, "shape": "layout"},
+	"corkscrew": {"dur": 1.0, "flip": -TAU, "twist": TAU, "roll": 0.0, "shape": "twist"},
+	"aerial": {"dur": 0.72, "flip": 0.0, "twist": 0.0, "roll": TAU, "shape": "split"},
+	"full_twist": {"dur": 0.6, "flip": 0.0, "twist": TAU, "roll": 0.0, "shape": "pencil"},
+	"front_pike": {"dur": 0.8, "flip": -TAU, "twist": 0.0, "roll": 0.0, "shape": "pike"},
+	"double_front": {"dur": 1.05, "flip": -2.0 * TAU, "twist": 0.0, "roll": 0.0, "shape": "tuck"},
+	"double_twist_layout": {"dur": 1.25, "flip": TAU, "twist": 2.0 * TAU, "roll": 0.0, "shape": "twist"},
+}
+var trick := ""            # current trick ("" = none); read by tests / HUD
+var _trick := ""
+var _trick_t := 0.0
+var _trick_dur := 1.0
+var _trick_dir := 1.0      # mirrors twist / cartwheel direction
+var _last_trick := ""
+var _resid := Quaternion.IDENTITY  # a trick cut short eases out from here
+var _ground_h := INF       # height of the capsule bottom above what's below
+var _ground_t := 0.0
+var _perfect_pending := false
+var _last_trick_seen := ""
+var tricks_done := 0
 var _rag_time := 0.0
 var _recover_blend := 0.0
 var _time := 0.0
@@ -180,6 +204,7 @@ func _connect_player() -> void:
 	player.released.connect(_on_released)
 	player.stun_started.connect(_on_stun)
 	player.stun_ended.connect(_on_stun_ended)
+	player.perfect_release.connect(_on_perfect)
 	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.STEP_MAX))
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
@@ -290,7 +315,6 @@ func on_landed(speed: float) -> void:
 	var vh := Vector3(player.s.velocity.x, 0, player.s.velocity.z).length() if player else 0.0
 	if player and speed > player.params.roll_landing_speed and vh > 8.0 and not ragdolling:
 		_roll_time = 0.55  # shoulder roll to absorb a fast landing
-	_flip_rate = 0.0
 
 
 ## Wall run / wall tap: face the wall and run up it while still rising.
@@ -316,32 +340,135 @@ func _jolt(strength: float) -> void:
 		_angvel["shin_" + sd] += Vector3(-4.0, 0, 0) * strength
 
 
+## JUMP in the air (or a wall tap): a trick that fits the air time left.
 func _on_trick() -> void:
-	if _trick_time <= 0.0 and not ragdolling:
-		_trick_time = 0.6
+	start_trick()
 
 
-func _on_released(v: Vector3) -> void:
-	# The body was rotating with the rope; that spin carries on after release.
-	var r := player.global_position - player.s.anchor
-	var omega := r.cross(v) / maxf(r.length_squared(), 1.0)
+func _on_released(_v: Vector3) -> void:
+	_perfect_pending = true  # perfect_release (if any) arrives this tick
+
+
+## A perfect release earns a flourish when there is air to do it in.
+func _on_perfect(_streak: int) -> void:
+	if _air_time_left() > 1.15:
+		start_trick()
+
+
+## Starts a trick chosen for the moment (or `which`). Returns its name.
+func start_trick(which := "") -> String:
+	if _trick != "" or ragdolling or player.is_on_floor() or player.line_state == Player.Line.ATTACHED:
+		return ""
+	var left := _air_time_left()
+	if which == "":
+		which = _choose_trick(left)
+	if which == "" or not TRICKS.has(which):
+		return ""
+	var base: float = TRICKS[which]["dur"]
+	# Long air: stretch it a little (slower is more graceful); short: squeeze.
+	_trick_dur = clampf(minf(base * 1.25, left - 0.2), base * 0.8, base * 1.25)
+	_trick = which
+	trick = which
+	_trick_t = 0.0
+	_trick_dir = -1.0 if randf() < 0.5 else 1.0
+	_last_trick = which
+	tricks_done += 1
+	return which
+
+
+func _choose_trick(left: float) -> String:
+	var v := player.s.velocity
 	var right := _body_basis.x
-	_flip_rate = clampf(omega.dot(right), -4.0, 4.0)
+	var lateral := absf(v.dot(right)) / maxf(v.length(), 1.0)
+	var weights := {}
+	for name in TRICKS:
+		var dur: float = TRICKS[name]["dur"]
+		if dur * 0.8 > left - 0.2 or name == _last_trick:
+			continue
+		var w := 1.0
+		match name:
+			"aerial":
+				w = 0.6 + lateral * 4.0
+			"front_tuck", "front_pike", "corkscrew":
+				w = 1.0 + clampf(v.y / 10.0, 0.0, 1.2)
+			"back_layout", "full_twist":
+				w = 1.0 + clampf(-v.y / 12.0, 0.0, 1.0)
+			"double_front", "double_twist_layout":
+				w = 0.4 + 0.6 * float(player.perfect_streak >= 2) + clampf(left - 1.6, 0.0, 1.0)
+		weights[name] = w
+	var total := 0.0
+	for k in weights:
+		total += weights[k]
+	if total <= 0.0:
+		return ""
+	var r := randf() * total
+	for k in weights:
+		r -= weights[k]
+		if r <= 0.0:
+			return k
+	return weights.keys()[-1]
 
 
-func _on_stun(_speed: float) -> void:
+## Seconds until the body would reach the ground below (ballistic estimate).
+func _air_time_left() -> float:
+	var h := _probe_ground()
+	if h == INF:
+		return 3.0
+	var g := player.params.gravity
+	var vy := player.s.velocity.y
+	return (vy + sqrt(maxf(vy * vy + 2.0 * g * maxf(h, 0.0), 0.0))) / g
+
+
+## Height of the capsule's bottom above the surface below (INF: none in 200 m).
+func _probe_ground() -> float:
+	if not is_inside_tree():
+		return INF
+	var from := player.global_position
+	var rq := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 200.0, player.collision_mask)
+	rq.exclude = [player.get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(rq)
+	return INF if hit.is_empty() else from.y - 0.9 - (hit.position as Vector3).y
+
+
+func _on_stun(speed: float) -> void:
 	ragdolling = true
 	_rag_time = 0.0
+	_trick = ""
 	ragdoll.space = get_world_3d().direct_space_state
+	if player.knocked_out:
+		_knockout_ragdoll(speed)
+		return
 	var spin := Vector3(randf_range(-3, 3), randf_range(-2, 2), randf_range(-3, 3))
 	ragdoll.start(joint_positions(), player.s.velocity * 0.6, spin)
+
+
+## Wall knockout: the body bounces off the facade, but the limbs still carry
+## the speed they had going in, so they slap the wall and fold round; the
+## head snaps back off the impact, and the whole body tumbles away from the
+## wall, turning about the axis along the facade.
+func _knockout_ragdoll(speed: float) -> void:
+	var n := player.ko_normal
+	var pre := player.ko_velocity
+	var joints := joint_positions()
+	var extra := {}
+	var limb_carry := (pre - player.s.velocity) * 0.55
+	for j in ["wr_l", "wr_r", "el_l", "el_r", "an_l", "an_r", "kn_l", "kn_r"]:
+		extra[j] = limb_carry * (1.0 if j.begins_with("wr") or j.begins_with("an") else 0.6)
+	extra["head"] = n * minf(speed * 0.22, 8.0) + Vector3.UP * 1.5
+	extra["neck"] = n * minf(speed * 0.1, 4.0)
+	var axis := n.cross(Vector3.UP)
+	if axis.length_squared() < 0.01:
+		axis = _body_basis.x
+	var spin := axis.normalized() * clampf(speed * 0.12, 3.0, 8.0) + Vector3.UP * randf_range(-2.5, 2.5)
+	ragdoll.start(joints, player.s.velocity, spin, extra)
 
 
 func _on_respawned() -> void:
 	ragdolling = false
 	_flip = 0.0
-	_flip_rate = 0.0
-	_trick_time = 0.0
+	_trick = ""
+	trick = ""
+	_resid = Quaternion.IDENTITY
 	_roll_time = 0.0
 	for b in BONES:
 		_angvel[b] = Vector3.ZERO
@@ -385,7 +512,8 @@ func debug_state() -> Dictionary:
 		var dir := (player.s.anchor - sh).normalized()
 		hand_off = ((hand - sh) - dir * (hand - sh).dot(dir)).length()
 	return {"skinned": skeleton != null and not _skel_idx.is_empty(), "planted": _plant.size(),
-		"foot_gap": snappedf(gap, 0.001), "hand_line": snappedf(hand_off, 0.001), "ragdoll": ragdolling}
+		"foot_gap": snappedf(gap, 0.001), "hand_line": snappedf(hand_off, 0.001), "ragdoll": ragdolling,
+		"trick": _trick if _trick != "" else _last_trick_seen, "tricks": tricks_done, "ko": player.knocked_out}
 
 
 # ------------------------------------------------------------------ update
@@ -400,8 +528,11 @@ func _process(dt: float) -> void:
 		_update_animated(dt)
 	_update_scarf(dt)
 	_sync_skeleton()
-	_set_grip("r", player.line_state != Player.Line.IDLE)
-	_set_grip("l", player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0)
+	# Closed hands on the line, and loose fists when running or flying (open
+	# flat palms read as waving); open hands when standing.
+	var fists := not player.is_on_floor() or player.speed() > 3.5 or ragdolling
+	_set_grip("r", player.line_state != Player.Line.IDLE or fists)
+	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0) or fists)
 
 
 func _set_grip(side: String, on: bool) -> void:
@@ -484,6 +615,13 @@ func _update_animated(dt: float) -> void:
 		up = Vector3.UP.lerp(v.normalized() if speed > 1.0 else Vector3.UP, lean).normalized()
 		if v.y < -6.0:
 			up = up.lerp(Vector3.UP, 0.5).normalized()  # dropping: feet stay under the body
+		# Freefall arch: falling fast with height to spare, the body lies
+		# belly-down, head toward the travel direction.
+		var sky := _skydive(v, dive)
+		if sky > 0.0:
+			var ahead := (_facing + Vector3.UP * 0.2).normalized()
+			up = up.slerp(ahead, sky * 0.8).normalized()
+			fwd_hint = fwd_hint.slerp(Vector3.DOWN, sky * 0.9).normalized()
 		if dive > 0.0:
 			up = up.slerp(v.normalized(), dive * 0.85).normalized()
 			fwd_hint = Vector3.DOWN.slerp(_facing, 0.5).normalized()
@@ -501,21 +639,29 @@ func _update_animated(dt: float) -> void:
 	_body_basis = _body_basis.slerp(want, 1.0 - exp(-rate * dt)).orthonormalized()
 
 	# --- acrobatics (visual only) ------------------------------------------
-	if _trick_time > 0.0:
-		_trick_time -= dt
-		_flip -= TAU / 0.6 * dt  # one forward somersault
-	elif _roll_time > 0.0:
+	if _roll_time > 0.0:
 		_roll_time -= dt
 		_flip -= TAU / 0.55 * dt
-	elif air:
-		_flip += _flip_rate * dt
-		_flip_rate = move_toward(_flip_rate, 0.0, 2.2 * dt)
-	if _trick_time <= 0.0 and _roll_time <= 0.0:
-		var resid := wrapf(_flip, -PI, PI)
-		_flip = resid
-		if not air or absf(_flip_rate) < 0.3:
-			_flip = lerpf(_flip, 0.0, 1.0 - exp(-(10.0 if not air else 3.0) * dt))
-	var body := _body_basis * Basis(Vector3.RIGHT, _flip)
+	else:
+		_flip = lerpf(wrapf(_flip, -PI, PI), 0.0, 1.0 - exp(-10.0 * dt))
+	var trick_rot := Quaternion.IDENTITY
+	var trick_u := 0.0
+	if _trick != "":
+		_trick_t += dt
+		trick_u = clampf(_trick_t / _trick_dur, 0.0, 1.0)
+		trick_rot = _trick_rotation(_trick, trick_u)
+		if not air:
+			# Caught a web, landed or hit something mid-trick: ease out.
+			_resid = (_resid * trick_rot).normalized()
+			trick_rot = Quaternion.IDENTITY
+			_trick = ""
+		elif trick_u >= 1.0:
+			_trick = ""  # whole turns: ends exactly upright
+	trick = _trick
+	if _trick != "":
+		_last_trick_seen = _trick  # the bridge samples slowly: keep the last one
+	_resid = _resid.slerp(Quaternion.IDENTITY, 1.0 - exp(-9.0 * dt))
+	var body := _body_basis * Basis(_resid * trick_rot) * Basis(Vector3.RIGHT, _flip)
 	global_basis = body
 	_step_off = move_toward(_step_off, 0.0, dt * 2.2) * exp(-8.0 * dt)
 	global_position = player.global_position + Vector3.DOWN * _step_off
@@ -531,8 +677,11 @@ func _update_animated(dt: float) -> void:
 	var twist := clampf(_yaw_rate * 0.12, -0.55, 0.55)
 	var bob := 0.0
 
-	if _trick_time > 0.0 or _roll_time > 0.0:
-		# Tight tuck for flips and landing rolls.
+	if _trick != "" and _roll_time <= 0.0:
+		_pose_air(q, v, speed, la, dive, twist)
+		_pose_trick(q, _trick, trick_u)
+	elif _roll_time > 0.0:
+		# Tight tuck for landing rolls.
 		q["spine"] = _rx(0.55)
 		q["chest"] = _rx(0.35)
 		q["neck"] = _rx(0.2)
@@ -566,6 +715,13 @@ func _update_animated(dt: float) -> void:
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
 
 	_drive_springs(q, dt, on_rope)
+	if air:
+		_ground_t -= dt
+		if _ground_t <= 0.0:
+			_ground_t = 0.1
+			_ground_h = _probe_ground()
+	else:
+		_ground_h = INF
 	if _loco > 0.0 and grounded and not wall_run and _getup_t <= 0.0:
 		_plant_feet(dt)
 	else:
@@ -636,10 +792,12 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		q["thigh_" + sd] = _rx(thigh + _land_squash * 0.9 + brake * 0.3)
 		q["shin_" + sd] = _rx(-knee - _land_squash * 1.6)
 		q["foot_" + sd] = _rx(foot + _land_squash * 0.6)
-		# Arms swing against the legs; elbows bend to ~80° when running.
-		var asw := -sw * (1.0 if i == 0 else -1.0) * (0.22 + 0.63 * run) * mv - 0.12 * run
-		q["upper_arm_" + sd] = _rx(asw) * _rz((0.12 + 0.05 * run) * (1.0 if sd == "r" else -1.0))
-		q["forearm_" + sd] = _rx(0.15 + 0.95 * run + 0.15 * mv + maxf(0.0, asw) * 0.35)
+		# Arms swing against the legs from the shoulder; the elbow holds near
+		# 90° through the stride (closing a little on the forward swing), so
+		# the hands travel hip → chin rather than flailing up to the face.
+		var asw := -sw * (1.0 if i == 0 else -1.0) * (0.22 + 0.5 * run) * mv - 0.1 * run
+		q["upper_arm_" + sd] = _rx(asw) * _rz((0.14 + 0.06 * run) * (1.0 if sd == "r" else -1.0))
+		q["forearm_" + sd] = _rx(0.3 + 1.05 * run + 0.15 * mv + asw * 0.18)
 	_standing = false
 	if mv < 0.3:
 		# Idle: slow breathing, weight shifting from leg to leg, a glance about.
@@ -851,47 +1009,158 @@ func _ground_hit(space: PhysicsDirectSpaceState3D, at: Vector3) -> Dictionary:
 	return space.intersect_ray(rq)
 
 
-## Ballistic flight. Rising: the lead knee drives up and the other leg
-## trails, arms open forward/back for balance. Apex: both knees gather.
-## Falling: legs bend and reach for the ground, arms rise and windmill a
-## little when dropping fast. Fast steep descents streamline head-first.
+## Ballistic flight, blended by phase so it always reads as one body moving:
+##  * launch (rising): chest opens, arms sweep back and out, lead knee up;
+##  * apex: limbs gather, elbows out for balance;
+##  * falling: arms rise out to the sides, legs reach down;
+##  * freefall arch (fast fall, height to spare): belly down, arms in a "W",
+##    knees bent, toes pointed;
+##  * dive (fast, steep): head-first streamline, arms together overhead;
+##  * near the ground: legs come under the body to take the landing.
+## Elbows and knees always keep some bend – straight "zombie" limbs read wrong.
 func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float, twist: float) -> void:
-	var rising := clampf(v.y / 10.0, 0.0, 1.0)
-	var falling := clampf(-v.y / 14.0, 0.0, 1.0) * (1.0 - dive)
-	var apex := 1.0 - clampf(absf(v.y) / 5.0, 0.0, 1.0)
-	var fast := clampf((-v.y - 12.0) / 14.0, 0.0, 1.0) * (1.0 - dive)
-	var wm := sin(_time * 6.0) * fast * 0.45  # windmill when dropping hard
-	if dive > 0.0:
-		q["upper_arm_l"] = _rz(-0.25) * _rx(-0.45 * dive)
-		q["upper_arm_r"] = _rz(0.25) * _rx(-0.45 * dive)
-		q["forearm_l"] = _rx(0.15)
-		q["forearm_r"] = _rx(0.15)
-		q["thigh_l"] = _rx(0.05)
-		q["thigh_r"] = _rx(-0.15)
-		q["shin_l"] = _rx(-0.25)
-		q["shin_r"] = _rx(-0.45)
-		q["head"] = _rx(-0.5 * dive)
+	var rising := clampf(v.y / 12.0, 0.0, 1.0)
+	var falling := clampf(-v.y / 14.0, 0.0, 1.0)
+	var sky := _skydive(v, dive)
+	var near := clampf(1.0 - _ground_h / 7.0, 0.0, 1.0) * falling if _ground_h < INF else 0.0
+	var react := clampf(la.z * 0.015, -0.3, 0.3)
+	var drift := sin(_time * 2.1)  # a little life
+	# Apex / base.
+	var pose := {
+		"spine": _rx(0.06) * _ry(twist * 0.3), "chest": _rx(-0.04), "neck": _rx(0.0), "head": _rx(-0.05),
+		"upper_arm_l": _rz(-0.9 - drift * 0.05) * _ry(0.35) * _rx(0.6 + react),
+		"upper_arm_r": _rz(0.85 + drift * 0.05) * _ry(-0.35) * _rx(0.5 + react),
+		"forearm_l": _rx(1.05), "forearm_r": _rx(0.9),
+		"thigh_l": _rx(0.75) * _rz(-0.08), "thigh_r": _rx(0.35) * _rz(0.08),
+		"shin_l": _rx(-1.15), "shin_r": _rx(-0.85), "foot_l": _rx(-0.25), "foot_r": _rx(-0.3),
+	}
+	_put(q, pose, 1.0)
+	# Launch.
+	_put(q, {
+		"spine": _rx(-0.12) * _ry(twist * 0.3), "chest": _rx(-0.1), "head": _rx(-0.2),
+		"upper_arm_l": _rz(-0.55) * _rx(-0.5), "upper_arm_r": _rz(0.5) * _rx(-0.6),
+		"forearm_l": _rx(0.75), "forearm_r": _rx(0.6),
+		"thigh_l": _rx(0.85) * _rz(-0.05), "thigh_r": _rx(-0.25) * _rz(0.05),
+		"shin_l": _rx(-1.0), "shin_r": _rx(-0.45), "foot_l": _rx(-0.35), "foot_r": _rx(-0.55),
+	}, rising)
+	# Falling: arms up and out, legs reaching down a little apart.
+	_put(q, {
+		"spine": _rx(0.04), "chest": _rx(0.0), "head": _rx(0.15),
+		# Elbows bent, hands rising forward-up (balance, not a T-pose).
+		"upper_arm_l": _rz(-1.3 - drift * 0.08) * _ry(0.6) * _rx(0.55),
+		"upper_arm_r": _rz(1.25 + drift * 0.08) * _ry(-0.6) * _rx(0.45),
+		"forearm_l": _rx(1.15), "forearm_r": _rx(1.0),
+		"thigh_l": _rx(0.3) * _rz(-0.14), "thigh_r": _rx(0.02) * _rz(0.14),
+		"shin_l": _rx(-0.55), "shin_r": _rx(-0.7), "foot_l": _rx(-0.2), "foot_r": _rx(-0.25),
+	}, falling * (1.0 - sky))
+	# Freefall arch.
+	_put(q, {
+		"spine": _rx(-0.3), "chest": _rx(-0.15), "neck": _rx(-0.2), "head": _rx(-0.45),
+		# "W": upper arms out level, twisted so the elbows bend toward the
+		# head (the chest faces the ground here).
+		"upper_arm_l": _rz(-1.45) * _ry(1.57) * _rx(-0.15), "upper_arm_r": _rz(1.45) * _ry(-1.57) * _rx(-0.15),
+		"forearm_l": _rx(1.35 + drift * 0.08), "forearm_r": _rx(1.35 - drift * 0.08),
+		"thigh_l": _rx(-0.2) * _rz(-0.2), "thigh_r": _rx(-0.2) * _rz(0.2),
+		"shin_l": _rx(-1.05), "shin_r": _rx(-0.95), "foot_l": _rx(-0.5), "foot_r": _rx(-0.5),
+	}, sky)
+	# Landing prep.
+	_put(q, {
+		"spine": _rx(0.14), "chest": _rx(0.05), "head": _rx(0.2),
+		"upper_arm_l": _rz(-0.75) * _rx(0.75), "upper_arm_r": _rz(0.75) * _rx(0.7),
+		"forearm_l": _rx(0.6), "forearm_r": _rx(0.6),
+		"thigh_l": _rx(0.6) * _rz(-0.1), "thigh_r": _rx(0.4) * _rz(0.1),
+		"shin_l": _rx(-0.8), "shin_r": _rx(-0.6), "foot_l": _rx(0.1), "foot_r": _rx(0.05),
+	}, near)
+	# Dive: streamlined, arms together overhead, toes pointed.
+	_put(q, {
+		"spine": _rx(0.08), "chest": _rx(0.0), "neck": _rx(0.15), "head": _rx(-0.35),
+		"upper_arm_l": _rx(2.85) * _rz(0.12), "upper_arm_r": _rx(2.85) * _rz(-0.12),
+		"forearm_l": _rx(0.15), "forearm_r": _rx(0.15),
+		"thigh_l": _rx(0.05) * _rz(0.03), "thigh_r": _rx(-0.05) * _rz(-0.03),
+		"shin_l": _rx(-0.15), "shin_r": _rx(-0.25), "foot_l": _rx(-0.7), "foot_r": _rx(-0.7),
+	}, dive)
+
+
+## 0..1 how much the freefall arch applies: falling fast, not diving, with
+## room below (it gives way to the landing prep near the ground).
+func _skydive(v: Vector3, dive: float) -> float:
+	var room := clampf((_ground_h - 8.0) / 8.0, 0.0, 1.0) if _ground_h < INF else 1.0
+	return clampf((-v.y - 13.0) / 10.0, 0.0, 1.0) * (1.0 - dive) * room
+
+
+static func _put(q: Dictionary, pose: Dictionary, w: float) -> void:
+	if w <= 0.001:
 		return
-	# Legs.
-	var lead_t := 0.45 + 1.0 * rising + 0.55 * apex + 0.3 * falling
-	var lead_s := -0.55 - 0.8 * rising - 0.5 * apex - 0.35 * falling
-	var trail_t := -0.4 * rising + 0.35 * apex + 0.15 * falling
-	var trail_s := -0.5 - 0.2 * rising - 0.45 * apex - 0.4 * falling
-	q["thigh_l"] = _rx(lead_t + wm * 0.3) * _rz(-0.08)
-	q["shin_l"] = _rx(lead_s)
-	q["thigh_r"] = _rx(trail_t - wm * 0.3) * _rz(0.06)
-	q["shin_r"] = _rx(trail_s)
-	q["foot_l"] = _rx(0.25)
-	q["foot_r"] = _rx(0.15 + 0.2 * rising)
-	# Arms: opposite to the legs while rising, out and up while falling.
-	var react := clampf(la.z * 0.02, -0.4, 0.4)
-	q["upper_arm_l"] = _rz(-0.35 - 0.75 * falling - wm) * _rx(-0.45 * rising + 0.35 * apex + 0.5 * falling + react)
-	q["upper_arm_r"] = _rz(0.35 + 0.75 * falling + wm) * _rx(0.75 * rising + 0.35 * apex + 0.6 * falling + react)
-	q["forearm_l"] = _rx(0.5 + 0.2 * apex)
-	q["forearm_r"] = _rx(0.6 + 0.3 * rising)
-	q["spine"] = _rx(0.12 * apex + 0.08 * falling - 0.08 * rising) * _ry(twist * 0.3)
-	q["chest"] = _ry(-0.15 * rising)
-	q["head"] = _rx(clampf(-v.y * 0.015, -0.3, 0.35))
+	for b in pose:
+		q[b] = (q[b] as Quaternion).slerp(pose[b], clampf(w, 0.0, 1.0))
+
+
+## Body rotation of a trick at progress u (0..1), in the body frame.
+func _trick_rotation(name: String, u: float) -> Quaternion:
+	var t: Dictionary = TRICKS[name]
+	var e := u * u * u * (u * (u * 6.0 - 15.0) + 10.0)  # smootherstep: slow–fast–slow
+	var r := Quaternion(Vector3.RIGHT, float(t["flip"]) * e)
+	if float(t["twist"]) != 0.0:
+		r = r * Quaternion(Vector3.UP, float(t["twist"]) * _trick_dir * e)
+	if float(t["roll"]) != 0.0:
+		r = r * Quaternion(Vector3.BACK, float(t["roll"]) * _trick_dir * e)
+	return r
+
+
+## Limb shapes held through a trick; k rises into it and opens out at the end
+## (open early enough to spot the landing).
+func _pose_trick(q: Dictionary, name: String, u: float) -> void:
+	var k := sin(PI * clampf(u * 1.1, 0.0, 1.0))
+	k = sqrt(maxf(k, 0.0))
+	var side := _trick_dir
+	match TRICKS[name]["shape"]:
+		"tuck":
+			_put(q, {
+				"spine": _rx(0.6), "chest": _rx(0.35), "neck": _rx(0.25), "head": _rx(0.35),
+				"thigh_l": _rx(2.05) * _rz(-0.08), "thigh_r": _rx(2.05) * _rz(0.08),
+				"shin_l": _rx(-2.3), "shin_r": _rx(-2.3), "foot_l": _rx(-0.4), "foot_r": _rx(-0.4),
+				"upper_arm_l": _rx(1.25) * _rz(-0.2), "upper_arm_r": _rx(1.25) * _rz(0.2),
+				"forearm_l": _rx(1.55), "forearm_r": _rx(1.55),
+			}, k)
+		"pike":
+			_put(q, {
+				"spine": _rx(0.7), "chest": _rx(0.3), "neck": _rx(0.2), "head": _rx(0.3),
+				"thigh_l": _rx(1.75), "thigh_r": _rx(1.75), "shin_l": _rx(-0.08), "shin_r": _rx(-0.08),
+				"foot_l": _rx(-0.6), "foot_r": _rx(-0.6),
+				"upper_arm_l": _rx(1.9) * _rz(-0.1), "upper_arm_r": _rx(1.9) * _rz(0.1),
+				"forearm_l": _rx(0.15), "forearm_r": _rx(0.15),
+			}, k)
+		"layout":
+			# Arms sweep overhead out of the take-off, then open to the sides.
+			var over := 1.0 - smoothstep(0.15, 0.6, u)
+			_put(q, {
+				"spine": _rx(-0.18), "chest": _rx(-0.12), "head": _rx(-0.25),
+				"thigh_l": _rx(-0.05), "thigh_r": _rx(-0.05), "shin_l": _rx(-0.08), "shin_r": _rx(-0.08),
+				"foot_l": _rx(-0.65), "foot_r": _rx(-0.65),
+				"upper_arm_l": (_rx(2.7) * _rz(0.1)).slerp(_rz(-1.5) * _rx(-0.1), 1.0 - over),
+				"upper_arm_r": (_rx(2.7) * _rz(-0.1)).slerp(_rz(1.5) * _rx(-0.1), 1.0 - over),
+				"forearm_l": _rx(0.2), "forearm_r": _rx(0.2),
+			}, k)
+		"twist", "pencil":
+			# Arms pulled tight across the chest spin you faster (and look it).
+			var open := 1.0 - smoothstep(0.1, 0.3, u) + smoothstep(0.8, 1.0, u)
+			var tight := {
+				"spine": _rx(-0.05), "chest": _rx(0.0), "head": _rx(-0.05),
+				"thigh_l": _rx(0.02) * _rz(0.04), "thigh_r": _rx(0.02) * _rz(-0.04),
+				"shin_l": _rx(-0.06), "shin_r": _rx(-0.1), "foot_l": _rx(-0.7), "foot_r": _rx(-0.7),
+				"upper_arm_l": _rz(-0.15) * _rx(0.55) * _ry(0.5), "upper_arm_r": _rz(0.15) * _rx(0.5) * _ry(-0.5),
+				"forearm_l": _rx(2.1), "forearm_r": _rx(2.2),
+			}
+			_put(q, tight, k * (1.0 - clampf(open, 0.0, 1.0) * 0.7))
+		"split":
+			# Cartwheel: arms and legs wide, a star.
+			_put(q, {
+				"spine": _rz(-0.08 * side), "chest": _rx(-0.05), "head": _rz(0.1 * side),
+				"thigh_l": _rz(-0.95) * _rx(0.1), "thigh_r": _rz(0.95) * _rx(0.1),
+				"shin_l": _rx(-0.15), "shin_r": _rx(-0.15), "foot_l": _rx(-0.5), "foot_r": _rx(-0.5),
+				"upper_arm_l": _rz(-2.2) * _rx(0.1), "upper_arm_r": _rz(2.2) * _rx(0.1),
+				"forearm_l": _rx(0.25), "forearm_r": _rx(0.25),
+			}, k)
 
 
 ## Running up a facade after a head-on hit: quick high-knee steps against the
@@ -1001,7 +1270,6 @@ func _on_stun_ended() -> void:
 	ragdolling = false
 	_getup_t = GETUP_TIME if player.is_on_floor() else 0.0
 	_flip = 0.0
-	_flip_rate = 0.0
 	_body_basis = global_basis.orthonormalized()
 
 

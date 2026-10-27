@@ -111,20 +111,100 @@ func test_animation_never_affects_physics(t) -> void:
 	bare.queue_free()
 
 
-func test_head_on_wall_hit_becomes_a_wall_run(t) -> void:
-	# Survivable head-on hit (between ragdoll_impact_speed and wall_run_max_speed).
-	player.respawn(Vector3(0, 40, -10))
+func test_slow_head_on_wall_hit_becomes_a_wall_run(t) -> void:
+	# Survivable head-on hit (between hard_impact_speed and wall_run_max_speed).
+	player.respawn(Vector3(0, 40, -24))
 	await get_tree().physics_frame
-	player.s.velocity = Vector3(0, 0, -40)
+	player.s.velocity = Vector3(0, 2, -19)
 	var top := 0.0
 	var stunned := false
-	for i in 150:  # the face is ~42 m away: hit after ~1 s, then the run up
+	var hit_y := 0.0
+	for i in 150:  # the face is ~8 m away: hit after ~0.4 s, then the run up
 		await get_tree().physics_frame
+		if hit_y == 0.0 and player.global_position.z < -30.5:
+			hit_y = player.global_position.y
 		top = maxf(top, player.global_position.y)
 		stunned = stunned or player.stunned
-	t.check(not stunned, "no ragdoll at 40 m/s head-on")
-	t.note("wall run peak %.1f m above the hit" % (top - 40.0))
-	t.check(top > 45.0, "runs up the facade")
+	t.check(not stunned, "no knockout at 19 m/s head-on")
+	t.note("wall run peak %.1f m above the hit" % (top - hit_y))
+	t.check(top > hit_y + 2.0, "runs up the facade")
+
+
+## Shared: fly head-on into the tower face at `speed`, optionally pressing
+## JUMP `jump_before` seconds before contact. Returns what happened.
+func _wall_hit(speed: float, jump_before := -1.0) -> Dictionary:
+	var drive := _Idle.new()
+	player.bot = drive
+	player.respawn(Vector3(0, 40, -20))
+	await get_tree().physics_frame
+	player.s.velocity = Vector3(0, 1, -speed)
+	var res := {"ko": false, "saved": false, "bounce_z": 0.0, "down": 0.0, "ragdoll": false, "head_out": 0.0}
+	var on_ko := func(_s, _n): res["ko"] = true
+	var on_save := func(_s): res["saved"] = true
+	player.knockout.connect(on_ko)
+	player.wall_saved.connect(on_save)
+	var hit_at := 12.0 / speed  # face at z = -32
+	var t := 0.0
+	var head0 := INF
+	for i in 60 * 6:
+		drive.jump = jump_before >= 0.0 and absf(t - (hit_at - jump_before)) < 0.5 / 60.0
+		await get_tree().physics_frame
+		t += 1.0 / 60.0
+		if res["ko"] and res["bounce_z"] == 0.0:
+			res["bounce_z"] = player.s.velocity.z
+		if rig.ragdolling:
+			res["ragdoll"] = true
+			# Head relative to the pelvis, along the wall normal (+z here).
+			var rel: float = (rig.ragdoll.pos["head"] as Vector3).z - (rig.ragdoll.pos["pelvis"] as Vector3).z
+			if head0 == INF:
+				head0 = rel
+			res["head_out"] = maxf(res["head_out"], rel - head0)
+		if player.stunned:
+			res["down"] += 1.0 / 60.0
+		elif res["down"] > 0.0:
+			break
+	player.knockout.disconnect(on_ko)
+	player.wall_saved.disconnect(on_save)
+	player.bot = _Idle.new()
+	return res
+
+
+func test_fast_head_on_wall_hit_knocks_you_out(t) -> void:
+	var r := await _wall_hit(35.0)
+	t.note("knockout at 35 m/s: bounced %.1f m/s off the wall, head thrown %.2f m back relative to the hips, down %.1f s" % [
+		r["bounce_z"], r["head_out"], r["down"]])
+	t.check(r["ko"] and r["ragdoll"], "knocked out: the body goes limp")
+	t.check(r["bounce_z"] > 1.0, "bounces off the facade, not stuck to it")
+	t.check(r["head_out"] > 0.15, "the head snaps back off the impact (whiplash)")
+	t.check(r["down"] >= player.params.knockout_time, "stays down at least knockout_time")
+
+
+func test_timed_jump_kicks_off_instead(t) -> void:
+	var early := await _wall_hit(35.0, 0.5)   # too early: the window has closed
+	var timed := await _wall_hit(35.0, 0.1)
+	t.note("JUMP 0.5 s early: ko=%s; 0.1 s before: saved=%s ko=%s" % [early["ko"], timed["saved"], timed["ko"]])
+	t.check(early["ko"] and not early["saved"], "jumping too early does not save you")
+	t.check(timed["saved"] and not timed["ko"], "JUMP just before the wall kicks off it")
+
+
+func test_knockout_hit_stop_restores_time(t) -> void:
+	var fx := ImpactFx.new()
+	add_child(fx)
+	fx.knockout(35.0)
+	t.check(Engine.time_scale < 0.1, "the hit freezes the action")
+	var slow_seen := false
+	var start := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start < 2500 and Engine.time_scale < 1.0:
+		await get_tree().process_frame
+		slow_seen = slow_seen or (Engine.time_scale > 0.2 and Engine.time_scale < 0.5)
+	var took := (Time.get_ticks_msec() - start) / 1000.0
+	t.note("hit-stop + slow motion lasted %.2f s of real time" % took)
+	t.check(slow_seen, "then plays out in slow motion")
+	t.check(Engine.time_scale == 1.0 and took < 1.6, "and returns to full speed")
+	fx.knockout(35.0)
+	fx.cancel()
+	t.check(Engine.time_scale == 1.0, "cancel restores time at once (respawn / pause)")
+	fx.queue_free()
 
 
 func test_crash_ragdolls_then_recovers(t) -> void:
@@ -171,5 +251,6 @@ func test_crash_on_the_rope_keeps_the_web(t) -> void:
 
 class _Idle:
 	extends RefCounted
+	var jump := false
 	func drive(_p, _dt) -> Dictionary:
-		return {"move": Vector3.ZERO, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+		return {"move": Vector3.ZERO, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": jump}

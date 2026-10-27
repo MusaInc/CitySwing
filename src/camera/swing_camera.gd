@@ -60,6 +60,8 @@ var _turn_rate := 0.0
 var _lift := 0.0           # smoothed framing lift toward the line
 var _pick_bias := Vector3.ZERO
 var _crane := 0.0          # 0..1 lift over the shoulder when squeezed
+var _shake := 0.0          # metres of positional shake (decays)
+var _shake_t := 0.0
 var _body: Node3D          # the character, hidden if the lens gets inside it
 ## Overrides for close-up captures (--closeup).
 var distance_scale := 1.0
@@ -86,6 +88,12 @@ func set_target(p: Player) -> void:
 	p.perfect_release.connect(func(_n): _fov_kick = minf(_fov_kick + 7.0, 10.0); _punch = 1.0)
 	p.landed.connect(func(spd: float, _street: bool): _bump_v -= clampf(spd * 0.09, 0.0, 2.6))
 	p.attached.connect(func(_a: Vector3): _tug_v += clampf(target.speed() * 0.04, 0.4, 1.6))
+
+
+## A jolt (knockouts): decaying, low-frequency shake plus a FOV punch-in.
+func shake(amount: float) -> void:
+	_shake = maxf(_shake, amount)
+	_fov_kick -= amount * 6.0
 
 
 func snap() -> void:
@@ -225,6 +233,14 @@ func _process(dt: float) -> void:
 	if _crane > 0.01:
 		var up := _ray_clear(placed, placed + Vector3.UP * 2.2 * _crane)
 		placed = up
+	if _shake > 0.002:
+		# Real time, so the shake still reads while the game is in slow motion.
+		var rt := dt / maxf(Engine.time_scale, 0.05)
+		_shake_t += rt
+		var n := Vector3(sin(_shake_t * 37.0), sin(_shake_t * 29.0 + 1.3), sin(_shake_t * 41.0 + 2.1))
+		placed += n * _shake
+		shaken += n * _shake * 0.35
+		_shake *= exp(-4.5 * rt)
 	global_position = placed
 	look_at(shaken + Vector3.DOWN * 0.4 * _crane, Vector3.UP)
 	# Never film the inside of the character.
@@ -237,7 +253,7 @@ func _process(dt: float) -> void:
 	_roll = lerpf(_roll, roll_goal, 1.0 - exp(-2.5 * dt))
 	rotate_object_local(Vector3.FORWARD, _roll)
 
-	_fov_kick = move_toward(_fov_kick, 0.0, 5.0 * dt)
+	_fov_kick = move_toward(_fov_kick, 0.0, 5.0 * dt / maxf(Engine.time_scale, 0.05))
 	_punch = move_toward(_punch, 0.0, dt * 2.5)
 	var fov_goal := lerpf(base_fov, max_fov, t * t * (3.0 - 2.0 * t)) + _fov_kick
 	cam.fov = lerpf(cam.fov, fov_goal, 1.0 - exp(-(3.0 + 9.0 * _punch) * dt))

@@ -88,11 +88,13 @@ func test_skill_gap_expert_vs_novice(t) -> void:
 	t.note("expert distances %s (cleared %d/%d), novice %s" % [ed, cleared, experts.size(), nd])
 	# Mistakes cost time rather than ending the run (wall runs), so novices
 	# survive longer than they used to; the gap is in who actually clears it.
-	t.check(ed[2] > nd[2], "skilled timing goes further (median %.0f m vs %.0f m)" % [ed[2], nd[2]])
-	# 4/5 before the web pick counted sideways (orbiting) swings as flyable –
-	# needed for stick steering; the city feel report improved with it.
-	t.check(cleared >= 3 and ed[2] >= 400.0,
-		"skilled timing mostly clears the range without touching the street (%d/5, median %.0f m)" % [cleared, ed[2]])
+	t.check(ed[2] > nd[2] * 2.0, "skilled timing goes much further (median %.0f m vs %.0f m)" % [ed[2], nd[2]])
+	# Walls are lethal now (head-on ≥ wall_run_max_speed = knocked out) and
+	# this corridor is tight: the expert reads walls (re-webs or times a
+	# wall-kick save) and still clears it sometimes; novices fly into the
+	# first tower. Before lethal walls: ≥3/5 cleared, median ≥400 m.
+	t.check(cleared >= 2 and ed[2] >= 300.0,
+		"skilled timing gets well down the range (%d/5 cleared, median %.0f m)" % [cleared, ed[2]])
 	var novice_fails := 0
 	for r in novices:
 		if r["street"] or r["best_z"] > -420.0:

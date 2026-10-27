@@ -29,8 +29,9 @@ var hand_pin := Vector3.INF
 var exclude: Array[RID] = []
 
 
-## joints: name -> world position (from the current pose); vel: body velocity.
-func start(joints: Dictionary, vel: Vector3, spin: Vector3) -> void:
+## joints: name -> world position (from the current pose); vel: body velocity;
+## part_vel: optional extra velocity per particle (e.g. whiplash on impact).
+func start(joints: Dictionary, vel: Vector3, spin: Vector3, part_vel := {}) -> void:
 	pos.clear()
 	prev.clear()
 	links.clear()
@@ -39,7 +40,7 @@ func start(joints: Dictionary, vel: Vector3, spin: Vector3) -> void:
 		var p: Vector3 = joints[n]
 		pos[n] = p
 		# Initial velocity: body velocity plus a little tumble about the pelvis.
-		prev[n] = p - (vel + spin.cross(p - c)) * STEP
+		prev[n] = p - (vel + spin.cross(p - c) + (part_vel.get(n, Vector3.ZERO) as Vector3)) * STEP
 	for pair in [["pelvis", "chest"], ["chest", "neck"], ["neck", "head"], ["chest", "sh_l"], ["chest", "sh_r"],
 			["sh_l", "sh_r"], ["pelvis", "sh_l"], ["pelvis", "sh_r"], ["pelvis", "hip_l"], ["pelvis", "hip_r"],
 			["hip_l", "hip_r"], ["chest", "hip_l"], ["chest", "hip_r"], ["neck", "sh_l"], ["neck", "sh_r"],
