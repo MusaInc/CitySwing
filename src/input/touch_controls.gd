@@ -1,7 +1,9 @@
 class_name TouchControls
 extends Control
 ## Landscape two-thumb controls with per-finger roles (tracked by touch index).
-##   Left side  : floating analogue stick → move_* actions.
+##   Left side  : floating analogue stick → move_* actions. It also steers
+##                the web: pushed, it turns the assisted pick toward its
+##                direction (see GrappleTargeting).
 ##   JUMP       : button (jump, wall-kick, mid-air flip).
 ##   Right side : the web. The big SWING button marks it, but any touch on the
 ##                right (outside JUMP / pause) counts – hard to miss mid-swing.
@@ -36,7 +38,7 @@ var _font: Font
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_font = ThemeDB.fallback_font
+	_font = UiStyle.font("bold")
 	resized.connect(_update_safe)
 	_update_safe()
 	visibility_changed.connect(func(): if not visible: release_all())
@@ -187,13 +189,28 @@ func _process(_dt: float) -> void:
 func _draw() -> void:
 	var white := Color(1, 1, 1, 0.85)
 	var faint := Color(1, 1, 1, 0.16)
+	var shade := Color(0, 0, 0, 0.22)
 	if _has_kind("stick"):
+		draw_circle(_stick_origin, STICK_RADIUS + 3.0, shade)
 		draw_circle(_stick_origin, STICK_RADIUS, faint)
 		draw_arc(_stick_origin, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.35), 2.0, true)
-		draw_circle(_stick_pos, 34.0, Color(1, 1, 1, 0.55))
+		var d := _stick_pos - _stick_origin
+		if d.length() > 14.0:
+			# Steering: a gold chevron on the rim where the web will lean.
+			var u := d.normalized()
+			var tip := _stick_origin + u * (STICK_RADIUS + 16.0)
+			var side := Vector2(-u.y, u.x)
+			var k := clampf(d.length() / STICK_RADIUS, 0.0, 1.0)
+			draw_colored_polygon(PackedVector2Array([tip, tip - u * 14.0 + side * 11.0, tip - u * 14.0 - side * 11.0]),
+				Color(UiStyle.GOLD, 0.4 + 0.5 * k))
+			draw_arc(_stick_origin, STICK_RADIUS, d.angle() - 0.5 * k, d.angle() + 0.5 * k, 12, Color(UiStyle.GOLD, 0.8), 4.0, true)
+		draw_circle(_stick_pos, 36.0, shade)
+		draw_circle(_stick_pos, 34.0, Color(1, 1, 1, 0.6))
 	else:
 		var hint := Vector2(_safe.position.x + 150, _safe.end.y - 150)
-		draw_arc(hint, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.18), 2.0, true)
+		draw_arc(hint, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.2), 2.0, true)
+		var lw := _font.get_string_size("MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		draw_string(_font, hint + Vector2(-lw / 2.0, 5), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.38))
 	var web_down := _has_kind("web")
 	var jump_down := false
 	for t in touches.values():
@@ -207,12 +224,19 @@ func _draw() -> void:
 		var fill := Color(1, 1, 1, 0.34 if down else 0.12)
 		if action == "grapple" and (ready or down) and Settings.aim_mode != "tap":
 			fill = Color(1.0, 0.78, 0.35, 0.55 if down else 0.28)
+		draw_circle(c, b["r"] + 3.0, shade)
 		draw_circle(c, b["r"], fill)
-		draw_arc(c, b["r"], 0, TAU, 48, white if down else Color(1, 1, 1, 0.5), 2.5, true)
-		var fs := 24 if action == "grapple" else 15
+		var ring := white if down else Color(1, 1, 1, 0.5)
+		if action == "grapple" and ready and Settings.aim_mode != "tap":
+			ring = Color(UiStyle.GOLD, 0.95)
+			draw_arc(c, b["r"] + 9.0, 0, TAU, 56, Color(UiStyle.GOLD, 0.35), 3.0, true)
+		draw_arc(c, b["r"], 0, TAU, 48, ring, 3.0, true)
+		var fs := 26 if action == "grapple" else 16
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(_font, c + Vector2(-tw / 2.0 + 1, fs * 0.35 + 2), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.35))
 		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, white)
 	var pp := Vector2(_safe.end.x - 44, _safe.position.y + 44)
+	draw_circle(pp, 26, shade)
 	draw_circle(pp, 24, faint)
 	draw_rect(Rect2(pp + Vector2(-8, -9), Vector2(5, 18)), white)
 	draw_rect(Rect2(pp + Vector2(3, -9), Vector2(5, 18)), white)

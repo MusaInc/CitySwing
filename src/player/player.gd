@@ -249,7 +249,10 @@ func _physics_process(dt: float) -> void:
 
 	var origin := hand_position()
 	targeting.update(get_world_3d().direct_space_state, origin, aim_dir, s.velocity, params,
-		is_on_floor(), [get_rid()])
+		is_on_floor(), [get_rid()], _move_smooth)
+	if line_state == Line.IDLE or line_state == Line.ATTACHED:
+		s.position = global_position
+		targeting.refresh_pick(get_world_3d().direct_space_state, s, params, [get_rid()], dt)
 
 	# Assisted grapple (button/autopilot). Touch webs are driven by fire_at/release_web.
 	# While stunned the hand stays clenched on the line: input can't release it.

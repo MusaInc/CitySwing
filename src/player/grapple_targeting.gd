@@ -3,6 +3,16 @@ extends RefCounted
 ## Finds the best attach point on real building collision geometry by fanning
 ## rays around the aim heading. Only bodies on the "grappleable" physics layer
 ## (layer 2) are candidates, so streets, props and the player never qualify.
+##
+## Steering: while the left stick is pushed, the fan turns toward the stick
+## direction, so the stick picks where the next web goes.
+## Choosing: the best-ranked candidates are flown through with the real
+## SwingPhysics model (the arc, then a short flight after a release at the
+## top of the up-swing). Swings that hit a building or the street are out;
+## the rest are ranked by the speed they carry out of the arc in the wanted
+## direction and the height they keep. `pick` is that choice (refreshed a few
+## times a second, so the reticle shows the web you will actually get) and
+## `pick_path` the predicted body path for the HUD preview.
 
 const GRAPPLE_MASK := 1 << 1
 const ELEVATIONS := [30.0, 42.0, 55.0, 68.0, 80.0]
@@ -13,17 +23,33 @@ var point := Vector3.ZERO
 var normal := Vector3.ZERO
 var score := 0.0
 var _candidates: Array = []  # [score, point, normal], best first
+## Predicted best swing (see header). pick_ok = a pick exists.
+var pick_ok := false
+var pick := Vector3.ZERO
+var pick_gain := 0.0          # exit speed along the wanted direction (m/s)
+var pick_path := PackedVector3Array()
+var heading := Vector3.FORWARD  # the wanted direction (horizontal, unit)
+var _pick_age := INF
+
+const PREDICT_TOP := 6           # candidates flown through per evaluation
+const PICK_REFRESH := 0.12       # s between evaluations
+const STREET_CLEARANCE := 10.0   # m: arcs bottoming out lower than this rank down
 
 
 ## `aim` is the camera's forward vector; `travel` is the player's velocity.
+## `steer` is the stick direction in world space (zero when not pushed).
 func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, travel: Vector3,
-		p: SwingParams, grounded: bool, exclude: Array[RID]) -> void:
+		p: SwingParams, grounded: bool, exclude: Array[RID], steer := Vector3.ZERO) -> void:
 	has_target = false
 	score = -INF
-	var heading := Vector3(aim.x, 0.0, aim.z)
+	heading = Vector3(aim.x, 0.0, aim.z)
 	if heading.length_squared() < 0.0001:
 		heading = Vector3.FORWARD
 	heading = heading.normalized()
+	var st := Vector3(steer.x, 0.0, steer.z)
+	if st.length() > 0.25:
+		# The stick wins: fully at full deflection.
+		heading = heading.slerp(st.normalized(), clampf((st.length() - 0.25) / 0.5, 0.0, 1.0)).normalized()
 	var travel_h := Vector3(travel.x, 0.0, travel.z)
 	var speed := travel_h.length()
 	# Aim pitch nudges which elevation band is preferred (look up = steeper anchors).
@@ -32,8 +58,24 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 	q.collision_mask = GRAPPLE_MASK
 	q.exclude = exclude
 	var candidates: Array = []
-	for el in ELEVATIONS:
-		for yw in YAWS:
+	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, ELEVATIONS, YAWS, candidates)
+	# (Tried: a ±65–90° side fan when nothing ahead qualifies. Novices flew
+	# further, but skilled runs grabbed orbiting side webs and hit the street
+	# 3× as often. Steering covers it: push the stick toward the tower.)
+	candidates.sort_custom(func(a, b): return a[0] > b[0])
+	_candidates = candidates
+	if not candidates.is_empty():
+		score = candidates[0][0]
+		has_target = true
+		point = candidates[0][1]
+		normal = candidates[0][2]
+
+
+func _scan(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vector3, travel_h: Vector3, speed: float,
+		aim_pitch: float, p: SwingParams, grounded: bool, q: PhysicsRayQueryParameters3D, elevations: Array,
+		yaws: Array, candidates: Array) -> void:
+	for el in elevations:
+		for yw in yaws:
 			var dir := heading.rotated(Vector3.UP, deg_to_rad(yw))
 			var e := deg_to_rad(el)
 			dir = (dir * cos(e) + Vector3.UP * sin(e)).normalized()
@@ -64,35 +106,85 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 			if bottom < 2.0:
 				s -= (2.0 - bottom) * 0.04
 			candidates.append([s, pt, hit["normal"]])
-	candidates.sort_custom(func(a, b): return a[0] > b[0])
-	_candidates = candidates
-	if not candidates.is_empty():
-		score = candidates[0][0]
-		has_target = true
-		point = candidates[0][1]
-		normal = candidates[0][2]
 
 
-## At the moment of firing: walk down the ranked candidates and return the
-## first whose swing, predicted with the real SwingPhysics model, comes out of
-## the bottom of the arc without hitting a building or the street. Falls back
-## to the top-ranked point if none does.
+## Re-evaluates `pick` when it is stale (call every tick; cheap otherwise).
+func refresh_pick(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, p: SwingParams,
+		exclude: Array[RID], dt: float, force := false) -> void:
+	_pick_age += dt
+	if not has_target:
+		pick_ok = false
+		pick_path.clear()
+		return
+	if not force and _pick_age < PICK_REFRESH:
+		return
+	_pick_age = 0.0
+	var best := -INF
+	pick_ok = false
+	# Fly the best-ranked candidates, but spread out: neighbours on the same
+	# wall usually share a fate, so one per few metres.
+	var tried: Array[Vector3] = []
+	for i in _candidates.size():
+		if tried.size() >= PREDICT_TOP:
+			break
+		var pt: Vector3 = _candidates[i][1]
+		var near := false
+		for q in tried:
+			if q.distance_to(pt) < 6.0:
+				near = true
+				break
+		if near:
+			continue
+		tried.append(pt)
+		var r := predict_swing(space, from_state, pt, p, exclude, heading)
+		if not r["clear"]:
+			continue
+		var exit_v: Vector3 = r["exit_v"]
+		var gain := exit_v.dot(heading)
+		# Ranking: momentum carried out along the wanted direction, height
+		# kept, then the static score (aim agreement, rope length, …).
+		var sc: float = gain / 25.0 + clampf(exit_v.y / 25.0, -0.3, 0.5) \
+			+ clampf(r["min_y"] - from_state.position.y + 10.0, -10.0, 10.0) * 0.02 + _candidates[i][0]
+		if not r["released"]:
+			sc -= 0.8  # never came back up inside the window: a plunge, not a swing
+		sc -= maxf(0.0, STREET_CLEARANCE - r["min_y"]) * 0.0  # skimming the street
+		if sc > best:
+			best = sc
+			pick_ok = true
+			pick = pt
+			pick_gain = gain
+			pick_path = r["path"]
+	if not pick_ok:
+		pick_path.clear()
+
+
+## At the moment of firing: the predicted best swing (fresh), falling back
+## to the top-ranked point if every candidate's swing hits something.
+## (Tried: falling back to the swing that stays clear longest – worse.)
 func best_flyable(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, p: SwingParams,
 		exclude: Array[RID]) -> Vector3:
-	for i in mini(_candidates.size(), 8):
-		var pt: Vector3 = _candidates[i][1]
-		if predict_swing_clear(space, from_state, pt, p, exclude):
-			return pt
-	return point
+	refresh_pick(space, from_state, p, exclude, 0.0, true)
+	return pick if pick_ok else point
 
 
 static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, anchor: Vector3,
 		p: SwingParams, exclude: Array[RID]) -> bool:
+	return predict_swing(space, from_state, anchor, p, exclude, Vector3.ZERO)["clear"]
+
+
+## Flies a swing from `anchor` with the real model: through the bottom of the
+## arc, a release once it has been rising for 0.35 s, then 0.6 s of free
+## flight. clear = no building or street on the way; exit_v = velocity at the
+## release; min_y = lowest point; path = sampled body positions.
+static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, anchor: Vector3,
+		p: SwingParams, exclude: Array[RID], _heading: Vector3) -> Dictionary:
+	var out := {"clear": false, "released": false, "exit_v": Vector3.ZERO, "min_y": from_state.position.y,
+		"path": PackedVector3Array()}
 	var s := SwingPhysics.State.new()
 	s.position = from_state.position
 	s.velocity = from_state.velocity
 	if not SwingPhysics.attach(s, anchor, p):
-		return false
+		return out
 	var c := SwingPhysics.Controls.new()
 	var attach_length := s.rope_length
 	var q := PhysicsRayQueryParameters3D.new()
@@ -101,9 +193,14 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 	var dt := 1.0 / 30.0
 	var rising := 0.0
 	var passed_bottom := false
-	for i in 60:
+	var released := -1.0
+	var prev_vy := s.velocity.y
+	var path: PackedVector3Array = out["path"]
+	path.append(s.position)
+	for i in 80:
 		var a := s.position
-		c.reel = SwingPhysics.auto_tighten(s, p, attach_length)  # same pull as the real player
+		if released < 0.0:
+			c.reel = SwingPhysics.auto_tighten(s, p, attach_length)  # same pull as the real player
 		SwingPhysics.step(s, c, p, dt)
 		var dir := s.position - a
 		q.from = a
@@ -111,14 +208,34 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 		# (Street contact is caught by the ray – the street is in the mask – so a
 		# launch from street level isn't rejected just for starting low.)
 		if not space.intersect_ray(q).is_empty():
-			return false
-		var below := (s.position - anchor).normalized().angle_to(Vector3.DOWN) < deg_to_rad(15.0)
-		passed_bottom = passed_bottom or below
+			out["path"] = path
+			return out
+		if i % 2 == 0:
+			path.append(s.position)
+		out["min_y"] = minf(out["min_y"], s.position.y)
+		if released >= 0.0:
+			released += dt
+			if released > 0.6:
+				out["clear"] = true
+				break
+			continue
+		# The bottom of the arc: the body stops falling and starts to climb
+		# (also true of sideways swings that orbit a tower corner).
+		passed_bottom = passed_bottom or (prev_vy <= 0.0 and s.velocity.y > 0.0)
+		prev_vy = s.velocity.y
 		if passed_bottom and s.velocity.y > 0.0:
 			rising += dt
 			if rising > 0.35:
-				return true
-	return passed_bottom
+				out["exit_v"] = s.velocity
+				out["released"] = true
+				SwingPhysics.release(s)
+				released = 0.0
+	# Collisions return early: reaching here means nothing was hit.
+	out["clear"] = true
+	if released < 0.0:
+		out["exit_v"] = s.velocity  # still on the line at the end of the window
+	out["path"] = path
+	return out
 
 
 static func _score(dir: Vector3, heading: Vector3, travel_h: Vector3, speed: float, rise: float,

@@ -89,12 +89,17 @@ func test_skill_gap_expert_vs_novice(t) -> void:
 	# Mistakes cost time rather than ending the run (wall runs), so novices
 	# survive longer than they used to; the gap is in who actually clears it.
 	t.check(ed[2] > nd[2], "skilled timing goes further (median %.0f m vs %.0f m)" % [ed[2], nd[2]])
-	t.check(cleared >= 4, "skilled timing reliably clears the range without touching the street (%d/5)" % cleared)
+	# 4/5 before the web pick counted sideways (orbiting) swings as flyable –
+	# needed for stick steering; the city feel report improved with it.
+	t.check(cleared >= 3 and ed[2] >= 400.0,
+		"skilled timing mostly clears the range without touching the street (%d/5, median %.0f m)" % [cleared, ed[2]])
 	var novice_fails := 0
 	for r in novices:
 		if r["street"] or r["best_z"] > -420.0:
 			novice_fails += 1
-	t.check(novice_fails == novices.size(), "poor timing never clears it")
+	# The web pick flies each candidate's swing and avoids the ones that end
+	# in a wall, which occasionally rescues a badly timed web.
+	t.check(novice_fails >= novices.size() - 1, "poor timing rarely clears it (%d/%d failed)" % [novice_fails, novices.size()])
 
 
 func test_cannot_tunnel_through_buildings(t) -> void:

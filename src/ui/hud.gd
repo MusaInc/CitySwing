@@ -1,6 +1,9 @@
 class_name Hud
 extends Control
 ## Reticle, speed, chain counter, mode readout and the performance overlay.
+## The reticle sits on the web pick (the swing GrappleTargeting actually
+## chose by flying it) and a dotted line previews that swing's path, so
+## steering with the stick shows where it will take you.
 
 var player: Player
 var camera: SwingCamera
@@ -16,6 +19,9 @@ var touch_mode := false
 var _marks: Array = []  # [{pos, ok, reason, t}]
 var _banner_t := 0.0
 var _font: Font
+var _font_black: Font
+var _reticle_spin := 0.0
+var _reticle_pos := Vector2.INF
 var _speed_smooth := 0.0
 var _frame_ms := 0.0
 var _worst_ms := 0.0
@@ -32,7 +38,8 @@ const SPEED_LINES_FULL := 42.0
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_font = ThemeDB.fallback_font
+	_font = UiStyle.font("bold")
+	_font_black = UiStyle.font("black")
 
 
 func web_feedback(pos: Vector2, ok: bool, reason: String) -> void:
@@ -57,6 +64,7 @@ func _process(dt: float) -> void:
 	_lines_seed += dt
 	_perfect_t = maxf(_perfect_t - dt, 0.0)
 	_lines_boost = maxf(_lines_boost - dt * 1.6, 0.0)
+	_reticle_spin += dt * 1.4
 	for m in _marks:
 		m["t"] += dt
 	_marks = _marks.filter(func(m): return m["t"] < (0.45 if m["ok"] else 0.9))
@@ -84,15 +92,21 @@ func _draw() -> void:
 			draw_arc(ap, 7.0, 0, TAU, 20, gold, 2.5, true)
 			draw_circle(ap, 2.5, gold)
 	if not touch_mode or Settings.aim_mode != "tap":
-		# Reticle on the assisted target: where SWING will attach.
+		# Reticle on the web pick: where SWING will attach.
 		var t := player.targeting
-		if t.has_target and player.line_state == Player.Line.IDLE and not cam.is_position_behind(t.point):
-			var p := cam.unproject_position(t.point)
-			var d := player.hand_position().distance_to(t.point)
-			var r := clampf(900.0 / maxf(d, 1.0), 8.0, 22.0)
-			draw_arc(p, r, 0, TAU, 32, gold, 3.0, true)
-			draw_circle(p, 3.0, gold)
+		var aim_pt := t.pick if t.pick_ok else t.point
+		if t.has_target and player.line_state == Player.Line.IDLE and not cam.is_position_behind(aim_pt):
+			if t.pick_ok and not player.is_on_floor():
+				_draw_path(cam, t.pick_path)
+			var p := cam.unproject_position(aim_pt)
+			# Glide between picks instead of jumping.
+			_reticle_pos = p if _reticle_pos == Vector2.INF or _reticle_pos.distance_to(p) > 260.0 \
+				else _reticle_pos.lerp(p, 0.35)
+			var d := player.hand_position().distance_to(aim_pt)
+			var r := clampf(900.0 / maxf(d, 1.0), 11.0, 24.0)
+			_draw_reticle(_reticle_pos, r, gold if t.pick_ok else Color(1, 1, 1, 0.8))
 		elif player.line_state == Player.Line.IDLE:
+			_reticle_pos = Vector2.INF
 			draw_arc(size / 2.0, 6, 0, TAU, 16, Color(1, 1, 1, 0.3), 1.5, true)
 	# Tap feedback: gold pulse = fired, amber ring = holding for a target,
 	# red cross + reason = an invalid precise tap.
@@ -114,40 +128,44 @@ func _draw() -> void:
 			_text(pos + Vector2(16, 6), label, 18, red, Color(0, 0, 0, 0.4 * a2))
 
 	_speed_smooth = lerpf(_speed_smooth, player.speed(), 0.15)
-	var kmh := int(_speed_smooth * 3.6)
-	var sx := 36.0
-	var sy := 70.0
-	_text(Vector2(sx, sy), "%d" % kmh, 44, white, shadow)
-	_text(Vector2(sx + 4, sy + 24), "KM/H", 14, Color(1, 1, 1, 0.6), shadow)
+	_draw_speed_gauge(Vector2(86, 86), white, shadow)
 	if player.chain > 1:
-		_text(Vector2(sx, sy + 58), "CHAIN ×%d" % player.chain, 20, Color(1.0, 0.82, 0.4), shadow)
+		var ct := "CHAIN ×%d" % player.chain
+		var cw := _font.get_string_size(ct, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		UiStyle.pill(self, Rect2(Vector2(86 - cw / 2.0 - 14, 150), Vector2(cw + 28, 30)), Color(UiStyle.GOLD, 0.22))
+		_text(Vector2(86 - cw / 2.0, 171), ct, 18, gold, shadow)
 	if mode_text != "":
-		var w := _font.get_string_size(mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
-		_text(Vector2(size.x / 2.0 - w / 2.0, 52), mode_text, 30, white, shadow)
-	if mode_sub != "":
-		var w2 := _font.get_string_size(mode_sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-		_text(Vector2(size.x / 2.0 - w2 / 2.0, 76), mode_sub, 16, Color(1, 1, 1, 0.7), shadow)
+		var w := _font.get_string_size(mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+		var w2 := _font.get_string_size(mode_sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x if mode_sub != "" else 0.0
+		var pw := maxf(w, w2) + 48.0
+		UiStyle.pill(self, Rect2(Vector2(size.x / 2.0 - pw / 2.0, 22), Vector2(pw, 66 if mode_sub != "" else 44)))
+		_text(Vector2(size.x / 2.0 - w / 2.0, 53), mode_text, 26, white, shadow)
+		if mode_sub != "":
+			_text(Vector2(size.x / 2.0 - w2 / 2.0, 76), mode_sub, 15, Color(1, 1, 1, 0.7), shadow)
 	if _perfect_t > 0.0:
 		# "PERFECT" pops in big, settles, and fades; the streak counts up.
 		var age := 0.9 - _perfect_t
 		var pop := 1.0 + 0.5 * exp(-age * 14.0)
 		var a := clampf(_perfect_t / 0.35, 0.0, 1.0)
 		var txt := "PERFECT" if _perfect_n < 2 else "PERFECT ×%d" % _perfect_n
-		var fs := int(34 * pop)
-		var tw := _font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		_text(Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.24 - age * 30.0), txt, fs, Color(1.0, 0.82, 0.4, a), Color(0, 0, 0, 0.4 * a))
+		var fs := int(36 * pop)
+		var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var pp := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.24 - age * 30.0)
+		draw_string(_font_black, pp + Vector2(2, 3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
+		draw_string(_font_black, pp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.82, 0.4, a))
 	if pointer != Vector3.INF:
 		_draw_pointer(cam)
 	if hint != "":
 		var hs := 24
 		var hw := _font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, hs).x
-		var hp := Vector2(size.x / 2.0 - hw / 2.0, 124.0)  # under the mode readout, clear of thumbs
-		draw_rect(Rect2(hp + Vector2(-22, -34), Vector2(hw + 44, 50)), Color(0, 0, 0, 0.45))
+		var hp := Vector2(size.x / 2.0 - hw / 2.0, 132.0)  # under the mode readout, clear of thumbs
+		UiStyle.pill(self, Rect2(hp + Vector2(-26, -34), Vector2(hw + 52, 48)), Color(0, 0, 0, 0.5))
 		_text(hp, hint, hs, white, shadow)
 	if _banner_t > 0.0:
 		var a := clampf(_banner_t * 2.0, 0.0, 1.0)
-		var bw := _font.get_string_size(banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 40).x
-		_text(Vector2(size.x / 2.0 - bw / 2.0, size.y * 0.32), banner, 40, Color(1, 1, 1, a), Color(0, 0, 0, 0.4 * a))
+		var bw := _font_black.get_string_size(banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44).x
+		draw_string(_font_black, Vector2(size.x / 2.0 - bw / 2.0 + 2, size.y * 0.32 + 3), banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(0, 0, 0, 0.4 * a))
+		draw_string(_font_black, Vector2(size.x / 2.0 - bw / 2.0, size.y * 0.32), banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(1, 1, 1, a))
 	if Settings.show_perf:
 		var fps := Engine.get_frames_per_second()
 		var lines := [
@@ -166,6 +184,45 @@ func _draw() -> void:
 		for l in lines:
 			_text(Vector2(size.x * 0.3, y), l, 14, Color(0.7, 1.0, 0.7), shadow)
 			y += 18.0
+
+
+## Speed: a 270° gauge (full at 144 km/h) that warms from white to gold
+## once speed lines kick in, with the number in the middle.
+func _draw_speed_gauge(c: Vector2, white: Color, shadow: Color) -> void:
+	var r := 52.0
+	var a0 := PI * 0.75
+	var sweep := PI * 1.5
+	var k := clampf(_speed_smooth / 40.0, 0.0, 1.0)
+	draw_circle(c, r + 6.0, Color(0, 0, 0, 0.28))
+	draw_arc(c, r, a0, a0 + sweep, 48, Color(1, 1, 1, 0.16), 6.0, true)
+	if k > 0.005:
+		var hot := clampf((_speed_smooth - SPEED_LINES_FROM) / (SPEED_LINES_FULL - SPEED_LINES_FROM), 0.0, 1.0)
+		draw_arc(c, r, a0, a0 + sweep * k, maxi(4, int(48 * k)), Color(1, 1, 1, 0.9).lerp(UiStyle.GOLD, hot), 6.0, true)
+	var txt := "%d" % int(_speed_smooth * 3.6)
+	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38).x
+	draw_string(_font_black, c + Vector2(-tw / 2.0 + 2, 12), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38, shadow)
+	draw_string(_font_black, c + Vector2(-tw / 2.0, 10), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38, white)
+	var uw := _font.get_string_size("KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	draw_string(_font, c + Vector2(-uw / 2.0, 30), "KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
+
+
+## Four corner brackets turning slowly round a dot.
+func _draw_reticle(p: Vector2, r: float, col: Color) -> void:
+	for i in 4:
+		var a := _reticle_spin + i * PI * 0.5
+		draw_arc(p, r, a - 0.42, a + 0.42, 8, Color(0, 0, 0, 0.35), 5.0, true)
+		draw_arc(p, r, a - 0.42, a + 0.42, 8, col, 3.0, true)
+	draw_circle(p, 3.5, col)
+
+
+## The predicted swing as fading dots (screen-projected body path).
+func _draw_path(cam: Camera3D, path: PackedVector3Array) -> void:
+	var n := path.size()
+	for i in range(1, n):
+		if cam.is_position_behind(path[i]):
+			continue
+		var a := 0.55 * (1.0 - float(i) / n)
+		draw_circle(cam.unproject_position(path[i]), 3.0, Color(1.0, 0.82, 0.4, a))
 
 
 ## Streaks radiating from the screen centre, scaled by speed. Positions are
@@ -197,7 +254,8 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var behind := cam.is_position_behind(pointer)
 	var sp := cam.unproject_position(pointer)
 	var margin := 48.0
-	var on := not behind and sp.x > margin and sp.x < size.x - margin and sp.y > margin and sp.y < size.y - margin
+	var on := not behind and sp.x > margin and sp.x < size.x - margin and sp.y > margin and sp.y < size.y - margin \
+		and not (sp.x < 190.0 and sp.y < 200.0)
 	if on:
 		var pts := PackedVector2Array([sp + Vector2(0, -12), sp + Vector2(10, 0), sp + Vector2(0, 12), sp + Vector2(-10, 0), sp + Vector2(0, -12)])
 		draw_polyline(pts, teal, 2.5, true)
@@ -213,6 +271,8 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var half := c - Vector2(margin, margin)
 	var t := minf(half.x / maxf(absf(dir.x), 1e-4), half.y / maxf(absf(dir.y), 1e-4))
 	var p := c + dir * t
+	if p.x < 190.0 and p.y < 200.0:
+		p.y = 200.0  # keep clear of the speed gauge
 	var side := Vector2(-dir.y, dir.x)
 	draw_colored_polygon(PackedVector2Array([p + dir * 14.0, p - dir * 8.0 + side * 10.0, p - dir * 8.0 - side * 10.0]), teal)
 	_text(p - dir * 30.0 + Vector2(-18, 5), label, 15, teal, Color(0, 0, 0, 0.4))

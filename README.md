@@ -49,7 +49,7 @@ and the in-game **Pause → Tuning** panel edits them live on the device. See
 
 | | Touch (landscape) | Controller | Keyboard/mouse |
 |---|---|---|---|
-| Move / steer | left thumb, floating stick | left stick | WASD |
+| Move / steer (also aims the web) | left thumb, floating stick | left stick | WASD |
 | Web | Hold **SWING** or touch the right side; it catches an available target automatically, including after a jump. Lift the owning finger to release; press with another finger to reattach. Settings offer precise building taps. | RT (assisted aim) | hold Space / LMB (assisted aim) |
 | Look | automatic follow camera | right stick | captured mouse |
 | Jump / wall-kick / mid-air flip | **JUMP** | A | Shift |
@@ -62,6 +62,13 @@ own role (stick, web, jump), tracked by touch ID. If no assisted target is
 available, holding SWING arms the web until one appears. In precise tap mode,
 invalid building taps (sky, street, too far, blocked) show a red cross; the
 SWING button remains an assisted fallback.
+
+**Web choice.** The stick steers where the assisted web goes: pushed, the
+search fan turns toward it (a gold chevron on the stick shows the direction).
+The game flies the best few candidate swings with the real physics model
+(through the arc, a release, and a short flight) and picks one that clears
+the buildings and carries the most speed in that direction. The gold
+reticle sits on that pick; in the air a dotted line previews its path.
 
 ## Modes
 

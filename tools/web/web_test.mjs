@@ -79,6 +79,18 @@ if (engine === "chromium") {
   check((taut?.rig?.hand_line ?? -1) >= 0 && taut.rig.hand_line < 0.1,
     `web hand stays on the rope line (${((taut?.rig?.hand_line ?? -1) * 100).toFixed(1)} cm off)`);
   s = await state();
+  // The left stick steers the web: push right, then left, while swinging.
+  const stickAt = at(0.15, 0.77);
+  await down(5, ...stickAt);
+  await move(5, stickAt[0] + 70 * k, stickAt[1]);
+  const sr = await waitFor(v => (v?.web?.heading_side ?? 0) > 25 || v?.line === 0, 15000);
+  await move(5, stickAt[0] - 70 * k, stickAt[1]);
+  const sl = await waitFor(v => (v?.web?.heading_side ?? 0) < -25 || v?.line === 0, 15000);
+  await up(5);
+  check((sr?.web?.heading_side ?? 0) > 25 && (sl?.web?.heading_side ?? 0) < -25,
+    `left stick steers the web (right ${sr?.web?.heading_side}°, left ${sl?.web?.heading_side}°; ` +
+    `pick ${sr?.web?.pick_side ?? "-"}° / ${sl?.web?.pick_side ?? "-"}°)`);
+  s = await state();
   const oldYaw = s?.look_yaw ?? 0;
   await down(2, ...at(0.77, 0.33));
   s = await waitFor(v => v?.touch_web === 2 && v?.line !== 0, 20000);

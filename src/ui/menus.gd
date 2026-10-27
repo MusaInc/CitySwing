@@ -44,7 +44,7 @@ func _ready() -> void:
 
 
 func _build_theme() -> void:
-	var font := ThemeDB.fallback_font
+	var font := UiStyle.font("bold")
 	_theme.default_font = font
 	_theme.default_font_size = 26
 	var normal := StyleBoxFlat.new()
@@ -395,6 +395,8 @@ func _label(text: String, size: int, color: Color) -> Label:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
+	if size >= 40:  # headings
+		l.add_theme_font_override("font", UiStyle.font("black"))
 	return l
 
 

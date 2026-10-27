@@ -1,6 +1,39 @@
-# Status: 2026-10-27 (foot contact + kerbs)
+# Status: 2026-10-27 (web choice, camera, UI)
 
-## Foot contact and kerbs (latest)
+## Web choice, camera and UI (latest)
+
+- **Stick steers the web**: pushing the left stick turns the assisted
+  search toward its direction (fully at ~75% deflection).
+- **Predicted web pick** (`GrappleTargeting.refresh_pick`, every 0.12 s and
+  at firing): up to 6 spread-out candidates are flown with SwingPhysics
+  (arc → release once rising → 0.6 s free flight). Swings that hit a
+  building or the street are out; the rest rank by exit speed along the
+  wanted direction, height kept, plunges and street-skimming arcs ranked
+  down, plus the old aim score. Arc bottom now = "starts climbing", so
+  sideways swings round a tower corner count (needed for steering). Cost on
+  the VPS: ~0.5 ms per evaluation (~4 ms/s); not measured on a phone.
+- Feel report vs the previous commit (6 × 40 s, same seeds): expert
+  59 → 66 km/h airborne, street touches 2.2 → 1.7/run, 313 → 339 m, crashes
+  0 → 0.2/run; novice ~unchanged (66 → 65 km/h, crashes 0.2 → 0).
+  Prototype range: expert clears 3/5 (was 4–5/5; the test now asks ≥3 and
+  median ≥400 m), novices clear ≤1/5. Time Trial courses re-recorded.
+- Tried and dropped: a ±65–90° side fan when nothing is ahead (novices
+  flew further, experts hit the street 3× more); falling back to the
+  longest-surviving swing (worse).
+- **Camera**: wider shot on long ropes and a lift toward the line, dip into
+  the down-swing, look up out of releases, framing leans toward the pick,
+  spring-damped landing dip and web-catch tug, ≤4° bank in sustained fast
+  turns, crane over the shoulder when a wall squeezes the camera (it used to
+  end up inside the character), body hidden if the lens is inside it.
+- **UI**: Outfit font (assets/fonts, OFL) on HUD, controls and menus; speed
+  gauge (gold past 72 km/h); pills for mode, chain, hints; rotating bracket
+  reticle on the actual pick with a dotted swing-path preview; stick shows a
+  gold steering chevron; SWING glows gold with a halo when a web is ready.
+- Tests: 69 native (new tests/test_web_pick.gd); browser Chromium 16/16
+  (new: stick steers the web), WebKit 9/9. `test_city` chunk streaming
+  failed once in a full run and passed 3/3 alone (threaded timing).
+
+## Foot contact and kerbs
 
 - **Planted feet** (`CharacterRig._plant_feet`): a stance foot locks where it
   touches the ground (raycast), the leg is solved onto it with two-bone IK,

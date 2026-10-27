@@ -294,6 +294,22 @@ var _webs_fired := 0
 var _last_tap := {}
 
 
+## Where the next web is aimed, as signed horizontal angles (degrees, + =
+## right of the camera): the wanted heading (stick steering) and the pick.
+func _web_aim_state(cam: Camera3D) -> Dictionary:
+	var t := player.targeting
+	var fwd := -cam.global_basis.z
+	fwd = Vector3(fwd.x, 0.0, fwd.z).normalized()
+	var side := func(v: Vector3) -> float:
+		var h := Vector3(v.x, 0.0, v.z).normalized()
+		return rad_to_deg(atan2(fwd.cross(h).y * -1.0, fwd.dot(h)))
+	var out := {"heading_side": snappedf(side.call(t.heading), 0.1), "pick_ok": t.pick_ok,
+		"pick_gain": snappedf(t.pick_gain, 0.1)}
+	if t.pick_ok:
+		out["pick_side"] = snappedf(side.call(t.pick - player.global_position), 0.1)
+	return out
+
+
 ## Web builds opened with ?debug=1 publish game state to window.__cs so a
 ## browser test can check that taps attach where they land. Off otherwise.
 func _publish_web_state(dt: float) -> void:
@@ -351,7 +367,7 @@ func _publish_web_state(dt: float) -> void:
 		"grounded": player.is_on_floor(),
 		"cam_yaw": camera.yaw, "player_y": player.global_position.y,
 		"target_ready": player.targeting.has_target, "armed": player._armed_touch != -1,
-		"rig": rig.debug_state()}
+		"rig": rig.debug_state(), "web": _web_aim_state(cam)}
 	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
 
 
