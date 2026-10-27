@@ -136,7 +136,8 @@ def export(filename, objs=None):
         o.select_set(True)
     path = os.path.join(OUT, filename)
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True,
-                              export_apply=True, export_yup=True, export_materials="EXPORT")
+                              export_apply=True, export_yup=True, export_materials="EXPORT",
+                              export_vertex_color="ACTIVE")
     tris = sum(len(o.data.polygons) for o in targets)
     print(f"KIT {filename}: {len(targets)} objects, ~{tris} faces")
 
@@ -357,81 +358,233 @@ def crane():
 
 
 # ------------------------------------------------------------- character
+def loft(name, rings, segs=14, cap=True):
+    """Lofted body part. rings: [(z, rx, ry, cy)] – ellipse half-widths in x/y,
+    y-centre offset cy, at height z (Blender Z up, +Y = character front)."""
+    bm = bmesh.new()
+    loops = []
+    for (z, rx, ry, *rest) in rings:
+        cy = rest[0] if rest else 0.0
+        ring = []
+        for i in range(segs):
+            a = i / segs * math.tau
+            ring.append(bm.verts.new((math.cos(a) * rx, cy + math.sin(a) * ry, z)))
+        loops.append(ring)
+    for r0, r1 in zip(loops, loops[1:]):
+        for i in range(segs):
+            j = (i + 1) % segs
+            bm.faces.new((r0[i], r0[j], r1[j], r1[i]))
+    if cap:
+        for ring, flip in ((loops[0], True), (loops[-1], False)):
+            c = sum((v.co for v in ring), Vector()) / len(ring)
+            cv = bm.verts.new(c)
+            for i in range(segs):
+                j = (i + 1) % segs
+                bm.faces.new((ring[j], ring[i], cv) if flip else (ring[i], ring[j], cv))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = new_obj(name, bm)
+    return ob
+
+
+def paint(ob, material):
+    ob.data.materials.clear()
+    ob.data.materials.append(material)
+    return ob
+
+
+def bake_vertex_colors(ob):
+    """One surface per part: material colours become vertex colours (alpha 0 =
+    emissive), and all faces use a single material. Godot draws each part in
+    one call with a shared vertex-colour material."""
+    me = ob.data
+    cols = []
+    for m in me.materials:
+        bsdf = m.node_tree.nodes["Principled BSDF"]
+        c = bsdf.inputs["Base Color"].default_value
+        emissive = bsdf.inputs["Emission Strength"].default_value > 0.0 and \
+            sum(bsdf.inputs["Emission Color"].default_value[:3]) > 0.0
+        cols.append((c[0], c[1], c[2], 0.0 if emissive else 1.0))
+    attr = me.color_attributes.new("Col", "BYTE_COLOR", "CORNER")
+    for poly in me.polygons:
+        col = cols[poly.material_index] if cols else (1, 1, 1, 1)
+        for li in poly.loop_indices:
+            attr.data[li].color = col
+        poly.material_index = 0
+    me.color_attributes.active_color = attr
+    keep = me.materials[0] if me.materials else None
+    me.materials.clear()
+    body = _mats.get("character") or mat("character", (1, 1, 1), 0.7)
+    me.materials.append(body)
+
+
 def character():
-    """One stylised human (~1.8 m) in streetwear with grapple gear.
-    One object per bone; origin at the joint; limbs extend toward -Z (Blender)
-    which is -Y in Godot. The rig in Godot rotates these pivots."""
+    """One original stylised human (~1.82 m) – lofted anatomy, techwear outfit,
+    grapple gear. One object per bone; origin at the joint; limbs extend toward
+    -Z (Blender) = -Y (Godot). The Godot rig poses these pivots every frame."""
     reset()
-    skin = mat("skin", (0.78, 0.56, 0.42), 0.6)
-    hair = mat("hair", (0.1, 0.07, 0.05), 0.8)
-    hood = mat("hoodie", (0.86, 0.12, 0.1), 0.75)      # signal red: reads against stone and sky
-    hood_dk = mat("hoodie_dark", (0.5, 0.06, 0.06), 0.8)
-    jog = mat("joggers", (0.13, 0.15, 0.19), 0.85)
-    stripe = mat("stripe", (0.9, 0.9, 0.88), 0.7)
-    shoe = mat("sneaker", (0.94, 0.94, 0.92), 0.6)
-    sole = mat("sole", (0.2, 0.2, 0.22), 0.7)
+    skin = mat("skin", (0.72, 0.5, 0.38), 0.6)
+    lip = mat("lip", (0.55, 0.32, 0.27), 0.6)
+    hair = mat("hair", (0.09, 0.06, 0.05), 0.8)
+    brow = mat("brow", (0.08, 0.05, 0.04), 0.8)
+    jacket = mat("jacket", (0.8, 0.1, 0.09), 0.7)
+    jacket_dk = mat("jacket_dark", (0.42, 0.05, 0.05), 0.75)
+    yoke = mat("yoke", (0.14, 0.15, 0.17), 0.7)
+    tee = mat("tee", (0.9, 0.9, 0.86), 0.8)
+    pants = mat("pants", (0.12, 0.14, 0.2), 0.85)
+    pad = mat("kneepad", (0.2, 0.21, 0.24), 0.6)
+    strap = mat("strap", (0.06, 0.06, 0.07), 0.6)
+    metal = mat("metal", (0.55, 0.57, 0.6), 0.35, 0.8)
+    shoe = mat("sneaker", (0.93, 0.93, 0.9), 0.6)
+    sole = mat("sole", (0.8, 0.12, 0.1), 0.6)
+    glove = mat("glove", (0.1, 0.1, 0.11), 0.7)
     gear = mat("gear", (0.18, 0.2, 0.22), 0.4, 0.7)
-    accent = mat("gear_accent", (0.15, 0.85, 0.85), 0.3, 0.2, emit=(0.1, 0.7, 0.75))
-    objs = []
+    glow = mat("gear_glow", (0.2, 0.95, 0.95), 0.3, 0.0, emit=(0.1, 0.9, 0.95))
+    lens = mat("lens", (0.2, 0.9, 0.95), 0.1, 0.0, emit=(0.05, 0.6, 0.7))
+    scarf = mat("scarf", (0.95, 0.75, 0.2), 0.8)
+    parts = []
 
-    def limb(name, length, r_top, r_bot, material, extra=(), seg=12):
-        bm = bmesh.new()
-        bmesh.ops.create_cone(bm, cap_ends=True, segments=seg, radius1=r_bot, radius2=r_top, depth=length)
-        bmesh.ops.translate(bm, vec=Vector((0, 0, -length / 2)), verts=bm.verts)
-        ob = new_obj(name, bm, material)
-        smooth(ob, 1)
-        return join(name, [ob, *extra], (0, 0, 0))
+    def part(name, objs):
+        ob = join(name, objs)
+        bake_vertex_colors(ob)
+        parts.append(ob)
 
-    # Torso pieces (Godot rig: hips at 0.98 m, spine +0.06, chest +0.26, neck +0.26)
-    pel = sphere("hips_m", 0.17, (0, 0, 0.0), jog, 16, 10, (1.0, 0.75, 0.6))
-    belt = cyl("belt", 0.165, 0.07, (0, 0, 0.05), gear, 16)
-    objs.append(join("hips", [smooth(pel, 1), belt]))
+    # ---- torso ---------------------------------------------------------
+    pelvis = paint(smooth(loft("pelvis", [(-0.13, 0.12, 0.09), (-0.07, 0.165, 0.11), (0.02, 0.165, 0.11),
+                                           (0.1, 0.145, 0.1)])), pants)
+    belt = paint(loft("belt", [(0.04, 0.17, 0.115), (0.09, 0.165, 0.112)], segs=16), strap)
+    buckle = box("buckle", (0.06, 0.02, 0.045), (0, 0.115, 0.065), metal, bevel=0.005)
+    pocket = box("pocket", (0.07, 0.03, 0.08), (0.14, 0.03, -0.05), pants, bevel=0.01)
+    part("hips", [pelvis, belt, buckle, pocket])
 
-    abd = sphere("spine_m", 0.16, (0, 0, 0.13), hood, 16, 10, (1.0, 0.72, 1.0))
-    pocket = box("pocket", (0.24, 0.05, 0.11), (0, 0.115, 0.07), hood_dk, bevel=0.02)
-    objs.append(join("spine", [smooth(abd, 1), pocket]))
+    abdomen = paint(smooth(loft("abdomen", [(-0.03, 0.15, 0.105), (0.08, 0.152, 0.105), (0.18, 0.168, 0.115),
+                                             (0.25, 0.178, 0.12)])), jacket)
+    tee_gap = paint(loft("tee", [(-0.02, 0.05, 0.02, 0.1), (0.2, 0.06, 0.02, 0.112)], segs=8), tee)
+    hem = paint(loft("hem", [(-0.035, 0.157, 0.112), (0.0, 0.157, 0.112)], segs=16), jacket_dk)
+    part("spine", [abdomen, tee_gap, hem])
 
-    ch = sphere("chest_m", 0.2, (0, 0, 0.1), hood, 18, 12, (1.05, 0.68, 0.95))
-    hoodfold = sphere("hoodfold", 0.12, (0, -0.1, 0.27), hood_dk, 12, 8, (1.3, 0.8, 0.6))
-    pack = box("pack", (0.26, 0.12, 0.34), (0, -0.19, 0.08), gear, bevel=0.03)
-    spool = cyl("spool", 0.07, 0.24, (0, 0, 0), gear, 16)
-    spool.rotation_euler = (0, math.pi / 2, 0)
-    spool.location = (0.12, -0.26, 0.16)
-    light = box("packlight", (0.18, 0.01, 0.03), (0, -0.255, 0.0), accent)
-    objs.append(join("chest", [smooth(ch, 1), smooth(hoodfold, 1), pack, spool, light]))
+    chest = paint(smooth(loft("chest", [(-0.05, 0.172, 0.12), (0.05, 0.185, 0.13, 0.01), (0.15, 0.2, 0.125, 0.005),
+                                         (0.21, 0.195, 0.11), (0.26, 0.13, 0.085), (0.28, 0.07, 0.06)])), jacket)
+    yokes = []
+    for sx in (-1, 1):
+        y = paint(smooth(loft("yoke", [(0.15, 0.07, 0.115, 0.0), (0.24, 0.06, 0.1)], segs=10)), yoke)
+        y.location = (sx * 0.12, 0, 0)
+        yokes.append(y)
+        delt = sphere("deltoid", 0.072, (sx * 0.2, 0.0, 0.19), yoke, 12, 8, (1.0, 1.0, 0.95))
+        yokes.append(smooth(delt))
+    collar = paint(smooth(loft("collar", [(0.24, 0.085, 0.075, -0.005), (0.32, 0.075, 0.07, -0.01)], segs=14, cap=False)),
+                   jacket_dk)
+    straps = []
+    for sx in (-1, 1):  # crossed harness straps over the chest
+        st = box("strap", (0.032, 0.012, 0.36), (0, 0.128, 0.09), strap)
+        st.rotation_euler = (0, sx * 0.62, 0)
+        straps.append(st)
+    straps.append(cyl("clip", 0.03, 0.02, (0, 0.13, 0.08), metal, 12))
+    straps[-1].rotation_euler = (math.pi / 2, 0, 0)
+    straps[-1].location = (0, 0.128, 0.09)
+    # Back-mounted twin-drum spool with glowing rings.
+    housing = box("housing", (0.24, 0.09, 0.22), (0, -0.165, 0.11), gear, bevel=0.02)
+    drums = []
+    for sx in (-1, 1):
+        d = cyl("drum", 0.065, 0.06, (0, 0, 0), gear, 18)
+        d.rotation_euler = (0, math.pi / 2, 0)
+        d.location = (sx * 0.15, -0.17, 0.13)
+        drums.append(d)
+        r = cyl("ring", 0.068, 0.012, (0, 0, 0), glow, 18)
+        r.rotation_euler = (0, math.pi / 2, 0)
+        r.location = (sx * 0.183, -0.17, 0.13)
+        drums.append(r)
+    part("chest", [chest, *yokes, collar, *straps, housing, *drums])
 
-    neck = cyl("neck_m", 0.055, 0.1, (0, 0, -0.02), skin, 10)
-    objs.append(join("neck", [neck]))
+    neck = paint(smooth(loft("neck_m", [(-0.02, 0.05, 0.05), (0.1, 0.045, 0.047)])), skin)
+    scarf_wrap = paint(smooth(loft("scarf_wrap", [(0.0, 0.08, 0.075, -0.01), (0.06, 0.07, 0.068, -0.005)],
+                                   segs=14, cap=False)), scarf)
+    part("neck", [neck, scarf_wrap])
 
-    head = sphere("head_m", 0.105, (0, 0.0, 0.11), skin, 18, 12, (0.9, 1.0, 1.12))
-    hair_c = sphere("hair_m", 0.112, (0, -0.015, 0.14), hair, 16, 10, (0.94, 1.02, 1.0))
-    for v in hair_c.data.vertices:  # trim the hair cap to sit above the face
-        if v.co.z < -0.02 or (v.co.y > 0.02 and v.co.z < 0.05):
-            v.co.z = max(v.co.z, 0.05 if v.co.y > 0.02 else -0.02)
-    nose = sphere("nose", 0.022, (0, 0.1, 0.1), skin, 8, 6, (0.8, 1.0, 1.2))
-    ears = [sphere("ear", 0.025, (s * 0.094, 0.0, 0.11), skin, 8, 6, (0.5, 1.0, 1.3)) for s in (-1, 1)]
-    objs.append(join("head", [smooth(head, 1), smooth(hair_c, 1), nose, *ears]))
+    # ---- head ------------------------------------------------------------
+    skull = smooth(sphere("skull", 0.1, (0, -0.005, 0.12), skin, 18, 12, (0.88, 1.0, 1.08)))
+    jaw = smooth(paint(loft("jaw", [(0.02, 0.06, 0.06, 0.02), (0.07, 0.075, 0.075, 0.02), (0.11, 0.08, 0.08, 0.01)]), skin))
+    nose = sphere("nose", 0.02, (0, 0.098, 0.105), skin, 8, 6, (0.75, 1.0, 1.35))
+    lips = box("lips", (0.04, 0.012, 0.012), (0, 0.083, 0.06), lip, bevel=0.005)
+    brows = [box("brow", (0.035, 0.012, 0.01), (sx * 0.035, 0.09, 0.145), brow, bevel=0.003) for sx in (-1, 1)]
+    ears = [sphere("ear", 0.026, (sx * 0.088, -0.005, 0.11), skin, 8, 6, (0.45, 0.9, 1.3)) for sx in (-1, 1)]
+    hair_parts = [smooth(sphere("hair_cap", 0.106, (0, -0.02, 0.15), hair, 16, 10, (0.92, 1.0, 0.95)))]
+    for v in hair_parts[0].data.vertices:  # hairline: keep the cap off the face
+        if v.co.y > 0.035 and v.co.z < 0.03:
+            v.co.y = 0.035 - (v.co.y - 0.035) * 0.2
+    for (x, y, z, r) in ((0.0, 0.055, 0.22, 0.05), (0.04, 0.03, 0.235, 0.045), (-0.04, 0.02, 0.23, 0.045),
+                         (0.02, -0.03, 0.235, 0.05), (-0.03, -0.06, 0.21, 0.05)):
+        hair_parts.append(smooth(sphere("tuft", r, (x, y, z), hair, 10, 7, (1.0, 1.25, 0.6))))
+    band = paint(loft("goggle_band", [(0.17, 0.104, 0.112, -0.012), (0.19, 0.104, 0.112, -0.012)], segs=18, cap=False), strap)
+    goggles = [band]
+    for sx in (-1, 1):
+        g = cyl("goggle", 0.026, 0.022, (0, 0, 0), gear, 14)
+        g.rotation_euler = (math.pi / 2 - 0.35, 0, 0)
+        g.location = (sx * 0.038, 0.088, 0.185)
+        l = cyl("lens", 0.02, 0.006, (0, 0, 0), lens, 14)
+        l.rotation_euler = (math.pi / 2 - 0.35, 0, 0)
+        l.location = (sx * 0.038, 0.1, 0.19)
+        goggles += [g, l]
+    part("head", [skull, jaw, nose, lips, *brows, *ears, *hair_parts, *goggles])
 
-    for side, s in (("l", -1), ("r", 1)):
-        objs.append(limb(f"upper_arm_{side}", 0.29, 0.065, 0.055, hood))
+    # ---- arms ------------------------------------------------------------
+    for side, sx in (("l", -1), ("r", 1)):
+        ua = paint(smooth(loft("ua", [(0.02, 0.062, 0.062), (-0.09, 0.066, 0.064), (-0.21, 0.052, 0.05),
+                                       (-0.29, 0.046, 0.046)])), jacket)
+        stripe = box("stripe", (0.012, 0.014, 0.26), (sx * 0.06, 0.0, -0.13), jacket_dk)
+        elbow = sphere("elbow", 0.047, (0, -0.005, -0.29), jacket, 10, 8)
+        part(f"upper_arm_{side}", [ua, stripe, elbow])
+        fa = paint(smooth(loft("fa", [(0.0, 0.047, 0.047), (-0.07, 0.052, 0.05), (-0.2, 0.04, 0.038),
+                                       (-0.26, 0.036, 0.034)])), jacket)
+        cuff = paint(loft("cuff", [(-0.2, 0.043, 0.041), (-0.26, 0.04, 0.038)], segs=12), jacket_dk)
         extra = []
-        if side == "r":  # wrist launcher
-            extra.append(box("launcher", (0.085, 0.13, 0.16), (0, 0.035, -0.17), gear, bevel=0.015))
-            extra.append(box("launch_led", (0.02, 0.005, 0.1), (0, 0.1, -0.17), accent))
-        cuff = cyl("cuff", 0.05, 0.05, (0, 0, -0.27), hood_dk, 12)
-        objs.append(limb(f"forearm_{side}", 0.26, 0.055, 0.045, hood, [cuff, *extra]))
-        hand = sphere(f"hand_m", 0.048, (0, 0.0, -0.05), skin, 10, 8, (0.8, 0.55, 1.1))
-        objs.append(join(f"hand_{side}", [smooth(hand, 1)]))
-        knee_pad = sphere("kp", 0.06, (0, 0.04, -0.44), jog, 10, 6, (1.0, 0.8, 1.0))
-        stripe_t = box("stripe", (0.012, 0.02, 0.4), (s * 0.085, 0.0, -0.22), stripe)
-        objs.append(limb(f"thigh_{side}", 0.45, 0.09, 0.065, jog, [knee_pad, stripe_t]))
-        cuffl = cyl("cuffl", 0.055, 0.06, (0, 0, -0.42), jog, 12)
-        stripe_s = box("stripe2", (0.012, 0.02, 0.38), (s * 0.06, 0.0, -0.2), stripe)
-        objs.append(limb(f"shin_{side}", 0.44, 0.065, 0.05, jog, [cuffl, stripe_s]))
-        sh = box("shoe", (0.11, 0.27, 0.1), (0, 0.06, -0.03), shoe, bevel=0.035, segs=3)
-        so = box("sole", (0.115, 0.28, 0.03), (0, 0.06, -0.085), sole, bevel=0.01)
-        objs.append(join(f"foot_{side}", [sh, so]))
-    export("character.glb", objs)
+        if side == "r":  # launcher gauntlet on the web hand
+            extra.append(box("gauntlet", (0.09, 0.115, 0.15), (0, 0.02, -0.15), gear, bevel=0.015))
+            extra.append(box("nozzle", (0.03, 0.05, 0.04), (0, 0.075, -0.22), metal, bevel=0.006))
+            extra.append(box("led", (0.06, 0.006, 0.012), (0, 0.078, -0.12), glow))
+        part(f"forearm_{side}", [fa, cuff, *extra])
+        # Open, relaxed hand.
+        palm = box("palm", (0.075, 0.03, 0.08), (0, 0.0, -0.045), glove, bevel=0.012)
+        fingers = []
+        for i in range(4):
+            x = (i - 1.5) * 0.019
+            f = cyl("finger", 0.0085, 0.065 - abs(i - 1.5) * 0.008, (0, 0, 0), skin, 6)
+            f.location = (x, 0.004, -0.085 - (0.065 - abs(i - 1.5) * 0.008))
+            f.rotation_euler = (-0.25, 0, 0)
+            fingers.append(f)
+        th = cyl("thumb", 0.01, 0.05, (0, 0, 0), skin, 6)
+        th.location = (sx * -0.04, 0.02, -0.06)
+        th.rotation_euler = (0.4, sx * 0.9, 0)
+        part(f"hand_{side}", [palm, *fingers, th])
+        # Gripping fist (shown while holding the web / on the stick).
+        fist = box("fist", (0.08, 0.06, 0.085), (0, 0.012, -0.05), glove, bevel=0.022, segs=3)
+        knuckles = box("knuckles", (0.078, 0.02, 0.03), (0, 0.04, -0.085), skin, bevel=0.008)
+        thumb_g = box("thumb_g", (0.022, 0.03, 0.045), (sx * -0.035, 0.035, -0.06), skin, bevel=0.009)
+        part(f"hand_{side}_grip", [fist, knuckles, thumb_g])
+
+    # ---- legs --------------------------------------------------------------
+    for side, sx in (("l", -1), ("r", 1)):
+        th = paint(smooth(loft("th", [(0.03, 0.086, 0.09), (-0.1, 0.092, 0.094), (-0.3, 0.072, 0.074),
+                                       (-0.45, 0.058, 0.06)])), pants)
+        cargo = box("cargo", (0.03, 0.08, 0.1), (sx * 0.09, 0.0, -0.2), pants, bevel=0.012)
+        kp = smooth(sphere("kneepad", 0.06, (0, 0.035, -0.45), pad, 12, 8, (1.0, 0.7, 1.15)))
+        part(f"thigh_{side}", [th, cargo, kp])
+        sh = paint(smooth(loft("sh", [(0.0, 0.058, 0.06), (-0.1, 0.062, 0.068, -0.012), (-0.3, 0.046, 0.048),
+                                       (-0.4, 0.04, 0.042)])), pants)
+        cuffl = paint(loft("cuffl", [(-0.36, 0.05, 0.052), (-0.42, 0.048, 0.05)], segs=12), strap)
+        part(f"shin_{side}", [sh, cuffl])
+        collar_s = paint(smooth(loft("hightop", [(0.02, 0.055, 0.06, 0.0), (-0.06, 0.06, 0.07, 0.01)], segs=12)), shoe)
+        body = box("shoe", (0.11, 0.27, 0.085), (0, 0.065, -0.07), shoe, bevel=0.035, segs=3)
+        toe = box("toecap", (0.105, 0.06, 0.05), (0, 0.17, -0.085), sole, bevel=0.02)
+        so = box("sole", (0.118, 0.285, 0.03), (0, 0.065, -0.115), sole, bevel=0.01)
+        lace = box("laces", (0.05, 0.12, 0.012), (0, 0.09, -0.025), strap)
+        part(f"foot_{side}", [collar_s, body, toe, so, lace])
+
+    # ---- scarf tail (3 segments, simulated as a spring chain in Godot) ------
+    for i in range(3):
+        w = 0.085 - i * 0.012
+        seg = box(f"scarf_{i}", (w, 0.016, 0.17), (0, 0, -0.085), scarf, bevel=0.006)
+        part(f"scarf_{i}", [seg])
+    export("character.glb", parts)
 
 
 if __name__ == "__main__":

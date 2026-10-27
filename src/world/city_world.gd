@@ -95,6 +95,119 @@ func spawn_point() -> Vector3:
 	return Vector3((t2[0] + t2[2]) * 0.5, t2[5] + 2.0, (t2[1] + t2[3]) * 0.5)
 
 
+## Clearance (m) to keep from each kind of rooftop prop when standing.
+const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0}
+const ROOF_EDGE_CLEARANCE := 4.0
+
+var _roof_spawns: Array = []
+
+
+## Every rooftop that makes a good start: high enough for an exciting first
+## swing, big enough to walk on, clear of props, facing a promising route.
+## [{position: Vector3 (capsule centre, standing), yaw: float, height: float}]
+func rooftop_spawns() -> Array:
+	if not _roof_spawns.is_empty():
+		return _roof_spawns
+	var roof_props := {}
+	for pr in layout.props:
+		if pr[0] in PROP_CLEARANCE:
+			var o: Vector3 = pr[1].origin
+			var k := Vector2i(roundi(o.x / 50.0), roundi(o.z / 50.0))
+			if not roof_props.has(k):
+				roof_props[k] = []
+			roof_props[k].append(pr)
+	for b in layout.buildings:
+		if b["kind"] != "normal":
+			continue
+		var t: Array = b["tiers"][-1]
+		var h: float = t[5]
+		if h < 45.0 or h > 115.0 or t[2] - t[0] < 18.0 or t[3] - t[1] < 18.0:
+			continue
+		var spot := _clear_spot(t, roof_props)
+		if spot.is_empty():
+			continue
+		var p := Vector3(spot["x"], h + 0.6 + 0.95, spot["z"])
+		_roof_spawns.append({"position": p, "height": h})  # yaw is computed when picked
+	return _roof_spawns
+
+
+## Picks a valid rooftop, avoiding `avoid` (the previous spawn) when possible.
+func random_rooftop(rng: RandomNumberGenerator, avoid := Vector3.INF) -> Dictionary:
+	var all := rooftop_spawns()
+	if all.is_empty():
+		return {"position": spawn_point(), "yaw": 0.0, "height": 0.0}
+	var fallback := {}
+	for attempt in 24:
+		var c: Dictionary = all[rng.randi() % all.size()]
+		if not c.has("yaw"):
+			c["yaw"] = _best_heading(c["position"], c["height"])
+		if is_nan(c["yaw"]):
+			continue  # nowhere promising to swing from this roof
+		if avoid == Vector3.INF or c["position"].distance_to(avoid) > 150.0:
+			return c
+		fallback = c
+	return fallback if not fallback.is_empty() else {"position": spawn_point(), "yaw": 0.0, "height": 0.0}
+
+
+func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
+	var x0: float = t[0] + ROOF_EDGE_CLEARANCE
+	var z0: float = t[1] + ROOF_EDGE_CLEARANCE
+	var x1: float = t[2] - ROOF_EDGE_CLEARANCE
+	var z1: float = t[3] - ROOF_EDGE_CLEARANCE
+	var nearby: Array = []
+	var c := Vector2i(roundi((t[0] + t[2]) * 0.25 / 25.0), roundi((t[1] + t[3]) * 0.25 / 25.0))
+	for dx in [-1, 0, 1]:
+		for dz in [-1, 0, 1]:
+			nearby.append_array(roof_props.get(c + Vector2i(dx, dz), []))
+	var best := {}
+	var best_margin := 0.0
+	for i in 5:
+		for j in 5:
+			var x := lerpf(x0, x1, i / 4.0)
+			var z := lerpf(z0, z1, j / 4.0)
+			var margin := 30.0
+			for pr in nearby:
+				var o: Vector3 = pr[1].origin
+				if absf(o.y - t[5]) > 1.0:
+					continue
+				margin = minf(margin, Vector2(o.x - x, o.z - z).length() - PROP_CLEARANCE[pr[0]])
+			if margin > best_margin:
+				best_margin = margin
+				best = {"x": x, "z": z}
+	return best
+
+
+## Direction with the most taller anchors ahead and nothing blocking the run-up.
+## Returns the camera-style yaw (looking along -Z rotated by yaw), NAN if none.
+func _best_heading(p: Vector3, roof_h: float) -> float:
+	var best := NAN
+	var best_s := 0.5
+	for k in 8:
+		var dir := Vector3.FORWARD.rotated(Vector3.UP, k * TAU / 8.0)
+		var score := 0.0
+		var blocked := false
+		for b in layout.buildings:
+			if b["kind"] == "invisible":
+				continue
+			var t: Array = b["tiers"][0]
+			var top: float = b["tiers"][-1][5]
+			var near := Vector3(clampf(p.x, t[0], t[2]), 0.0, clampf(p.z, t[1], t[3]))
+			var off := Vector3(near.x - p.x, 0.0, near.z - p.z)
+			var d := off.length()
+			if d < 0.5:
+				continue  # the building we're standing on
+			var along := off.dot(dir)
+			if along > 0.0 and d < 9.0 and top > roof_h + 2.0 and off.normalized().dot(dir) > 0.7:
+				blocked = true
+			if d < 25.0 or d > 110.0 or off.normalized().dot(dir) < 0.8 or top < roof_h + 5.0:
+				continue
+			score += minf(top - roof_h, 60.0) / d
+		if not blocked and score > best_s:
+			best_s = score
+			best = atan2(-dir.x, -dir.z)
+	return best
+
+
 func bot_heading() -> Vector3:
 	return Vector3.FORWARD
 

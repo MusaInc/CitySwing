@@ -37,6 +37,10 @@ func _ready() -> void:
 	if args.has("perf"):
 		Settings.show_perf = true
 	Settings.apply()
+	if args.has("seed"):
+		_spawn_rng.seed = int(args["seed"])  # reproducible spawns for captures/tests
+	else:
+		_spawn_rng.randomize()
 
 	atmosphere = Atmosphere.new()
 	atmosphere.name = "Atmosphere"
@@ -60,12 +64,12 @@ func _ready() -> void:
 	rig = CharacterRig.new()
 	rig.name = "Rig"
 	player.add_child(rig)
-	rig.player = player
-	player.landed.connect(func(spd, _street): rig.on_landed(spd))
+	rig.set_player(player)
 	rope = RopeVisual.new()
 	rope.name = "Rope"
 	add_child(rope)
 	rope.player = player
+	rope.hand = rig.launcher
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
@@ -86,6 +90,9 @@ func _ready() -> void:
 	touch = TouchControls.new()
 	ui.add_child(touch)
 	touch.camera = camera
+	touch.player = player
+	touch.web_feedback.connect(hud.web_feedback)
+	hud.touch_mode = DisplayServer.is_touchscreen_available() or args.has("touch")
 	touch.pause_pressed.connect(pause)
 	menus = Menus.new()
 	ui.add_child(menus)
@@ -99,9 +106,7 @@ func _ready() -> void:
 	if args.has("cam"):
 		_overview_camera()
 	if args.has("closeup"):
-		camera.near_distance = 2.6
-		camera.far_distance = 3.4
-		camera.height = 0.6
+		camera.distance_scale = 0.55
 	if args.has("mode"):
 		var m := String(args["mode"]).split(":")
 		start_mode(m[0], m[1] if m.size() > 1 else "")
@@ -161,6 +166,7 @@ func start_mode(kind: String, arg: String) -> void:
 		_:
 			mode = FreeSwingMode.new()
 			_install(mode)
+			spawn_on_random_rooftop()
 	mode.finished.connect(_on_finished)
 	mode.start()
 	state = State.PLAYING
@@ -168,6 +174,27 @@ func start_mode(kind: String, arg: String) -> void:
 	hud.visible = true
 	touch.visible = DisplayServer.is_touchscreen_available() or args.has("touch")
 	camera.snap()
+
+
+var _spawn_rng := RandomNumberGenerator.new()
+var _last_spawn := Vector3.INF
+
+
+## Free Swing starts on a random valid rooftop, facing a promising route.
+## Building collision always exists, so the spawn is safe immediately; the
+## visible chunks around it are meshed before the first frame.
+func spawn_on_random_rooftop() -> Dictionary:
+	if not world.has_method("random_rooftop"):
+		return {}
+	var spot: Dictionary = world.random_rooftop(_spawn_rng, _last_spawn)
+	_last_spawn = spot["position"]
+	world.build_all_near(spot["position"], 420.0)
+	player.respawn(spot["position"])
+	player.last_safe_position = spot["position"]
+	var dir := Vector3.FORWARD.rotated(Vector3.UP, spot["yaw"])
+	rig.set_facing(dir)
+	camera.face(spot["yaw"])
+	return spot
 
 
 func _install(m: GameMode) -> void:
@@ -226,7 +253,6 @@ func _apply_settings() -> void:
 
 
 func _process(_dt: float) -> void:
-	touch.target_locked = player.targeting.has_target
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
 

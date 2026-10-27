@@ -17,6 +17,7 @@ var _hold := false
 var _cooldown := 0.0
 var _ground_time := 0.0
 var _stall := 0.0
+var _climb := 0.0  # >0 while climbing the line off a wall (seconds spent)
 var _rng := RandomNumberGenerator.new()
 
 
@@ -53,6 +54,7 @@ func drive(p: Player, dt: float) -> Dictionary:
 	_ground_time = 0.0
 
 	if p.line_state == Player.Line.IDLE:
+		_climb = 0.0
 		_hold = false
 		var fire := false
 		var t := p.targeting
@@ -73,11 +75,22 @@ func drive(p: Player, dt: float) -> Dictionary:
 		_stall = _stall + dt if v.length() < 3.0 else 0.0
 		if style == Style.EXPERT:
 			out["move"] = dir
-			if _stall > 0.6:
-				# Pinned against a wall: let go and find a better anchor.
-				_hold = false
-				_cooldown = 0.15
-				_stall = 0.0
+			if _stall > 0.6 and _climb <= 0.0:
+				_climb = 0.001
+			if _climb > 0.0:
+				# Pinned against a wall: climb the line, then kick off the wall
+				# and let go to find a better anchor (what a skilled player does).
+				_climb += dt
+				_hold = true
+				out["reel"] = 1.0
+				if p.s.rope_length <= p.params.min_rope_length + 1.0 or _climb > 4.0:
+					out["jump"] = true
+					_hold = false
+					_cooldown = 0.2
+					_stall = 0.0
+					_climb = 0.0
+				out["grapple"] = _hold
+				return out
 			# Pump: shorten through the bottom of the arc, and always keep the
 			# bottom of the arc well clear of the street.
 			out["reel"] = 1.0 if below_anchor < deg_to_rad(25.0) and p.s.rope_length > 18.0 else 0.0

@@ -1,13 +1,15 @@
 class_name RopeVisual
 extends MeshInstance3D
-## Draws the grapple line as a camera-facing ribbon. Taut ropes are straight;
-## slack ropes sag (approximate catenary from the unused length); a flying line
-## ripples slightly as it travels.
+## Draws the web as a camera-facing ribbon from the character's animated hand
+## (visual only – physics uses Player.hand_position) through any corner wraps
+## to the anchor. Slack ropes sag; a flying line ripples as it travels.
 
-const SEGMENTS := 18
+const SEGMENTS := 14
 
 var player: Player
-var width := 0.045
+## Optional node whose position the web leaves from (the rig's launcher hand).
+var hand: Node3D
+var width := 0.04
 var _mesh := ImmediateMesh.new()
 var _wave := 0.0
 
@@ -18,7 +20,7 @@ func _ready() -> void:
 	top_level = true
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.95, 0.93, 0.86)
+	mat.albedo_color = Color(0.96, 0.95, 0.9)
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material_override = mat
 	extra_cull_margin = 200.0
@@ -32,30 +34,41 @@ func _process(dt: float) -> void:
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
 		return
-	var a := player.hand_position()
-	var b := player.line_tip if player.line_state == Player.Line.FLYING else player.s.anchor
-	var dist := a.distance_to(b)
-	if dist < 0.05:
-		return
-	var sag := 0.0
-	if player.line_state == Player.Line.ATTACHED:
-		var slack := maxf(0.0, player.s.rope_length - player.s.position.distance_to(player.s.anchor))
-		sag = sqrt(slack * dist) * 0.45
 	_wave += dt * 30.0
-	var amp := 0.25 if player.line_state == Player.Line.FLYING else 0.0
-	var side := (b - a).cross(Vector3.UP).normalized()
-	if side.length_squared() < 0.5:
-		side = Vector3.RIGHT
-	var cam_pos := cam.global_position
+	var start := hand.global_position if hand else player.hand_position()
+	var pts: PackedVector3Array
+	var sag := 0.0
+	var amp := 0.0
+	if player.line_state == Player.Line.FLYING:
+		pts = PackedVector3Array([start, player.line_tip])
+		amp = 0.22
+	else:
+		pts = player.rope_points()
+		pts[0] = start
+		var s := player.s
+		var slack := maxf(0.0, s.rope_length - s.position.distance_to(s.anchor))
+		sag = sqrt(slack * maxf(start.distance_to(s.anchor), 0.1)) * 0.45
 	_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
-	for i in SEGMENTS + 1:
-		var t := float(i) / SEGMENTS
-		var p := a.lerp(b, t)
-		p += Vector3.DOWN * sag * 4.0 * t * (1.0 - t)
-		p += side * sin(t * 9.0 - _wave) * amp * t * (1.0 - t) * 4.0
+	var cam_pos := cam.global_position
+	for seg_i in pts.size() - 1:
+		var a := pts[seg_i]
+		var b := pts[seg_i + 1]
+		var side := (b - a).cross(Vector3.UP).normalized()
+		if side.length_squared() < 0.5:
+			side = Vector3.RIGHT
 		var tangent := (b - a).normalized()
-		var to_cam := (cam_pos - p).normalized()
-		var w := tangent.cross(to_cam).normalized() * width * (1.0 + p.distance_to(cam_pos) * 0.012)
-		_mesh.surface_add_vertex(p - w)
-		_mesh.surface_add_vertex(p + w)
+		var first := seg_i == 0
+		for i in SEGMENTS + 1:
+			if i == 0 and seg_i > 0:
+				continue  # shared joint with the previous segment
+			var t := float(i) / SEGMENTS
+			var p := a.lerp(b, t)
+			if first:
+				# Only the free segment (hand → nearest pivot) sags or ripples.
+				p += Vector3.DOWN * sag * 4.0 * t * (1.0 - t)
+				p += side * sin(t * 9.0 - _wave) * amp * t * (1.0 - t) * 4.0
+			var to_cam := (cam_pos - p).normalized()
+			var w := tangent.cross(to_cam).normalized() * width * (1.0 + p.distance_to(cam_pos) * 0.012)
+			_mesh.surface_add_vertex(p - w)
+			_mesh.surface_add_vertex(p + w)
 	_mesh.surface_end()

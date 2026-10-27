@@ -59,5 +59,11 @@ extends Resource
 @export var hard_impact_speed: float = 14.0
 ## Speed into the floor above which the landing is a "roll" rather than a step.
 @export var roll_landing_speed: float = 18.0
+## Speed into a wall above which the body goes limp (ragdoll + recovery).
+@export var ragdoll_impact_speed: float = 28.0
+## Vertical landing speed above which the body crumples (ragdoll + recovery).
+@export var ragdoll_fall_speed: float = 30.0
+## Fraction of along-wall speed lost per second while scraping a facade.
+@export var wall_friction: float = 1.2
 ## Below this world Y the player respawns.
 @export var kill_plane_y: float = -30.0

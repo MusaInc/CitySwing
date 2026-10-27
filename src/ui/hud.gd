@@ -7,6 +7,9 @@ var camera: SwingCamera
 var mode_text := ""
 var mode_sub := ""
 var banner := ""
+## Touch play: no auto-target reticle; tap feedback instead.
+var touch_mode := false
+var _marks: Array = []  # [{pos, ok, reason, t}]
 var _banner_t := 0.0
 var _font: Font
 var _speed_smooth := 0.0
@@ -21,6 +24,12 @@ func _ready() -> void:
 	_font = ThemeDB.fallback_font
 
 
+func web_feedback(pos: Vector2, ok: bool, reason: String) -> void:
+	_marks.append({"pos": pos, "ok": ok, "reason": reason, "t": 0.0})
+	if _marks.size() > 6:
+		_marks.pop_front()
+
+
 func flash(text: String, seconds := 2.0) -> void:
 	banner = text
 	_banner_t = seconds
@@ -28,6 +37,9 @@ func flash(text: String, seconds := 2.0) -> void:
 
 func _process(dt: float) -> void:
 	_banner_t -= dt
+	for m in _marks:
+		m["t"] += dt
+	_marks = _marks.filter(func(m): return m["t"] < (0.45 if m["ok"] else 0.9))
 	_frame_ms = lerpf(_frame_ms, dt * 1000.0, 0.1)
 	_worst_t -= dt
 	if dt * 1000.0 > _worst_ms or _worst_t <= 0.0:
@@ -42,17 +54,38 @@ func _draw() -> void:
 	var cam := camera.cam
 	var white := Color(1, 1, 1, 0.92)
 	var shadow := Color(0, 0, 0, 0.35)
-	# Reticle on the predicted anchor.
-	var t := player.targeting
-	if t.has_target and player.line_state == Player.Line.IDLE and not cam.is_position_behind(t.point):
-		var p := cam.unproject_position(t.point)
-		var d := player.hand_position().distance_to(t.point)
-		var r := clampf(900.0 / maxf(d, 1.0), 8.0, 22.0)
-		draw_arc(p, r, 0, TAU, 32, Color(1.0, 0.82, 0.4, 0.95), 3.0, true)
-		draw_circle(p, 3.0, Color(1.0, 0.82, 0.4, 0.95))
-	elif player.line_state == Player.Line.IDLE:
-		var c := size / 2.0
-		draw_arc(c, 6, 0, TAU, 16, Color(1, 1, 1, 0.3), 1.5, true)
+	var gold := Color(1.0, 0.82, 0.4, 0.95)
+	# Live anchor marker (where the web is actually stuck).
+	if player.line_state != Player.Line.IDLE:
+		var a := player.rope_anchor() if player.line_state == Player.Line.ATTACHED else player.line_target
+		if not cam.is_position_behind(a):
+			var ap := cam.unproject_position(a)
+			draw_arc(ap, 7.0, 0, TAU, 20, gold, 2.5, true)
+			draw_circle(ap, 2.5, gold)
+	if not touch_mode:
+		# Controller/keyboard: reticle on the assisted target.
+		var t := player.targeting
+		if t.has_target and player.line_state == Player.Line.IDLE and not cam.is_position_behind(t.point):
+			var p := cam.unproject_position(t.point)
+			var d := player.hand_position().distance_to(t.point)
+			var r := clampf(900.0 / maxf(d, 1.0), 8.0, 22.0)
+			draw_arc(p, r, 0, TAU, 32, gold, 3.0, true)
+			draw_circle(p, 3.0, gold)
+		elif player.line_state == Player.Line.IDLE:
+			draw_arc(size / 2.0, 6, 0, TAU, 16, Color(1, 1, 1, 0.3), 1.5, true)
+	# Tap feedback: gold pulse = web fired here; red cross + reason = rejected.
+	for m in _marks:
+		var pos: Vector2 = m["pos"]
+		var k: float = m["t"]
+		if m["ok"]:
+			draw_arc(pos, 10.0 + k * 70.0, 0, TAU, 28, Color(1.0, 0.82, 0.4, 1.0 - k / 0.45), 3.0, true)
+		else:
+			var a2 := clampf(1.0 - (k - 0.5) / 0.4, 0.0, 1.0)
+			var red := Color(1.0, 0.32, 0.28, a2)
+			draw_line(pos + Vector2(-11, -11), pos + Vector2(11, 11), red, 3.5, true)
+			draw_line(pos + Vector2(-11, 11), pos + Vector2(11, -11), red, 3.5, true)
+			var label: String = {"sky": "no surface", "street": "street", "too far": "too far", "blocked": "blocked"}.get(m["reason"], m["reason"])
+			_text(pos + Vector2(16, 6), label, 18, red, Color(0, 0, 0, 0.4 * a2))
 
 	_speed_smooth = lerpf(_speed_smooth, player.speed(), 0.15)
 	var kmh := int(_speed_smooth * 3.6)

@@ -12,6 +12,7 @@ var has_target := false
 var point := Vector3.ZERO
 var normal := Vector3.ZERO
 var score := 0.0
+var _candidates: Array = []  # [score, point, normal], best first
 
 
 ## `aim` is the camera's forward vector; `travel` is the player's velocity.
@@ -30,6 +31,7 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 	var q := PhysicsRayQueryParameters3D.new()
 	q.collision_mask = GRAPPLE_MASK
 	q.exclude = exclude
+	var candidates: Array = []
 	for el in ELEVATIONS:
 		for yw in YAWS:
 			var dir := heading.rotated(Vector3.UP, deg_to_rad(yw))
@@ -57,11 +59,58 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 			var bottom := pt.y - dist
 			if bottom < 2.0:
 				s -= (2.0 - bottom) * 0.04
-			if s > score:
-				score = s
-				has_target = true
-				point = pt
-				normal = hit["normal"]
+			candidates.append([s, pt, hit["normal"]])
+	candidates.sort_custom(func(a, b): return a[0] > b[0])
+	_candidates = candidates
+	if not candidates.is_empty():
+		score = candidates[0][0]
+		has_target = true
+		point = candidates[0][1]
+		normal = candidates[0][2]
+
+
+## At the moment of firing: walk down the ranked candidates and return the
+## first whose swing, predicted with the real SwingPhysics model, comes out of
+## the bottom of the arc without hitting a building or the street. Falls back
+## to the top-ranked point if none does.
+func best_flyable(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, p: SwingParams,
+		exclude: Array[RID]) -> Vector3:
+	for i in mini(_candidates.size(), 8):
+		var pt: Vector3 = _candidates[i][1]
+		if predict_swing_clear(space, from_state, pt, p, exclude):
+			return pt
+	return point
+
+
+static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, anchor: Vector3,
+		p: SwingParams, exclude: Array[RID]) -> bool:
+	var s := SwingPhysics.State.new()
+	s.position = from_state.position
+	s.velocity = from_state.velocity
+	if not SwingPhysics.attach(s, anchor, p):
+		return false
+	var c := SwingPhysics.Controls.new()
+	var q := PhysicsRayQueryParameters3D.new()
+	q.collision_mask = 1 | GRAPPLE_MASK | (1 << 3)
+	q.exclude = exclude
+	var dt := 1.0 / 30.0
+	var rising := 0.0
+	var passed_bottom := false
+	for i in 60:
+		var a := s.position
+		SwingPhysics.step(s, c, p, dt)
+		var dir := s.position - a
+		q.from = a
+		q.to = s.position + dir.normalized() * 0.4  # body radius
+		if not space.intersect_ray(q).is_empty() or s.position.y < 2.0:
+			return false
+		var below := (s.position - anchor).normalized().angle_to(Vector3.DOWN) < deg_to_rad(15.0)
+		passed_bottom = passed_bottom or below
+		if passed_bottom and s.velocity.y > 0.0:
+			rising += dt
+			if rising > 0.35:
+				return true
+	return passed_bottom
 
 
 static func _score(dir: Vector3, heading: Vector3, travel_h: Vector3, speed: float, rise: float,

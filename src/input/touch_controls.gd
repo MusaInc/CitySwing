@@ -1,33 +1,37 @@
 class_name TouchControls
 extends Control
-## Landscape two-thumb layout.
-##   Left thumb : floating analogue stick anywhere on the left 42% → move_* actions.
-##   Right thumb: drag empty space to aim the camera; HOLD the grapple button to
-##                fire and stay attached, lift to release. Sliding the thumb while
-##                holding grapple keeps aiming. Reel in/out and jump sit above it.
-## Everything is fed into the InputMap actions, so gameplay code is input-agnostic.
+## Landscape two-thumb controls with per-finger roles (tracked by touch index).
+##   Left side   : floating analogue stick → move_* actions.
+##   LOOK pad    : drag to rotate the camera; never fires a web.
+##   JUMP/IN/OUT : buttons (jump / reel in / reel out).
+##   Anywhere else: the camera ray through that exact pixel. A valid building
+##                 surface fires the web *there*; holding that finger keeps
+##                 the web; lifting it releases. An invalid spot never fires:
+##                 dragging it turns the camera, tapping it shows why it was
+##                 rejected. A new valid tap while swinging re-attaches.
 
 signal look(delta: Vector2)
 signal pause_pressed
+## Feedback for the HUD: where the finger went, whether it was valid, and why not.
+signal web_feedback(screen_pos: Vector2, ok: bool, reason: String)
 
 const STICK_RADIUS := 78.0
 const LOOK_SENS := 0.0042
+const DRAG_THRESHOLD := 14.0
 
 var camera: SwingCamera
+var player: Player
 var buttons := {
-	"grapple": {"pos": Vector2(-150, -150), "r": 86.0, "label": "SWING"},
-	"jump": {"pos": Vector2(-322, -96), "r": 50.0, "label": "JUMP"},
-	"reel_in": {"pos": Vector2(-104, -330), "r": 44.0, "label": "IN"},
-	"reel_out": {"pos": Vector2(-222, -300), "r": 44.0, "label": "OUT"},
+	"jump": {"pos": Vector2(-118, -112), "r": 64.0, "label": "JUMP"},
+	"reel_in": {"pos": Vector2(-112, -262), "r": 44.0, "label": "IN"},
+	"reel_out": {"pos": Vector2(-228, -238), "r": 44.0, "label": "OUT"},
+	"look": {"pos": Vector2(-292, -104), "r": 66.0, "label": "LOOK"},
 }
-var target_locked := false  # grapple button tint when a target is available
 
-var _stick_touch := -1
+## touch index -> {"kind": stick|button|look|web|aim, "start", "last", "moved", "action", "result"}
+var touches := {}
 var _stick_origin := Vector2.ZERO
 var _stick_pos := Vector2.ZERO
-var _look_touch := -1
-var _look_last := Vector2.ZERO
-var _button_touch := {}  # touch index -> action
 var _safe := Rect2()
 var _font: Font
 
@@ -38,6 +42,7 @@ func _ready() -> void:
 	_font = ThemeDB.fallback_font
 	resized.connect(_update_safe)
 	_update_safe()
+	visibility_changed.connect(func(): if not visible: release_all())
 
 
 func _update_safe() -> void:
@@ -52,72 +57,119 @@ func _update_safe() -> void:
 		_safe = Rect2(Vector2.ZERO, size)
 
 
-func _button_center(b: Dictionary) -> Vector2:
-	return _safe.end + b["pos"]
+func button_center(action: String) -> Vector2:
+	return _safe.end + buttons[action]["pos"]
 
 
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
 	if event is InputEventScreenTouch:
-		var pos := _to_local(event.position)
 		if event.pressed:
-			_touch_down(event.index, pos)
+			touch_down(event.index, event.position)
 		else:
-			_touch_up(event.index)
+			touch_up(event.index)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventScreenDrag:
-		var pos := _to_local(event.position)
-		if event.index == _stick_touch:
-			_stick_pos = pos
-			_apply_stick()
-		elif event.index == _look_touch:
-			_emit_look((pos - _look_last))
-			_look_last = pos
-		elif _button_touch.get(event.index, "") == "grapple":
-			_emit_look(event.relative * get_global_transform_with_canvas().affine_inverse().get_scale() * 0.6)
+		touch_drag(event.index, event.position)
 		get_viewport().set_input_as_handled()
+
+
+## Positions are viewport coordinates (the same space the 3D camera projects in).
+func touch_down(idx: int, pos: Vector2) -> void:
+	var local := _to_local(pos)
+	if local.distance_to(Vector2(_safe.end.x - 44, _safe.position.y + 44)) < 40:
+		pause_pressed.emit()
+		return
+	for action in buttons:
+		var b: Dictionary = buttons[action]
+		if local.distance_to(button_center(action)) <= b["r"] * 1.2:
+			touches[idx] = {"kind": "look" if action == "look" else "button", "action": action, "last": pos,
+				"start": pos, "moved": false}
+			if action != "look":
+				Input.action_press(action)
+			Settings.haptic(8, 0.3)
+			queue_redraw()
+			return
+	if local.x < size.x * 0.40:
+		if not _has_kind("stick"):
+			touches[idx] = {"kind": "stick", "start": pos, "last": pos, "moved": false}
+			_stick_origin = local
+			_stick_pos = local
+		queue_redraw()
+		return
+	# World touch: aim the web exactly where the finger landed.
+	var result := {"ok": false, "reason": "no camera", "point": Vector3.ZERO}
+	if player and camera and camera.cam:
+		result = player.screen_target(camera.cam, pos)
+	if result["ok"]:
+		touches[idx] = {"kind": "web", "start": pos, "last": pos, "moved": false, "result": result}
+		player.fire_at(result["point"], idx)
+		web_feedback.emit(local, true, "")
+		Settings.haptic(10, 0.35)
+	else:
+		# Not a valid surface: becomes a camera drag if it moves; a tap shows why.
+		touches[idx] = {"kind": "aim", "start": pos, "last": pos, "moved": false, "result": result}
 	queue_redraw()
+
+
+func touch_drag(idx: int, pos: Vector2) -> void:
+	if not touches.has(idx):
+		return
+	var t: Dictionary = touches[idx]
+	var delta: Vector2 = pos - t["last"]
+	t["last"] = pos
+	if not t["moved"] and pos.distance_to(t["start"]) > DRAG_THRESHOLD:
+		t["moved"] = true
+	match t["kind"]:
+		"stick":
+			_stick_pos = _to_local(pos)
+			_apply_stick()
+		"look", "aim":
+			if t["moved"]:
+				_emit_look(delta)
+	queue_redraw()
+
+
+func touch_up(idx: int) -> void:
+	if not touches.has(idx):
+		return
+	var t: Dictionary = touches[idx]
+	touches.erase(idx)
+	match t["kind"]:
+		"stick":
+			for a in ["move_left", "move_right", "move_forward", "move_back"]:
+				Input.action_release(a)
+		"button":
+			Input.action_release(t["action"])
+		"web":
+			if player:
+				player.release_web(idx)  # only if this finger still owns the web
+		"aim":
+			if not t["moved"]:
+				web_feedback.emit(_to_local(t["start"]), false, t["result"]["reason"])
+				Settings.haptic(20, 0.15)
+	queue_redraw()
+
+
+func release_all() -> void:
+	for idx in touches.keys():
+		touch_up(idx)
+
+
+func _has_kind(kind: String) -> bool:
+	for t in touches.values():
+		if t["kind"] == kind:
+			return true
+	return false
 
 
 func _to_local(p: Vector2) -> Vector2:
 	return get_global_transform_with_canvas().affine_inverse() * p
 
 
-func _touch_down(idx: int, pos: Vector2) -> void:
-	if pos.distance_to(Vector2(_safe.end.x - 44, _safe.position.y + 44)) < 40:
-		pause_pressed.emit()
-		return
-	for action in buttons:
-		var b: Dictionary = buttons[action]
-		if pos.distance_to(_button_center(b)) <= b["r"] * 1.25:
-			_button_touch[idx] = action
-			Input.action_press(action)
-			Settings.haptic(8, 0.3)
-			return
-	if pos.x < size.x * 0.42 and _stick_touch == -1:
-		_stick_touch = idx
-		_stick_origin = pos
-		_stick_pos = pos
-	elif _look_touch == -1:
-		_look_touch = idx
-		_look_last = pos
-
-
-func _touch_up(idx: int) -> void:
-	if idx == _stick_touch:
-		_stick_touch = -1
-		for a in ["move_left", "move_right", "move_forward", "move_back"]:
-			Input.action_release(a)
-	elif idx == _look_touch:
-		_look_touch = -1
-	elif _button_touch.has(idx):
-		Input.action_release(_button_touch[idx])
-		_button_touch.erase(idx)
-
-
 func _apply_stick() -> void:
-	var d := (_stick_pos - _stick_origin)
+	var d := _stick_pos - _stick_origin
 	if d.length() > STICK_RADIUS:
 		# Floating stick: drag the base along so reversing direction is instant.
 		_stick_origin = _stick_pos - d.normalized() * STICK_RADIUS
@@ -150,26 +202,32 @@ func _emit_look(d: Vector2) -> void:
 func _draw() -> void:
 	var white := Color(1, 1, 1, 0.85)
 	var faint := Color(1, 1, 1, 0.16)
-	if _stick_touch != -1:
+	if _has_kind("stick"):
 		draw_circle(_stick_origin, STICK_RADIUS, faint)
 		draw_arc(_stick_origin, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.35), 2.0, true)
 		draw_circle(_stick_pos, 34.0, Color(1, 1, 1, 0.55))
 	else:
 		var hint := Vector2(_safe.position.x + 150, _safe.end.y - 150)
 		draw_arc(hint, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.18), 2.0, true)
+	var held := {}
+	for t in touches.values():
+		if t.has("action"):
+			held[t["action"]] = true
 	for action in buttons:
 		var b: Dictionary = buttons[action]
-		var c := _button_center(b)
-		var down := _button_touch.values().has(action)
-		var fill := Color(1, 1, 1, 0.38 if down else 0.14)
-		if action == "grapple" and target_locked:
-			fill = Color(1.0, 0.78, 0.35, 0.55 if down else 0.3)
-		draw_circle(c, b["r"], fill)
-		draw_arc(c, b["r"], 0, TAU, 48, white if down else Color(1, 1, 1, 0.5), 2.5, true)
-		var fs := 22 if action == "grapple" else 15
+		var c := button_center(action)
+		var down := held.has(action)
+		draw_circle(c, b["r"], Color(1, 1, 1, 0.34 if down else 0.12))
+		draw_arc(c, b["r"], 0, TAU, 48, white if down else Color(1, 1, 1, 0.45), 2.0, true)
+		if action == "look":
+			for k in 4:  # four-way arrows
+				var dir := Vector2.RIGHT.rotated(k * PI * 0.5)
+				var tip: Vector2 = c + dir * (float(b["r"]) - 12.0)
+				draw_line(tip, tip - dir * 10 + dir.orthogonal() * 7, Color(1, 1, 1, 0.6), 2.0, true)
+				draw_line(tip, tip - dir * 10 - dir.orthogonal() * 7, Color(1, 1, 1, 0.6), 2.0, true)
+		var fs := 15
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, white)
-	# Pause
 	var pp := Vector2(_safe.end.x - 44, _safe.position.y + 44)
 	draw_circle(pp, 24, faint)
 	draw_rect(Rect2(pp + Vector2(-8, -9), Vector2(5, 18)), white)

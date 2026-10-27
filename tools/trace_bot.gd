@@ -57,6 +57,8 @@ func _go() -> void:
 	p.released.connect(func(v): print("   RELEASE v=", v.snapped(Vector3.ONE * 0.1)))
 	p.landed.connect(func(s, st): print("   LAND %.1f street=%s" % [s, st]))
 	p.grapple_missed.connect(func(): print("   MISS"))
+	p.rope_wrapped.connect(func(c): print("   WRAP at ", c.snapped(Vector3.ONE * 0.1), " L=%.1f" % p.s.rope_length))
+	p.stun_started.connect(func(spd): print("   STUN %.1f" % spd))
 	for i in int(secs * 60):
 		await physics_frame
 		if i % 30 == 0:
