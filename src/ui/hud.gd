@@ -7,6 +7,10 @@ var camera: SwingCamera
 var mode_text := ""
 var mode_sub := ""
 var banner := ""
+## Bottom-centre instruction (Training).
+var hint := ""
+## World point to guide the player to (nearest token); Vector3.INF = none.
+var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
 var _marks: Array = []  # [{pos, ok, reason, t}]
@@ -16,6 +20,13 @@ var _speed_smooth := 0.0
 var _frame_ms := 0.0
 var _worst_ms := 0.0
 var _worst_t := 0.0
+var _lines_seed := 0.0
+var _perfect_t := 0.0
+var _perfect_n := 0
+var _lines_boost := 0.0  # extra speed-line burst after a perfect release
+## Speed lines start at this speed (m/s) and peak at SPEED_LINES_FULL.
+const SPEED_LINES_FROM := 20.0
+const SPEED_LINES_FULL := 42.0
 
 
 func _ready() -> void:
@@ -30,6 +41,12 @@ func web_feedback(pos: Vector2, ok: bool, reason: String) -> void:
 		_marks.pop_front()
 
 
+func on_perfect(streak: int) -> void:
+	_perfect_t = 0.9
+	_perfect_n = streak
+	_lines_boost = 1.0
+
+
 func flash(text: String, seconds := 2.0) -> void:
 	banner = text
 	_banner_t = seconds
@@ -37,6 +54,9 @@ func flash(text: String, seconds := 2.0) -> void:
 
 func _process(dt: float) -> void:
 	_banner_t -= dt
+	_lines_seed += dt
+	_perfect_t = maxf(_perfect_t - dt, 0.0)
+	_lines_boost = maxf(_lines_boost - dt * 1.6, 0.0)
 	for m in _marks:
 		m["t"] += dt
 	_marks = _marks.filter(func(m): return m["t"] < (0.45 if m["ok"] else 0.9))
@@ -55,6 +75,7 @@ func _draw() -> void:
 	var white := Color(1, 1, 1, 0.92)
 	var shadow := Color(0, 0, 0, 0.35)
 	var gold := Color(1.0, 0.82, 0.4, 0.95)
+	_draw_speed_lines()
 	# Live anchor marker (where the web is actually stuck).
 	if player.line_state != Player.Line.IDLE:
 		var a := player.rope_anchor() if player.line_state == Player.Line.ATTACHED else player.line_target
@@ -106,6 +127,23 @@ func _draw() -> void:
 	if mode_sub != "":
 		var w2 := _font.get_string_size(mode_sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 		_text(Vector2(size.x / 2.0 - w2 / 2.0, 76), mode_sub, 16, Color(1, 1, 1, 0.7), shadow)
+	if _perfect_t > 0.0:
+		# "PERFECT" pops in big, settles, and fades; the streak counts up.
+		var age := 0.9 - _perfect_t
+		var pop := 1.0 + 0.5 * exp(-age * 14.0)
+		var a := clampf(_perfect_t / 0.35, 0.0, 1.0)
+		var txt := "PERFECT" if _perfect_n < 2 else "PERFECT ×%d" % _perfect_n
+		var fs := int(34 * pop)
+		var tw := _font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		_text(Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.24 - age * 30.0), txt, fs, Color(1.0, 0.82, 0.4, a), Color(0, 0, 0, 0.4 * a))
+	if pointer != Vector3.INF:
+		_draw_pointer(cam)
+	if hint != "":
+		var hs := 24
+		var hw := _font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, hs).x
+		var hp := Vector2(size.x / 2.0 - hw / 2.0, 124.0)  # under the mode readout, clear of thumbs
+		draw_rect(Rect2(hp + Vector2(-22, -34), Vector2(hw + 44, 50)), Color(0, 0, 0, 0.45))
+		_text(hp, hint, hs, white, shadow)
 	if _banner_t > 0.0:
 		var a := clampf(_banner_t * 2.0, 0.0, 1.0)
 		var bw := _font.get_string_size(banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 40).x
@@ -128,6 +166,56 @@ func _draw() -> void:
 		for l in lines:
 			_text(Vector2(size.x * 0.3, y), l, 14, Color(0.7, 1.0, 0.7), shadow)
 			y += 18.0
+
+
+## Streaks radiating from the screen centre, scaled by speed. Positions are
+## hashed from a slowly ticking seed, so they flicker like wind, not noise.
+func _draw_speed_lines() -> void:
+	var k := clampf((player.speed() - SPEED_LINES_FROM) / (SPEED_LINES_FULL - SPEED_LINES_FROM), 0.0, 1.0)
+	k = maxf(k, _lines_boost * 0.8)
+	if k <= 0.0:
+		return
+	var c := size / 2.0
+	var r0 := size.length() * 0.32
+	var r1 := size.length() * 0.62
+	var tick := int(_lines_seed * 14.0)
+	var n := int(10 + k * 22)
+	for i in n:
+		var h := hash(Vector2i(i, tick))
+		var ang := float(h % 3600) / 3600.0 * TAU
+		var len := 0.25 + float((h >> 12) % 100) / 100.0 * 0.5
+		var a := r0 + float((h >> 20) % 100) / 100.0 * (r1 - r0) * 0.4
+		var d := Vector2(cos(ang), sin(ang))
+		draw_line(c + d * a, c + d * (a + (r1 - r0) * len), Color(1, 1, 1, 0.12 + 0.33 * k), 2.5, true)
+
+
+## Marker on the guided point; an edge arrow when it is off screen.
+func _draw_pointer(cam: Camera3D) -> void:
+	var teal := Color(0.45, 1.0, 0.85, 0.95)
+	var dist := player.global_position.distance_to(pointer)
+	var label := "%d m" % int(dist)
+	var behind := cam.is_position_behind(pointer)
+	var sp := cam.unproject_position(pointer)
+	var margin := 48.0
+	var on := not behind and sp.x > margin and sp.x < size.x - margin and sp.y > margin and sp.y < size.y - margin
+	if on:
+		var pts := PackedVector2Array([sp + Vector2(0, -12), sp + Vector2(10, 0), sp + Vector2(0, 12), sp + Vector2(-10, 0), sp + Vector2(0, -12)])
+		draw_polyline(pts, teal, 2.5, true)
+		_text(sp + Vector2(16, 6), label, 16, teal, Color(0, 0, 0, 0.4))
+		return
+	var c := size / 2.0
+	var dir := sp - c
+	if behind:
+		dir = -dir
+	if dir.length() < 1.0:
+		dir = Vector2.DOWN
+	dir = dir.normalized()
+	var half := c - Vector2(margin, margin)
+	var t := minf(half.x / maxf(absf(dir.x), 1e-4), half.y / maxf(absf(dir.y), 1e-4))
+	var p := c + dir * t
+	var side := Vector2(-dir.y, dir.x)
+	draw_colored_polygon(PackedVector2Array([p + dir * 14.0, p - dir * 8.0 + side * 10.0, p - dir * 8.0 - side * 10.0]), teal)
+	_text(p - dir * 30.0 + Vector2(-18, 5), label, 15, teal, Color(0, 0, 0, 0.4))
 
 
 func _text(pos: Vector2, s: String, fs: int, col: Color, sh: Color) -> void:

@@ -78,6 +78,10 @@ func attach_player(p: Player) -> void:
 	p.rope_snapped.connect(func(spd: float):
 		play("rope_snap", linear_to_db(clampf(spd / 12.0, 0.2, 1.0)))
 		Settings.haptic(20, clampf(spd / 15.0, 0.2, 0.8)))
+	p.perfect_release.connect(func(streak: int):
+		# A rising chime: each perfect in a row climbs a semitone (max an octave).
+		play("checkpoint", -7.0, pow(2.0, mini(streak - 1, 12) / 12.0) * 1.15)
+		Settings.haptic(18, 0.55))
 	p.landed.connect(_on_landed)
 	p.impact.connect(func(spd: float):
 		play("impact", linear_to_db(clampf(spd / 30.0, 0.3, 1.0)))

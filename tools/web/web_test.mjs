@@ -35,7 +35,7 @@ const at = (fx, fy) => [rect.x + fx * rect.w, rect.y + fy * rect.h];
 const shot = name => page.screenshot({ path: `${out}/${engine}_${name}.png` });
 check(rect.w >= 700 && rect.h >= 300 && rect.w > rect.h, `landscape canvas ${rect.w}x${rect.h}`);
 await shot("1_title");
-await page.touchscreen.tap(...at(0.5, 0.545));
+await page.touchscreen.tap(...at(0.5, 0.59));  // "Free Swing" (Training sits above it on a fresh save)
 s = await waitFor(v => v?.state === "playing", 30000);
 check(s?.state === "playing", "Free Swing starts with an iPhone touch");
 await page.waitForTimeout(2500);

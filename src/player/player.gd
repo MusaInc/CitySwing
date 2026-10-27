@@ -28,6 +28,9 @@ signal trick
 signal stun_started(speed: float)
 signal stun_ended
 signal launched
+## Let go inside the sweet spot (see SwingParams "Release"). streak counts
+## consecutive perfect releases without touching the ground.
+signal perfect_release(streak: int)
 
 enum Line { IDLE, FLYING, ATTACHED }
 
@@ -75,6 +78,9 @@ var distance_travelled := 0.0
 var swings := 0
 var chain := 0
 var best_chain := 0
+var perfect_streak := 0
+var perfects := 0
+var _from_swing := false  # in flight after letting go of a web (apex hang applies)
 var top_speed := 0.0
 
 var _grapple_held := false
@@ -229,6 +235,11 @@ func _physics_process(dt: float) -> void:
 	controls.move = _move_smooth
 	controls.reel = auto_tighten()
 	controls.jump = inp.get("jump", false)
+	controls.gravity_scale = 1.0
+	if _from_swing and not s.attached and absf(s.velocity.y) < params.apex_window:
+		# Hang at the top of the flight: time to pick the next anchor.
+		var k := absf(s.velocity.y) / params.apex_window
+		controls.gravity_scale = lerpf(params.apex_gravity_scale, 1.0, k * k)
 	aim_dir = inp.get("aim", aim_dir)
 	if inp.get("respawn", false):
 		respawn()
@@ -297,14 +308,20 @@ func _physics_process(dt: float) -> void:
 
 func _resolve_contacts(dt: float) -> void:
 	var worst_into := 0.0
+	var wall_n := Vector3.ZERO  # normal of the hardest wall hit this tick
+	var wall_ratio := 0.0       # its share of the speed going into the wall (1 = head-on)
 	var floor_street := false
 	for i in get_slide_collision_count():
 		var c := get_slide_collision(i)
 		var n := c.get_normal()
 		var into := -s.velocity.dot(n)
 		if into > 0.0:
+			var pre_speed := s.velocity.length()
 			s.velocity += n * into
 			if n.y < 0.6:
+				if into > worst_into:
+					wall_n = n
+					wall_ratio = into / maxf(pre_speed, 0.001)
 				worst_into = maxf(worst_into, into)
 			elif not was_on_floor:
 				worst_into = maxf(worst_into, into * 0.5)
@@ -322,13 +339,37 @@ func _resolve_contacts(dt: float) -> void:
 		var speed_in := maxf(land_speed, worst_into)
 		landed.emit(speed_in, floor_street)
 		chain = 0
+		perfect_streak = 0
+		_from_swing = false
 		if not floor_street:
 			last_safe_position = global_position + Vector3.UP * 0.2
 		if speed_in > params.ragdoll_fall_speed:
 			stun(speed_in)
 	elif on_floor:
 		on_street = floor_street
-	if worst_into > params.hard_impact_speed:
+	if worst_into > params.ragdoll_impact_speed and wall_n != Vector3.ZERO \
+			and wall_ratio < params.wall_glance_ratio and not stunned:
+		# A fast glancing hit is a wall tap, not a crash: kick off the facade
+		# and keep flowing (and keep the chain). Only head-on hits ragdoll.
+		var out := Vector3(wall_n.x, 0.0, wall_n.z).normalized()
+		s.velocity += out * worst_into * params.wall_glance_bounce
+		s.velocity.y = maxf(s.velocity.y, 0.0) + params.wall_kick_up * 0.6
+		wall_kicked.emit()
+		trick.emit()
+	elif worst_into > params.ragdoll_impact_speed and wall_n != Vector3.ZERO \
+			and worst_into < params.wall_run_max_speed and not stunned:
+		# Head-on, but survivable: hit the facade feet-first and run up it.
+		# Horizontal momentum is gone (that's the cost); the chain survives.
+		if line_state == Line.ATTACHED:
+			_let_go()
+		var out := Vector3(wall_n.x, 0.0, wall_n.z).normalized()
+		var along := s.velocity - out * s.velocity.dot(out)
+		along.y = 0.0
+		s.velocity = along * 0.5 + out * 2.0
+		s.velocity.y = clampf(worst_into * params.wall_run_up, 10.0, 22.0)
+		impact.emit(params.hard_impact_speed)  # a firm thud, no ragdoll
+		wall_kicked.emit()
+	elif worst_into > params.hard_impact_speed:
 		impact.emit(worst_into)
 		if worst_into > params.ragdoll_impact_speed:
 			stun(worst_into)
@@ -483,16 +524,38 @@ func _range_tolerant() -> SwingParams:
 
 func _let_go() -> void:
 	if line_state == Line.ATTACHED:
+		var perfect := is_perfect_release()
 		SwingPhysics.release(s)
+		if perfect:
+			s.velocity *= params.perfect_release_boost
+			s.velocity.y += params.perfect_release_lift
 		swings += 1
 		chain += 1
 		best_chain = maxi(best_chain, chain)
+		_from_swing = true
 		released.emit(s.velocity)
+		if perfect:
+			perfect_streak += 1
+			perfects += 1
+			perfect_release.emit(perfect_streak)
 	line_state = Line.IDLE
 	web_owner = ""
 	web_touch_id = -1
 	wraps.clear()
 	_zip = false
+
+
+## True when letting go now would be a perfect release: taut, rising,
+## heading forward-and-up inside the sweet spot, at speed.
+func is_perfect_release() -> bool:
+	if not (s.attached and s.taut) or stunned:
+		return false
+	var v := s.velocity
+	var spd := v.length()
+	if spd < params.perfect_release_min_speed:
+		return false
+	var up := rad_to_deg(asin(clampf(v.y / spd, -1.0, 1.0)))
+	return up >= params.perfect_release_min_deg and up <= params.perfect_release_max_deg
 
 
 ## How hard the web pulls itself in this tick (see SwingPhysics.auto_tighten).
@@ -558,6 +621,8 @@ func respawn(at: Variant = null) -> void:
 	s.position = global_position
 	was_on_floor = false
 	chain = 0
+	perfect_streak = 0
+	_from_swing = false
 	respawned.emit()
 
 
@@ -566,4 +631,5 @@ func reset_stats() -> void:
 	swings = 0
 	chain = 0
 	best_chain = 0
+	perfects = 0
 	top_speed = 0.0

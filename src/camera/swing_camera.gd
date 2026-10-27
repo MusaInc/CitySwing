@@ -43,6 +43,7 @@ var _reverse_time := 0.0
 var _heading := 0.0       # filtered travel heading
 var _col_dist := -1.0
 var _fov_kick := 0.0
+var _punch := 0.0  # 1 → 0 after a perfect release; FOV snaps out fast, eases back
 var _snapped := false
 ## Overrides for close-up captures (--closeup).
 var distance_scale := 1.0
@@ -64,6 +65,8 @@ func set_target(p: Player) -> void:
 	snap()
 	p.respawned.connect(snap)
 	p.rope_snapped.connect(func(spd: float): _fov_kick = minf(_fov_kick + spd * 0.2, 3.0))
+	# Perfect release: a quick widening punch that sells the burst of speed.
+	p.perfect_release.connect(func(_n): _fov_kick = minf(_fov_kick + 7.0, 10.0); _punch = 1.0)
 
 
 func snap() -> void:
@@ -163,8 +166,9 @@ func _process(dt: float) -> void:
 	look_at(_focus, Vector3.UP)
 
 	_fov_kick = move_toward(_fov_kick, 0.0, 5.0 * dt)
+	_punch = move_toward(_punch, 0.0, dt * 2.5)
 	var fov_goal := lerpf(base_fov, max_fov, t * t * (3.0 - 2.0 * t)) + _fov_kick
-	cam.fov = lerpf(cam.fov, fov_goal, 1.0 - exp(-3.0 * dt))
+	cam.fov = lerpf(cam.fov, fov_goal, 1.0 - exp(-(3.0 + 9.0 * _punch) * dt))
 
 
 func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:

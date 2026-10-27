@@ -81,7 +81,9 @@ func test_springs_stay_stable_and_bounded(t) -> void:
 		await get_tree().process_frame
 		for b in rig.bones:
 			var q: Quaternion = (rig.bones[b] as Node3D).quaternion
-			if not q.is_finite() or (b != "upper_arm_r" and q.get_angle() > 3.0):
+			# q and -q are the same rotation: measure the shortest angle.
+			var ang := 2.0 * acos(clampf(absf(q.w), 0.0, 1.0))
+			if not q.is_finite() or (b != "upper_arm_r" and ang > 3.0):
 				bad += 1
 	t.check(bad == 0, "no NaN or extreme joint angles (%d bad samples)" % bad)
 
@@ -109,11 +111,27 @@ func test_animation_never_affects_physics(t) -> void:
 	bare.queue_free()
 
 
-func test_crash_ragdolls_then_recovers(t) -> void:
-	# Fly into the tower's south face hard, off the rope.
+func test_head_on_wall_hit_becomes_a_wall_run(t) -> void:
+	# Survivable head-on hit (between ragdoll_impact_speed and wall_run_max_speed).
 	player.respawn(Vector3(0, 40, -10))
 	await get_tree().physics_frame
 	player.s.velocity = Vector3(0, 0, -40)
+	var top := 0.0
+	var stunned := false
+	for i in 150:  # the face is ~42 m away: hit after ~1 s, then the run up
+		await get_tree().physics_frame
+		top = maxf(top, player.global_position.y)
+		stunned = stunned or player.stunned
+	t.check(not stunned, "no ragdoll at 40 m/s head-on")
+	t.note("wall run peak %.1f m above the hit" % (top - 40.0))
+	t.check(top > 45.0, "runs up the facade")
+
+
+func test_crash_ragdolls_then_recovers(t) -> void:
+	# Fly into the tower's south face very hard, off the rope.
+	player.respawn(Vector3(0, 40, -10))
+	await get_tree().physics_frame
+	player.s.velocity = Vector3(0, 0, -player.params.wall_run_max_speed - 8.0)
 	var ragdolled := false
 	var worst := 0.0
 	for i in 60:

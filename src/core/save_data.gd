@@ -16,6 +16,9 @@ const DEFAULTS := {
 	"total_swings": 0,
 	"top_speed_ms": 0.0,
 	"play_time_s": 0.0,
+	"tokens": [],  # collected Free Swing token ids
+	"tutorial_done": false,
+	"suit": "ember",
 }
 
 
@@ -74,4 +77,36 @@ func add_stats(distance: float, swings: int, top_speed: float, chain: int, secon
 	data["top_speed_ms"] = maxf(data["top_speed_ms"], top_speed)
 	data["best_chain"] = maxi(data["best_chain"], chain)
 	data["play_time_s"] += seconds
+	save()
+
+
+## Returns true the first time a token is collected.
+func collect_token(id: int) -> bool:
+	if has_token(id):
+		return false
+	data["tokens"].append(id)
+	save()
+	return true
+
+
+func has_token(id: int) -> bool:
+	# JSON round-trips ints as floats.
+	for t in data["tokens"]:
+		if int(t) == id:
+			return true
+	return false
+
+
+func token_count() -> int:
+	return data["tokens"].size()
+
+
+func complete_tutorial() -> void:
+	if not data["tutorial_done"]:
+		data["tutorial_done"] = true
+		save()
+
+
+func set_suit(id: String) -> void:
+	data["suit"] = id
 	save()

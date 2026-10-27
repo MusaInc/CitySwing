@@ -136,6 +136,38 @@ func test_endurance_ends_on_street(t) -> void:
 	p.queue_free()
 
 
+func test_training_steps_advance_when_performed(t) -> void:
+	# Best of three seeded rooftop starts (swinging is chaotic).
+	var best := 0
+	for k in 3:
+		var p := _player()
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 11 + k
+		p.respawn(world.random_rooftop(rng)["position"])
+		var hud := Hud.new()
+		var mode := TrainingMode.new()
+		add_child(mode)
+		mode.setup(p, hud, null, world)
+		mode.start()
+		t.check(hud.hint != "", "first instruction is shown")
+		var bot := SwingBot.new(SwingBot.Style.EXPERT, Vector3.FORWARD)
+		bot.goal_fn = world.bot_goal
+		p.bot = bot
+		for i in 60 * 40:
+			await get_tree().physics_frame
+			if mode.step >= 4:
+				break
+		best = maxi(best, mode.step)
+		t.note("start %d: training reached step %d/%d" % [k, mode.step + 1, TrainingMode.STEPS.size()])
+		mode.queue_free()
+		p.queue_free()
+		await get_tree().process_frame
+		hud.free()
+		if best >= 4:
+			break
+	t.check(best >= 4, "web, release, chain and a 4-chain complete by actually swinging")
+
+
 func test_personal_bests_persist(t) -> void:
 	var before = SaveData.data.duplicate(true)
 	SaveData.data["best_trial_times"] = {}

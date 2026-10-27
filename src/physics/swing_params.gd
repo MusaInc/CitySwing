@@ -44,6 +44,24 @@ extends Resource
 @export var wrap_cut_length: float = 6.0
 ## Hard cap on tangential speed gained purely from reeling (stops infinite pumping).
 @export var reel_speed_cap: float = 55.0
+## Share of the radial energy lost when a slack rope snaps taut that is turned
+## into speed along the swing instead (0 = pure inelastic jerk). Catching a web
+## mid-flight carries you on rather than braking you.
+@export_range(0.0, 1.0) var snap_redirect: float = 0.7
+
+@export_group("Release")
+## Letting go on the upswing inside the sweet spot (flight path this many
+## degrees above horizontal, at speed) is a perfect release: speed × boost.
+@export var perfect_release_min_deg: float = 20.0
+@export var perfect_release_max_deg: float = 42.0
+@export var perfect_release_min_speed: float = 12.0
+@export var perfect_release_boost: float = 1.1
+## Extra upward speed (m/s) on a perfect release, for a satisfying launch.
+@export var perfect_release_lift: float = 2.5
+## After any release, gravity is scaled by this near the top of the flight
+## (|vy| below apex_window) for a moment of hang time to line up the next web.
+@export_range(0.2, 1.0) var apex_gravity_scale: float = 0.55
+@export var apex_window: float = 5.0
 
 @export_group("Control authority")
 ## Tangential force the player can add while attached (body "kick"), m/s².
@@ -73,6 +91,16 @@ extends Resource
 @export var roll_landing_speed: float = 18.0
 ## Speed into a wall above which the body goes limp (ragdoll + recovery).
 @export var ragdoll_impact_speed: float = 28.0
+## Fast wall hits at a shallower angle than this (speed into the wall ÷ total
+## speed; 0.7 ≈ 44°) are wall taps that bounce you off instead of crashing.
+@export_range(0.0, 1.0) var wall_glance_ratio: float = 0.7
+## Share of the into-wall speed returned as an outward push on a wall tap.
+@export_range(0.0, 1.0) var wall_glance_bounce: float = 0.35
+## Head-on wall hits between ragdoll_impact_speed and this become a wall run:
+## the body plants its feet and runs up the facade at into-speed × wall_run_up.
+## Above it, the body crashes (ragdoll).
+@export var wall_run_max_speed: float = 50.0
+@export_range(0.0, 1.0) var wall_run_up: float = 0.55
 ## Vertical landing speed above which the body crumples (ragdoll + recovery).
 @export var ragdoll_fall_speed: float = 30.0
 ## Fraction of along-wall speed lost per second while scraping a facade.

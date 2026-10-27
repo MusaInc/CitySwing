@@ -29,6 +29,8 @@ class Controls:
 	## +1 reel in, -1 reel out.
 	var reel := 0.0
 	var jump := false
+	## Game-layer gravity multiplier (apex hang time). Model tests leave it at 1.
+	var gravity_scale := 1.0
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -68,7 +70,7 @@ static func _substep(s: State, c: Controls, p: SwingParams, h: float) -> void:
 	if on_ground:
 		v = _ground_move(v, c, p, h)
 	else:
-		v.y -= p.gravity * h
+		v.y -= p.gravity * c.gravity_scale * h
 		if s.attached and s.taut:
 			v = _swing_steer(s, v, c, p, h)
 		else:
@@ -116,10 +118,18 @@ static func _substep(s: State, c: Controls, p: SwingParams, h: float) -> void:
 			s.position = s.anchor + nrm * minf(dist, s.rope_length)
 			var vr := v.dot(nrm)
 			if vr > 0.0:
+				var lost := vr * (p.taut_inelasticity if not s.taut else 1.0)
+				# Slack rope snapping tight is an inelastic jerk...
+				v -= nrm * lost
 				if not s.taut:
 					s.snap_speed = maxf(s.snap_speed, vr)
-				# Slack rope snapping tight is an inelastic jerk.
-				v -= nrm * vr * (p.taut_inelasticity if not s.taut else 1.0)
+					# ...but part of its energy carries on along the swing, so a
+					# web caught mid-flight keeps your momentum (never a gain).
+					var vt := v - nrm * v.dot(nrm)
+					var vt_len := vt.length()
+					if vt_len > 1.0:
+						var keep := sqrt(vt_len * vt_len + p.snap_redirect * lost * lost)
+						v += vt / vt_len * (keep - vt_len)
 			s.taut = true
 			var vt2 := (v - nrm * v.dot(nrm)).length_squared()
 			s.tension = maxf(0.0, vt2 / s.rope_length - p.gravity * nrm.y)

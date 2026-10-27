@@ -49,6 +49,7 @@ var bones := {}
 var launcher: Node3D  # the web hand; RopeVisual starts here
 var ragdoll := VerletRagdoll.new()
 var ragdolling := false
+var _mat: ShaderMaterial
 
 var _rot := {}      # bone -> Quaternion (current)
 var _angvel := {}   # bone -> Vector3 (angular velocity, parent space)
@@ -77,6 +78,8 @@ func _ready() -> void:
 	var parts := _load_parts()
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://src/player/shaders/character.gdshader")
+	_mat = mat
+	set_suit_color(Progress.current_suit_color())
 	for name in BONES:
 		var def: Array = BONES[name]
 		var pivot := Node3D.new()
@@ -116,6 +119,12 @@ func _ready() -> void:
 		_scarf.append(seg)
 	if player:
 		_connect_player()
+
+
+## Recolours the jacket (see character.gdshader).
+func set_suit_color(c: Color) -> void:
+	if _mat:
+		_mat.set_shader_parameter("suit_color", Vector3(c.r, c.g, c.b))
 
 
 func set_player(p: Player) -> void:

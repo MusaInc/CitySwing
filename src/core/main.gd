@@ -25,6 +25,7 @@ var mode: GameMode
 var ui: CanvasLayer
 var args := {}
 var _last_mode := ["free", ""]
+var _suits_before := []  # unlocked suit ids when the current run started
 
 
 func _ready() -> void:
@@ -92,6 +93,7 @@ func _ready() -> void:
 	touch.camera = camera
 	touch.player = player
 	touch.web_feedback.connect(hud.web_feedback)
+	player.perfect_release.connect(hud.on_perfect)
 	hud.touch_mode = DisplayServer.is_touchscreen_available() or args.has("touch")
 	touch.pause_pressed.connect(pause)
 	menus = Menus.new()
@@ -101,6 +103,11 @@ func _ready() -> void:
 	menus.resume.connect(unpause)
 	menus.restart.connect(func(): start_mode(_last_mode[0], _last_mode[1]))
 	menus.quit_to_title.connect(to_title)
+	menus.end_session.connect(func():
+		if mode is FreeSwingMode:
+			get_tree().paused = false
+			(mode as FreeSwingMode).stop())
+	menus.suit_changed.connect(func(c): rig.set_suit_color(c))
 	Settings.changed.connect(_apply_settings)
 
 	if args.has("cam"):
@@ -125,6 +132,7 @@ func _ready() -> void:
 			"courses": menus.show_courses()
 			"tuning": menus.show_tuning()
 			"pause": menus.show_pause()
+			"suits": menus.show_suits()
 	if args.has("nohud"):
 		ui.visible = false
 	if OS.has_feature("web"):
@@ -170,7 +178,14 @@ func start_mode(kind: String, arg: String) -> void:
 	_last_mode = [kind, arg]
 	player.bot = null
 	player.input_enabled = true
+	_suits_before = Progress.unlocked_ids()
 	match kind:
+		"training":
+			var tr := TrainingMode.new()
+			tr.touch = DisplayServer.is_touchscreen_available() or args.has("touch")
+			mode = tr
+			_install(mode)
+			spawn_on_random_rooftop()
 		"trial":
 			var tt := TimeTrialMode.new()
 			_install(tt)
@@ -237,7 +252,7 @@ func pause() -> void:
 	state = State.PAUSED
 	get_tree().paused = true
 	touch.visible = false
-	menus.show_pause()
+	menus.show_pause(mode is FreeSwingMode)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
@@ -249,6 +264,7 @@ func unpause() -> void:
 
 
 func _on_finished(result: Dictionary) -> void:
+	result["unlocks"] = Progress.newly_unlocked(_suits_before)
 	state = State.RESULTS
 	touch.visible = false
 	player.input_enabled = false

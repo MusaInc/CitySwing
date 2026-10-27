@@ -86,8 +86,10 @@ func test_skill_gap_expert_vs_novice(t) -> void:
 	ed.sort()
 	nd.sort()
 	t.note("expert distances %s (cleared %d/%d), novice %s" % [ed, cleared, experts.size(), nd])
-	t.check(ed[2] > nd[2] * 2.5, "skilled timing goes much further (median %.0f m vs %.0f m)" % [ed[2], nd[2]])
-	t.check(cleared >= 1, "the whole range can be cleared without touching the street")
+	# Mistakes cost time rather than ending the run (wall runs), so novices
+	# survive longer than they used to; the gap is in who actually clears it.
+	t.check(ed[2] > nd[2], "skilled timing goes further (median %.0f m vs %.0f m)" % [ed[2], nd[2]])
+	t.check(cleared >= 4, "skilled timing reliably clears the range without touching the street (%d/5)" % cleared)
 	var novice_fails := 0
 	for r in novices:
 		if r["street"] or r["best_z"] > -420.0:

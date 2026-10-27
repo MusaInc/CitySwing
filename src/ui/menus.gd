@@ -9,6 +9,8 @@ signal resume
 signal restart
 signal quit_to_title
 signal tuning_changed
+signal end_session
+signal suit_changed(color: Color)
 
 const ACCENT := Color(1.0, 0.76, 0.32)
 const PANEL := Color(0.05, 0.06, 0.09, 0.78)
@@ -78,20 +80,76 @@ func _build_theme() -> void:
 # ----------------------------------------------------------------- screens
 func show_title() -> void:
 	var box := _screen_box(0.5, 0.56)
-	var title := _label("CITY SWING", 84, ACCENT)
+	var title := _label("CITY SWING", 72, ACCENT)
 	box.add_child(title)
 	box.add_child(_label("Momentum is everything.", 24, Color(1, 1, 1, 0.75)))
-	box.add_child(_gap(18))
+	var mc := Progress.medal_counts()
+	box.add_child(_label("%d/%d tokens   ·   %d/%d medals   ·   %d/%d suits" % [SaveData.token_count(),
+		Progress.TOKEN_TOTAL, mc[0], CourseBuilder.COURSES.size(), Progress.unlocked_ids().size(),
+		Progress.SUITS.size()], 17, Color(1, 1, 1, 0.55)))
+	var first: Button
+	var trained: bool = SaveData.data["tutorial_done"]
+	if not trained:
+		first = _button("Training  ·  start here", func(): start_mode.emit("training", ""))
+		box.add_child(first)
 	var b1 := _button("Free Swing", func(): start_mode.emit("free", ""))
 	box.add_child(b1)
 	box.add_child(_button("Time Trial", show_courses))
 	box.add_child(_button("Endurance", func(): start_mode.emit("endurance", "")))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	if trained:
+		row.add_child(_button("Training", func(): start_mode.emit("training", "")))
+	row.add_child(_button("Suits", show_suits))
 	row.add_child(_button("Settings", func(): show_settings(show_title)))
 	row.add_child(_button("Stats", show_stats))
 	box.add_child(row)
-	b1.grab_focus.call_deferred()
+	(first if first else b1).grab_focus.call_deferred()
+
+
+func show_suits() -> void:
+	var box := _screen_box(0.5, 0.5, 720)
+	box.add_child(_label("SUITS", 52, ACCENT))
+	var current: String = SaveData.data.get("suit", "ember")
+	var focus: Button
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 12)
+	for sd in Progress.SUITS:
+		var open := Progress.unlocked(sd)
+		var txt: String = sd["name"] if open else "%s  ·  %s" % [sd["name"], sd["hint"]]
+		if sd["id"] == current:
+			txt = "✓ " + txt
+		var id: String = sd["id"]
+		var col: Color = sd["color"]
+		var b := _button(txt, func():
+			if not open:
+				return
+			SaveData.set_suit(id)
+			suit_changed.emit(col)
+			show_suits())
+		b.custom_minimum_size = Vector2(320, 60)
+		b.add_theme_font_size_override("font_size", 20 if open else 16)
+		b.icon = _swatch(col, open)
+		b.disabled = not open
+		grid.add_child(b)
+		if sd["id"] == current:
+			focus = b
+	box.add_child(grid)
+	var back := _button("Back", show_title)
+	box.add_child(back)
+	(focus if focus else back).grab_focus.call_deferred()
+
+
+func _swatch(c: Color, open: bool) -> ImageTexture:
+	var img := Image.create(28, 28, false, Image.FORMAT_RGBA8)
+	img.fill(Color(c, 1.0) if open else Color(0.3, 0.3, 0.32))
+	for i in 28:
+		for e in [0, 27]:
+			img.set_pixel(i, e, Color(1, 1, 1, 0.6))
+			img.set_pixel(e, i, Color(1, 1, 1, 0.6))
+	return ImageTexture.create_from_image(img)
 
 
 func show_courses() -> void:
@@ -103,12 +161,19 @@ func show_courses() -> void:
 		if c.is_empty():
 			continue
 		var best := SaveData.best_trial(id)
-		var txt := "%s     par %s   ·   best %s" % [CourseBuilder.COURSES[id]["name"], TimeTrialMode._fmt(c["par"]),
-			TimeTrialMode._fmt(best)]
+		var medal := Progress.medal_for(c["par"], best)
+		var txt := "%s     best %s" % [CourseBuilder.COURSES[id]["name"], TimeTrialMode._fmt(best)]
+		if medal != Progress.Medal.NONE:
+			txt += "   ·   " + Progress.MEDAL_NAMES[medal].to_upper()
 		var b := _button(txt, func(): start_mode.emit("trial", id))
 		b.tooltip_text = CourseBuilder.COURSES[id]["desc"]
+		if medal != Progress.Medal.NONE:
+			b.add_theme_color_override("font_color", Progress.MEDAL_COLORS[medal])
 		box.add_child(b)
-		box.add_child(_label(CourseBuilder.COURSES[id]["desc"], 18, Color(1, 1, 1, 0.6)))
+		box.add_child(_label("%s\ngold %s  ·  silver %s  ·  bronze %s" % [CourseBuilder.COURSES[id]["desc"],
+			TimeTrialMode._fmt(Progress.medal_target(c["par"], Progress.Medal.GOLD)),
+			TimeTrialMode._fmt(Progress.medal_target(c["par"], Progress.Medal.SILVER)),
+			TimeTrialMode._fmt(Progress.medal_target(c["par"], Progress.Medal.BRONZE))], 17, Color(1, 1, 1, 0.6)))
 		if first == null:
 			first = b
 	box.add_child(_gap(10))
@@ -117,12 +182,15 @@ func show_courses() -> void:
 		first.grab_focus.call_deferred()
 
 
-func show_pause() -> void:
+func show_pause(free_swing := false) -> void:
 	var box := _screen_box(0.5, 0.5)
 	box.add_child(_label("PAUSED", 56, ACCENT))
 	var b := _button("Resume", func(): resume.emit())
 	box.add_child(b)
-	box.add_child(_button("Restart", func(): restart.emit()))
+	if free_swing:
+		box.add_child(_button("End session", func(): end_session.emit()))
+	else:
+		box.add_child(_button("Restart", func(): restart.emit()))
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(_button("Settings", func(): show_settings(show_pause)))
@@ -159,17 +227,30 @@ func show_results(r: Dictionary) -> void:
 			box.add_child(bb)
 			bb.grab_focus.call_deferred()
 			return
+		"training":
+			headline = "Training complete"
+			detail = "You're ready. Free Swing hides %d tokens around the city." % Progress.TOKEN_TOTAL
 		_:
 			headline = "%.2f km" % (r.get("distance", 0.0) / 1000.0)
-			detail = "Free swing"
+			detail = "Free swing   ·   %d token%s this session   ·   %d/%d found" % [r.get("tokens_session", 0),
+				"" if r.get("tokens_session", 0) == 1 else "s", r.get("tokens_total", 0), Progress.TOKEN_TOTAL]
+	var medal: int = r.get("medal", Progress.Medal.NONE)
+	if medal != Progress.Medal.NONE:
+		box.add_child(_label("%s MEDAL" % Progress.MEDAL_NAMES[medal].to_upper(), 30, Progress.MEDAL_COLORS[medal]))
 	if r.get("new_best", false):
 		box.add_child(_label("NEW PERSONAL BEST", 26, ACCENT))
 	box.add_child(_label(headline, 76, Color.WHITE))
 	box.add_child(_label(detail, 22, Color(1, 1, 1, 0.75)))
 	box.add_child(_label("%d swings   ·   longest chain ×%d   ·   top speed %d km/h" % [r.get("swings", 0),
 		r.get("chain", 0), int(r.get("top_speed", 0.0) * 3.6)], 20, Color(1, 1, 1, 0.6)))
+	for u in r.get("unlocks", []):
+		box.add_child(_label("SUIT UNLOCKED: %s" % String(u).to_upper(), 22, Color(0.45, 1.0, 0.85)))
 	box.add_child(_gap(14))
-	var b := _button("Go again", func(): restart.emit())
+	var b: Button
+	if r.get("mode", "") == "training":
+		b = _button("Free Swing", func(): start_mode.emit("free", ""))
+	else:
+		b = _button("Go again", func(): restart.emit())
 	box.add_child(b)
 	box.add_child(_button("Title", func(): quit_to_title.emit()))
 	b.grab_focus.call_deferred()
@@ -185,6 +266,8 @@ func show_stats() -> void:
 		"Top speed   %d km/h" % int(d["top_speed_ms"] * 3.6),
 		"Longest chain   ×%d" % d["best_chain"],
 		"Endurance best   %d m" % int(d["best_endurance_m"]),
+		"Tokens   %d/%d" % [SaveData.token_count(), Progress.TOKEN_TOTAL],
+		"Medals   %d/%d   (gold %d)" % [Progress.medal_counts()[0], CourseBuilder.COURSES.size(), Progress.medal_counts()[1]],
 		"Time played   %d min" % int(d["play_time_s"] / 60.0),
 	]:
 		box.add_child(_label(line, 24, Color(1, 1, 1, 0.85)))

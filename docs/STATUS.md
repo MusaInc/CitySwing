@@ -1,6 +1,32 @@
-# Status: 2026-10-27 (gameplay overhaul)
+# Status: 2026-10-27 (swing feel + progression)
 
-## Overhaul (latest)
+## Swing feel pass (latest)
+
+Measured with `tools/feel_report.gd` (6 autopilot runs × 40 s; bots are
+chaotic, so these are rough):
+
+| | before | after |
+|---|---|---|
+| Expert: airborne speed / ragdoll crashes per run | 54 km/h / 1.2 | 59 km/h / 0.0 |
+| Novice: airborne speed / ragdoll crashes per run | not measured | 66 km/h / 0.2 (was 2.0 before wall runs) |
+| Prototype range cleared by expert timing | 1/5 | 5/5 (novice still 0/5) |
+
+- Perfect release (gold web cue, PERFECT ×n pop, FOV punch, rising chime).
+- Momentum kept when a web is caught mid-flight; hang time at the apex.
+- Head-on wall hits below 50 m/s become wall runs; glancing hits are wall taps.
+- Speed lines from 72 km/h. Time Trial courses re-recorded for the new physics.
+
+## Progression
+
+Training mode (first-run), 40 Free Swing tokens with a HUD pointer, Time Trial
+medals with targets shown in the course list and HUD, 8 unlockable suit
+colours (jacket recoloured in the character shader), unlock notices on the
+results screen, "End session" in Free Swing pause. 62 native tests; browser
+tests Chromium 12/12, WebKit 7/7. Still **not tried on a physical iPhone**:
+the swing feel numbers above come from the autopilot only.
+
+## Overhaul (earlier)
+
 
 - Assisted SWING touch catches the best valid anchor while held; if none is in
   range it launches and catches the next one automatically. Optional precise

@@ -12,6 +12,10 @@ var hand: Node3D
 var width := 0.04
 var _mesh := ImmediateMesh.new()
 var _wave := 0.0
+var _mat: StandardMaterial3D
+var _glow := 0.0
+const WHITE := Color(0.96, 0.95, 0.9)
+const SWEET := Color(1.0, 0.78, 0.3)
 
 
 func _ready() -> void:
@@ -20,7 +24,8 @@ func _ready() -> void:
 	top_level = true
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.96, 0.95, 0.9)
+	mat.albedo_color = WHITE
+	_mat = mat
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material_override = mat
 	extra_cull_margin = 200.0
@@ -35,6 +40,11 @@ func _process(dt: float) -> void:
 	if cam == null:
 		return
 	_wave += dt * 30.0
+	# Timing cue: the web glows gold inside the perfect-release window.
+	var want := 1.0 if player.line_state == Player.Line.ATTACHED and player.is_perfect_release() else 0.0
+	_glow = move_toward(_glow, want, dt * (12.0 if want > _glow else 5.0))
+	_mat.albedo_color = WHITE.lerp(SWEET, _glow)
+	var w_scale := 1.0 + _glow * 0.6
 	var start := hand.global_position if hand else player.hand_position()
 	var pts: PackedVector3Array
 	var sag := 0.0
@@ -68,7 +78,7 @@ func _process(dt: float) -> void:
 				p += Vector3.DOWN * sag * 4.0 * t * (1.0 - t)
 				p += side * sin(t * 9.0 - _wave) * amp * t * (1.0 - t) * 4.0
 			var to_cam := (cam_pos - p).normalized()
-			var w := tangent.cross(to_cam).normalized() * width * (1.0 + p.distance_to(cam_pos) * 0.012)
+			var w := tangent.cross(to_cam).normalized() * width * w_scale * (1.0 + p.distance_to(cam_pos) * 0.012)
 			_mesh.surface_add_vertex(p - w)
 			_mesh.surface_add_vertex(p + w)
 	_mesh.surface_end()

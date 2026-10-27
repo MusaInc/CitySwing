@@ -89,8 +89,14 @@ static func _crossed(g: Dictionary, a: Vector3, b: Vector3) -> bool:
 func _hud() -> void:
 	var best := SaveData.best_trial(course["id"])
 	hud.mode_text = "%s" % _fmt(elapsed)
-	hud.mode_sub = "ring %d/%d   ·   best %s" % [mini(next + 1, rings.size()), rings.size(),
-		"--" if best == INF else _fmt(best)]
+	var target := ""
+	for m in [Progress.Medal.GOLD, Progress.Medal.SILVER, Progress.Medal.BRONZE]:
+		var t := Progress.medal_target(course["par"], m)
+		if elapsed <= t:
+			target = "%s %s" % [Progress.MEDAL_NAMES[m].to_lower(), _fmt(t)]
+			break
+	hud.mode_sub = "ring %d/%d   ·   %s   ·   best %s" % [mini(next + 1, rings.size()), rings.size(),
+		target if target != "" else "no medal", "--" if best == INF else _fmt(best)]
 
 
 func _complete() -> void:
@@ -102,6 +108,7 @@ func _complete() -> void:
 	rings.clear()
 	end_run({"mode": "trial", "course": course["name"], "course_id": course["id"], "time": elapsed,
 		"new_best": best, "best": SaveData.best_trial(course["id"]), "par": course["par"], "splits": splits,
+		"medal": Progress.medal_for(course["par"], elapsed),
 		"swings": player.swings, "top_speed": player.top_speed, "chain": player.best_chain})
 
 

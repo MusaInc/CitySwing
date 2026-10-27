@@ -19,8 +19,18 @@ no story: the whole game is mastering momentum, timing and line choice.
 - **Automatic tightening conserves angular momentum** (`r·v_t = const`). The
   web shortens through the bottom of the arc, pumping energy into the swing.
   A ground launch tightens sooner to lift the player clear of the street.
-- **Release never touches velocity.** You fly off with exactly what the swing
-  gave you.
+- **The model's release never touches velocity.** You fly off with exactly
+  what the swing gave you, plus one game-layer reward (in `player.gd`): a
+  **perfect release** (flight path 20–42° above horizontal, ≥ 12 m/s) adds 10%
+  speed and 2.5 m/s lift. The web glows gold while you are inside the window;
+  letting go there pops "PERFECT", punches the FOV and plays a rising chime
+  for each consecutive perfect release.
+- **Flow assists** (all in the "Release"/"Rope"/"Impacts" params): a slack web
+  snapping tight returns 70% of the lost radial energy along the swing
+  (`snap_redirect`, never a gain), gravity eases to 55% near the top of a
+  post-release flight (hang time to pick the next anchor), a fast glancing
+  wall hit becomes a wall tap, and a head-on one below 50 m/s becomes a wall
+  run up the facade. Only harder hits ragdoll.
 - **Limited control authority**: tangential "kick" on the rope (4.5 m/s²),
   horizontal air steering (5 m/s², which can't push you above 9 m/s by itself),
   ground running with momentum-preserving landings, wall-kick recovery.
@@ -55,7 +65,12 @@ SWING button remains an assisted fallback.
 
 ## Modes
 
-- **Free Swing**: explore.
+- **Training**: seven guided steps (fire, release, catch, 4-chain, air jump,
+  90 km/h, rooftop landing), each completed by doing it. Offered first on a
+  fresh save.
+- **Free Swing**: explore and collect the 40 tokens hidden over the city
+  (`src/world/token_field.gd`; deterministic spots, collection saved). The HUD
+  points at the nearest one.
 - **Time Trial**: three courses (Canyon Sprint, Three Graces, Beacon Loop).
   Courses are **recorded from real physics**: `tools/make_courses.gd` flies
   the expert autopilot along street routes and places wall-to-wall gates along
@@ -65,7 +80,12 @@ SWING button remains an assisted fallback.
 - **Benchmark** (Settings → Run 45 s benchmark): fixed autopilot route,
   records frame-time statistics on the device.
 
-Personal bests and lifetime stats are saved to `user://save.json`.
+Personal bests, tokens, Training completion, the chosen suit and lifetime
+stats are saved to `user://save.json`. Time Trial medals (gold = par, silver
+≤ 1.25 × par, bronze ≤ 1.6 × par) and eight unlockable suit colours are derived
+from that save (`src/core/progress.gd`). `tools/feel_report.gd` prints
+swing-feel numbers (airborne speed, perfect releases, crashes) over several
+autopilot runs, to compare tuning changes.
 
 ## The city
 
