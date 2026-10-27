@@ -50,6 +50,10 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 			if dist < 6.0:
 				continue
 			var s := _score(dir, heading, travel_h, speed, rise, dist, el, aim_pitch, p)
+			if grounded:
+				# From the ground, a high, steep anchor lifts you; a far shallow
+				# one just drags you along the street.
+				s += clampf(rise / 35.0, 0.0, 1.0) * 1.5 + (0.6 if el >= 55.0 else 0.0)
 			# A wall facing you puts the bottom of the arc against that wall – the
 			# swing ends in a collision. Side walls along the route swing cleanly.
 			var n: Vector3 = hit["normal"]
@@ -104,7 +108,9 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 		var dir := s.position - a
 		q.from = a
 		q.to = s.position + dir.normalized() * 0.4  # body radius
-		if not space.intersect_ray(q).is_empty() or s.position.y < 2.0:
+		# (Street contact is caught by the ray – the street is in the mask – so a
+		# launch from street level isn't rejected just for starting low.)
+		if not space.intersect_ray(q).is_empty():
 			return false
 		var below := (s.position - anchor).normalized().angle_to(Vector3.DOWN) < deg_to_rad(15.0)
 		passed_bottom = passed_bottom or below

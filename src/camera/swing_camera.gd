@@ -8,8 +8,9 @@ extends Node3D
 ##  * Heading reversals (e.g. the back-swing of a pendulum) are ignored unless
 ##    they persist for over a second – no 180° spins.
 ##  * Pitch is fixed with a gentle, rate-limited tilt for dives.
-##  * Manual look (LOOK pad / drag / stick / mouse) offsets the view; it eases
-##    back behind the player 0.8 s after the input stops.
+##  * Near the street it tilts up so the buildings to swing from are in view.
+##  * No manual camera on touch. (Controller stick / mouse can still offset the
+##    view; it eases back behind the player 0.8 s after the input stops.)
 ##  * Critically damped position follow, speed-based FOV, sphere-cast
 ##    collision that pulls in smoothly and never leaves the camera in a wall.
 
@@ -128,6 +129,9 @@ func _process(dt: float) -> void:
 	# --- pitch: fixed, gently tilted down in dives --------------------------
 	var dive := clampf(-v.y / 35.0, 0.0, 1.0) if not grounded else 0.0
 	var want_pitch := base_pitch - deg_to_rad(12.0) * dive
+	if target.global_position.y < 15.0 and not target.s.attached:
+		# Down at street level: look up at the facades you can swing from.
+		want_pitch = deg_to_rad(6.0)
 	pitch = move_toward(pitch, want_pitch, deg_to_rad(25.0) * dt)
 
 	# Manual look eases back to centre once the player lets go.

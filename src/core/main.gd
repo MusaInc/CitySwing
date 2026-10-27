@@ -331,8 +331,10 @@ func _publish_web_state(dt: float) -> void:
 	var st := {"state": ["title", "playing", "paused", "results"][state], "line": player.line_state,
 		"swings": player.swings, "speed": player.speed(), "anchor": anchor_frac, "suggest": suggest, "invalid": invalid, "last_tap": _last_tap,
 		"touch_web": player.web_touch_id, "stunned": player.stunned, "fps": Engine.get_frames_per_second(),
-		"webs_fired": _webs_fired, "look_yaw": camera.look_yaw,
-		"cam_yaw": camera.yaw}
+		"webs_fired": _webs_fired, "look_yaw": camera.look_yaw, "y": player.global_position.y,
+		"grounded": player.is_on_floor(),
+		"cam_yaw": camera.yaw, "player_y": player.global_position.y,
+		"target_ready": player.targeting.has_target, "armed": player._armed_touch != -1}
 	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
 
 

@@ -131,75 +131,98 @@ func test_reattach_and_per_finger_release(t) -> void:
 	t.check(player.line_state == Player.Line.IDLE and player.s.velocity == v, "owning finger releases, momentum kept")
 
 
+func test_held_swing_catches_the_next_target_and_can_be_cancelled(t) -> void:
+	_place(Vector3(12, 30, -100))  # no building in front within web range
+	await get_tree().physics_frame
+	t.check(not player.targeting.has_target, "open space starts without an assisted target")
+	t.check(not player.assist_fire(7) and player.line_state == Player.Line.IDLE, "touch waits without firing at empty space")
+	player.global_position = Vector3(12, 30, -30)
+	player.s.position = player.global_position
+	await get_tree().physics_frame
+	t.check(player.line_state == Player.Line.FLYING and player.web_touch_id == 7,
+		"held touch automatically fires when a target comes into range")
+	player.release_web(7)
+	t.check(player.line_state == Player.Line.IDLE, "lifting the waiting finger cancels its web")
+	_place(Vector3(12, 30, -100))
+	await get_tree().physics_frame
+	player.assist_fire(8)
+	player.release_web(8)
+	player.global_position = Vector3(12, 30, -30)
+	player.s.position = player.global_position
+	await get_tree().physics_frame
+	t.check(player.line_state == Player.Line.IDLE, "a cancelled touch never fires later")
+
+
 func test_multitouch_roles(t) -> void:
 	var cam_rig := SwingCamera.new()
 	add_child(cam_rig)
 	cam_rig.set_target(player)
 	var tc := TouchControls.new()
 	add_child(tc)
+	tc.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	tc.size = Vector2(1280, 720)
 	tc._update_safe()
 	tc.camera = cam_rig
 	tc.player = player
 	var feedback: Array = []
 	tc.web_feedback.connect(func(p, ok, reason): feedback.append([ok, reason]))
+	var old_mode: String = Settings.aim_mode
+	Settings.aim_mode = "assist"
 	_place(Vector3(12, 30, -30))
-	cam_rig.face(atan2(-8.0, 25.0))  # look toward tower B
+	cam_rig.face(atan2(-8.0, 25.0))  # looking toward tower B
 	for i in 4:
+		await get_tree().physics_frame
 		await get_tree().process_frame
-	# Find a right-side pixel that sees tower B.
-	var web_px := Vector2.ZERO
-	for y in range(120, 420, 20):
-		for x in range(700, 1100, 40):
-			if player.screen_target(cam_rig.cam, Vector2(x, y))["ok"]:
-				web_px = Vector2(x, y)
-				break
-		if web_px != Vector2.ZERO:
-			break
-	if not t.check(web_px != Vector2.ZERO, "a valid building pixel on the right side"):
-		cam_rig.queue_free()
-		tc.queue_free()
-		return
-	# Finger 0: stick (left). Finger 1: web. Finger 2: drag on sky = camera.
+	var yaw0 := cam_rig.view_yaw()
+	# Finger 0: stick. Finger 1: the big SWING button.
 	tc.touch_down(0, Vector2(200, 560))
 	tc.touch_drag(0, Vector2(200, 480))
 	t.check(Input.is_action_pressed("move_forward"), "stick drives movement")
-	tc.touch_down(1, web_px)
-	t.check(player.line_state == Player.Line.FLYING and player.web_touch_id == 1, "finger 1 fired the web where it touched")
-	var expected: Vector3 = tc.touches[1]["result"]["point"]
-	t.check(player.line_target.distance_to(expected) < 0.001, "line aimed at the touched point")
-	for i in 20:
+	tc.touch_down(1, tc.button_center("grapple"))
+	t.check(player.line_state == Player.Line.FLYING and player.web_touch_id == 1, "SWING fires an assisted web owned by finger 1")
+	for i in 30:
 		await get_tree().physics_frame
-	var yaw0 := cam_rig.view_yaw()
-	var sky_px := Vector2(1000, 40)
-	tc.touch_down(2, sky_px)
-	for k in 6:
-		tc.touch_drag(2, sky_px - Vector2(25 * (k + 1), 0))
-	t.check(absf(cam_rig.view_yaw() - yaw0) > 0.05, "dragging empty sky turns the camera")
-	t.check(player.line_state == Player.Line.ATTACHED, "camera drag does not touch the web")
-	tc.touch_up(2)
-	t.check(player.line_state == Player.Line.ATTACHED, "lifting the camera finger keeps the web")
-	# LOOK pad drag rotates and never fires.
-	var lp := tc.button_center("look")
-	var yaw1 := cam_rig.view_yaw()
-	tc.touch_down(3, lp)
-	for k in 5:
-		tc.touch_drag(3, lp + Vector2(0, -20 * (k + 1)) + Vector2(30 * (k + 1), 0))
-	tc.touch_up(3)
-	t.check(absf(cam_rig.view_yaw() - yaw1) > 0.05, "LOOK pad rotates the camera")
-	t.check(player.web_touch_id == 1, "LOOK pad did not fire a web")
-	# A tap on the sky (no drag) is rejected with feedback, not fired.
-	tc.touch_down(5, sky_px)
-	tc.touch_up(5)
-	t.check(feedback.size() >= 2 and feedback[-1][0] == false and feedback[-1][1] == "sky",
-		"invalid tap shows feedback (%s)" % [feedback])
-	t.check(player.web_touch_id == 1, "invalid tap didn't steal the web")
+	t.check(player.line_state == Player.Line.ATTACHED, "web attached")
+	# Finger 2 anywhere else on the right: a fresh web (re-attach) owned by finger 2.
+	tc.touch_down(2, Vector2(900, 200))
+	t.check(player.web_touch_id == 2, "a second right-side press re-attaches")
 	tc.touch_up(1)
-	t.check(player.line_state == Player.Line.IDLE, "web finger lifting releases")
+	t.check(player.line_state != Player.Line.IDLE, "lifting the old finger keeps the new web")
+	# JUMP is its own button, not a web.
+	tc.touch_down(3, tc.button_center("jump"))
+	t.check(Input.is_action_pressed("jump") and player.web_touch_id == 2, "JUMP button is separate from the web")
+	tc.touch_up(3)
+	tc.touch_up(2)
+	t.check(player.line_state == Player.Line.IDLE, "lifting the owning finger lets go")
 	tc.touch_up(0)
 	t.check(not Input.is_action_pressed("move_forward"), "stick release clears movement")
+	t.check(absf(cam_rig.look_yaw) < 0.001, "touches never move the camera by hand (%.3f)" % cam_rig.look_yaw)
+	# Tap mode (setting): the web goes exactly where the finger lands.
+	Settings.aim_mode = "tap"
+	_place(Vector3(12, 30, -30))
+	for i in 4:
+		await get_tree().physics_frame
+		await get_tree().process_frame
+	var hit_px := Vector2.ZERO
+	for y in range(120, 420, 20):
+		for x in range(700, 1100, 40):
+			if player.screen_target(cam_rig.cam, Vector2(x, y))["ok"]:
+				hit_px = Vector2(x, y)
+				break
+		if hit_px != Vector2.ZERO:
+			break
+	if t.check(hit_px != Vector2.ZERO, "tap mode: a building pixel is visible"):
+		var expect: Vector3 = player.screen_target(cam_rig.cam, hit_px)["point"]
+		tc.touch_down(4, hit_px)
+		t.check(player.line_target.distance_to(expect) < 0.001, "tap mode: web aimed at the exact touched point")
+		tc.touch_up(4)
+	tc.touch_down(5, Vector2(1000, 8))  # sky
+	t.check(feedback[-1][0] == false, "tap mode: an invalid spot never fires (%s)" % [feedback[-1]])
+	tc.touch_up(5)
+	Settings.aim_mode = old_mode
 	cam_rig.queue_free()
 	tc.queue_free()
+	await get_tree().process_frame
 
 
 func test_rope_wraps_round_a_corner_and_never_cuts_through(t) -> void:

@@ -213,6 +213,63 @@ func test_spawn_and_reattach_transitions_are_smooth(t) -> void:
 	cam.queue_free()
 
 
+func test_swing_launches_cleanly_from_the_street_and_rooftops(t) -> void:
+	# Stand on the street at several avenue spots (and on rooftops), hold SWING:
+	# the player must jump, catch a web and get back up into the air.
+	var p := Player.new()
+	p.params = load("res://config/swing_params.tres").duplicate()
+	add_child(p)
+	p.bot = _Idle.new()
+	var spots: Array = []  # [position, heading, on_street]
+	var avenues: Array = []
+	for st in world.layout.x_streets:
+		if st[1] > 20.0 and st[0] > 300.0 and st[0] < 1000.0:
+			avenues.append(st[0])
+	for k in 5:
+		spots.append([Vector3(avenues[k % avenues.size()], 1.2, -400.0 + k * 130.0), Vector3(0, 0, -1), true])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 6
+	for k in 3:
+		var r := world.random_rooftop(rng)
+		spots.append([r["position"], Vector3.FORWARD.rotated(Vector3.UP, r["yaw"]), false])
+	var ok := 0
+	for entry in spots:
+		var spot: Vector3 = entry[0]
+		var heading: Vector3 = entry[1]
+		p.respawn(spot)
+		for f in 20:
+			await get_tree().physics_frame
+		var ground_y := p.global_position.y
+		# Face along the avenue / the roof's route, as the camera does.
+		p.aim_dir = (heading + Vector3.UP * 0.2).normalized()
+		p.targeting.update(get_viewport().world_3d.direct_space_state, p.hand_position(), p.aim_dir,
+			Vector3.ZERO, p.params, true, [p.get_rid()])
+		var fired := p.assist_fire(1)
+		var chosen := p.line_target
+		var top := ground_y
+		var attached := false
+		var start := p.global_position
+		for f in 180:
+			await get_tree().physics_frame
+			top = maxf(top, p.global_position.y)
+			attached = attached or p.line_state == Player.Line.ATTACHED
+		var rose := top - ground_y
+		var travelled := Vector2(p.global_position.x - start.x, p.global_position.z - start.z).length()
+		var airborne := not p.is_on_floor() or p.line_state == Player.Line.ATTACHED
+		# Street: must climb well clear of it. Rooftop: must swing off the roof.
+		var good: bool = (rose > 12.0) if entry[2] else (travelled > 15.0 and not p.on_street)
+		# A roof with no initial target arms the touch and catches one after takeoff.
+		if attached and airborne and good:
+			ok += 1
+		else:
+			t.note("launch from %s: fired=%s attached=%s rose %.1f m travelled %.0f m airborne=%s target=%s rope=%.1f" % [spot.snapped(Vector3.ONE), fired, attached, rose, travelled, airborne, chosen.snapped(Vector3.ONE), p.s.rope_length])
+		p.release_web()
+	t.note("clean launches: %d/%d" % [ok, spots.size()])
+	t.check(ok >= spots.size() - 1, "holding SWING on the ground gets the player swinging again")
+	p.queue_free()
+	await get_tree().process_frame
+
+
 class _Idle:
 	extends RefCounted
 	func drive(_p, _dt) -> Dictionary:

@@ -7,7 +7,7 @@ var camera: SwingCamera
 var mode_text := ""
 var mode_sub := ""
 var banner := ""
-## Touch play: no auto-target reticle; tap feedback instead.
+## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
 var _marks: Array = []  # [{pos, ok, reason, t}]
 var _banner_t := 0.0
@@ -62,8 +62,8 @@ func _draw() -> void:
 			var ap := cam.unproject_position(a)
 			draw_arc(ap, 7.0, 0, TAU, 20, gold, 2.5, true)
 			draw_circle(ap, 2.5, gold)
-	if not touch_mode:
-		# Controller/keyboard: reticle on the assisted target.
+	if not touch_mode or Settings.aim_mode != "tap":
+		# Reticle on the assisted target: where SWING will attach.
 		var t := player.targeting
 		if t.has_target and player.line_state == Player.Line.IDLE and not cam.is_position_behind(t.point):
 			var p := cam.unproject_position(t.point)
@@ -73,12 +73,17 @@ func _draw() -> void:
 			draw_circle(p, 3.0, gold)
 		elif player.line_state == Player.Line.IDLE:
 			draw_arc(size / 2.0, 6, 0, TAU, 16, Color(1, 1, 1, 0.3), 1.5, true)
-	# Tap feedback: gold pulse = web fired here; red cross + reason = rejected.
+	# Tap feedback: gold pulse = fired, amber ring = holding for a target,
+	# red cross + reason = an invalid precise tap.
 	for m in _marks:
 		var pos: Vector2 = m["pos"]
 		var k: float = m["t"]
 		if m["ok"]:
 			draw_arc(pos, 10.0 + k * 70.0, 0, TAU, 28, Color(1.0, 0.82, 0.4, 1.0 - k / 0.45), 3.0, true)
+		elif m["reason"] == "waiting":
+			var amber := Color(1.0, 0.82, 0.4, clampf(1.0 - k / 0.9, 0.0, 1.0))
+			draw_arc(pos, 16.0 + k * 18.0, 0, TAU, 28, amber, 3.0, true)
+			_text(pos + Vector2(20, 5), "hold to catch", 17, amber, shadow)
 		else:
 			var a2 := clampf(1.0 - (k - 0.5) / 0.4, 0.0, 1.0)
 			var red := Color(1.0, 0.32, 0.28, a2)

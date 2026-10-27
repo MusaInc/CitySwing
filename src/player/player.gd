@@ -27,6 +27,7 @@ signal wall_kicked
 signal trick
 signal stun_started(speed: float)
 signal stun_ended
+signal launched
 
 enum Line { IDLE, FLYING, ATTACHED }
 
@@ -79,6 +80,11 @@ var top_speed := 0.0
 var _grapple_held := false
 var _move_smooth := Vector3.ZERO
 var _attach_length := 0.0
+## Set by a ground launch: the web zips the body up before swinging normally.
+var _zip := false
+var _launch_pending := false
+## Touch finger still holding SWING with no target yet: fire as soon as one appears.
+var _armed_touch := -1
 var _prev_pos := Vector3.ZERO
 
 
@@ -166,6 +172,8 @@ func fire_at(point: Vector3, touch_id := -1) -> void:
 		return
 	if line_state != Line.IDLE:
 		_let_go()
+	_armed_touch = -1
+	_ground_launch()
 	web_owner = "touch"
 	web_touch_id = touch_id
 	line_state = Line.FLYING
@@ -177,6 +185,8 @@ func fire_at(point: Vector3, touch_id := -1) -> void:
 
 ## Releases the web if `touch_id` owns it (or unconditionally with -2).
 func release_web(touch_id := -2) -> void:
+	if touch_id == _armed_touch or touch_id == -2:
+		_armed_touch = -1
 	if touch_id != -2 and touch_id != web_touch_id:
 		return
 	_let_go()
@@ -237,6 +247,14 @@ func _physics_process(dt: float) -> void:
 		elif not held and _grapple_held and web_owner == "action":
 			_let_go()
 		_grapple_held = held
+	if _armed_touch != -1 and targeting.has_target and not stunned:
+		var id := _armed_touch
+		_armed_touch = -1
+		if line_state != Line.IDLE:
+			_let_go()
+		_fire(origin)
+		web_owner = "touch"
+		web_touch_id = id
 	_advance_line(dt, origin)
 
 	if controls.jump and not is_on_floor():
@@ -251,7 +269,8 @@ func _physics_process(dt: float) -> void:
 
 	# Integrate the model from the body's real position.
 	s.position = global_position
-	s.grounded = is_on_floor()
+	s.grounded = is_on_floor() and not _launch_pending
+	_launch_pending = false
 	var start := global_position
 	SwingPhysics.step(s, controls, params, dt)
 	if s.snap_speed > 2.0:
@@ -380,9 +399,46 @@ static func _clear(space: PhysicsDirectSpaceState3D, a: Vector3, b: Vector3) -> 
 
 
 # ------------------------------------------------------------ line life
+## Touch SWING: an assisted web owned by finger `touch_id`. Pressing while
+## already swinging re-attaches. Returns whether there was a target.
+func assist_fire(touch_id: int) -> bool:
+	if stunned:
+		return false
+	if not targeting.has_target:
+		# Nothing to catch yet (e.g. top of a tall roof): stay armed while the
+		# finger is down and fire the moment a target comes into reach.
+		_armed_touch = touch_id
+		if line_state == Line.IDLE:
+			_ground_launch()
+		return false
+	if line_state != Line.IDLE:
+		_let_go()
+	_armed_touch = -1
+	_fire(hand_position())
+	web_owner = "touch"
+	web_touch_id = touch_id
+	return line_will_hit
+
+
+## Firing from the ground: jump as the web goes out, so the line catches the
+## body in the air and winches it up into a swing (street or rooftop alike).
+func _ground_launch() -> void:
+	if is_on_floor() and not stunned:
+		# Leap up and forward along the view, so a launch off a roof clears the edge.
+		var fwd := Vector3(aim_dir.x, 0.0, aim_dir.z).normalized()
+		if fwd.length_squared() > 0.5 and Vector3(s.velocity.x, 0, s.velocity.z).length() < 6.0:
+			s.velocity += fwd * 6.0
+		s.velocity.y = maxf(s.velocity.y, params.jump_speed)
+		s.grounded = false
+		_launch_pending = true
+		_zip = true
+		launched.emit()
+
+
 func _fire(origin: Vector3) -> void:
 	if line_state != Line.IDLE or stunned:
 		return
+	_ground_launch()
 	web_owner = "action"
 	web_touch_id = -1
 	line_state = Line.FLYING
@@ -436,12 +492,20 @@ func _let_go() -> void:
 	web_owner = ""
 	web_touch_id = -1
 	wraps.clear()
+	_zip = false
 
 
 ## How hard the web pulls itself in this tick (see SwingPhysics.auto_tighten).
 func auto_tighten() -> float:
 	if stunned:
 		return 0.0
+	if _zip and s.attached:
+		# Launched from the ground: winch hard until the line is down to its
+		# shortest pull, including while initially slack. Waiting for tautness
+		# leaves the jumper falling back to the street before the rope catches.
+		if s.rope_length > _attach_length * params.auto_tighten_min_fraction + 0.5:
+			return 2.0
+		_zip = false
 	return SwingPhysics.auto_tighten(s, params, _attach_length)
 
 
@@ -483,6 +547,8 @@ func recover() -> void:
 
 func respawn(at: Variant = null) -> void:
 	_let_go()
+	_armed_touch = -1
+	_launch_pending = false
 	stunned = false
 	_grapple_held = true  # require a fresh press
 	global_position = at if at is Vector3 else last_safe_position

@@ -206,10 +206,15 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_row("Graphics", q))
 	box.add_child(_row("60 FPS", _check(Settings.fps_60, func(v): Settings.fps_60 = v; Settings.save())))
 	box.add_child(_row("Haptics", _check(Settings.haptics, func(v): Settings.haptics = v; Settings.save())))
-	box.add_child(_row("Invert look", _check(Settings.invert_y, func(v): Settings.invert_y = v; Settings.save())))
+	var aim := OptionButton.new()
+	aim.add_item("SWING button (assisted)")
+	aim.add_item("Tap buildings + SWING assist")
+	aim.selected = 1 if Settings.aim_mode == "tap" else 0
+	aim.item_selected.connect(func(i):
+		Settings.aim_mode = "tap" if i == 1 else "assist"
+		Settings.save())
+	box.add_child(_row("Web aiming", aim))
 	box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))
-	box.add_child(_row("Look sensitivity", _slider(Settings.look_sensitivity, 0.3, 2.5, 0.05,
-		func(v): Settings.look_sensitivity = v; Settings.save())))
 	box.add_child(_row("Music", _slider(Settings.music_volume, 0.0, 1.0, 0.05, func(v): Settings.music_volume = v; Settings.save())))
 	box.add_child(_row("Effects", _slider(Settings.sfx_volume, 0.0, 1.0, 0.05, func(v): Settings.sfx_volume = v; Settings.save())))
 	box.add_child(_label("Graphics changes to draw distance apply on next launch.", 16, Color(1, 1, 1, 0.5)))

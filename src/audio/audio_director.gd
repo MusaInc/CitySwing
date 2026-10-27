@@ -82,6 +82,7 @@ func attach_player(p: Player) -> void:
 	p.impact.connect(func(spd: float):
 		play("impact", linear_to_db(clampf(spd / 30.0, 0.3, 1.0)))
 		Settings.haptic(int(clampf(spd * 3.0, 40.0, 120.0)), 1.0))
+	p.launched.connect(func(): play("wall_kick", -4.0, 1.2))
 	p.wall_kicked.connect(func():
 		play("wall_kick", -2.0)
 		Settings.haptic(25, 0.6))

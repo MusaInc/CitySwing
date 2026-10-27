@@ -28,6 +28,8 @@ var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
 var invert_y := false
+## "assist": SWING fires at the reticle target. "tap": fire where you touch.
+var aim_mode := "assist"
 var music_volume := 0.6
 var sfx_volume := 1.0
 var tuning_overrides := {}  # SwingParams property -> value, from the in-game tuning panel
@@ -42,6 +44,7 @@ func _ready() -> void:
 		haptics = cfg.get_value("input", "haptics", haptics)
 		look_sensitivity = cfg.get_value("input", "look_sensitivity", look_sensitivity)
 		invert_y = cfg.get_value("input", "invert_y", invert_y)
+		aim_mode = cfg.get_value("input", "aim_mode", aim_mode)
 		music_volume = cfg.get_value("audio", "music", music_volume)
 		sfx_volume = cfg.get_value("audio", "sfx", sfx_volume)
 		tuning_overrides = cfg.get_value("tuning", "overrides", {})
@@ -70,6 +73,7 @@ func save() -> void:
 	cfg.set_value("input", "haptics", haptics)
 	cfg.set_value("input", "look_sensitivity", look_sensitivity)
 	cfg.set_value("input", "invert_y", invert_y)
+	cfg.set_value("input", "aim_mode", aim_mode)
 	cfg.set_value("audio", "music", music_volume)
 	cfg.set_value("audio", "sfx", sfx_volume)
 	cfg.set_value("tuning", "overrides", tuning_overrides)
