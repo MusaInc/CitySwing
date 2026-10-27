@@ -23,13 +23,25 @@ extends Resource
 @export var max_rope_length: float = 75.0
 ## Rope length on attach as a fraction of current distance (<1 gives an immediate tug).
 @export var attach_length_factor: float = 1.0
-## Reel speed in m/s. Reeling in while taut conserves angular momentum (pumping).
-@export var reel_in_speed: float = 9.0
+## Max speed (m/s) at which the web tightens by itself through the bottom of
+## each arc. Shortening a taut line conserves angular momentum, so this is real
+## pumping: the pull does work, the swing gains speed and lifts the body.
+@export var reel_in_speed: float = 8.0
+## The automatic pull never shortens the line below this fraction of its
+## length at attach (each swing keeps its character).
+@export_range(0.3, 1.0) var auto_tighten_min_fraction: float = 0.6
+## The line also tightens to keep the lowest point of the arc this far above
+## the street.
+@export var swing_ground_clearance: float = 8.0
 @export var reel_out_speed: float = 11.0
 ## Constraint sub-steps per physics tick. More = stiffer, more accurate rope.
 @export_range(1, 16) var substeps: int = 4
 ## Fraction of outward radial velocity removed when the rope snaps taut (1 = inelastic).
 @export_range(0.0, 1.0) var taut_inelasticity: float = 1.0
+## Ropes catch on building corners (new pivot) and unwrap when the line clears.
+@export var rope_wrapping: bool = true
+## A corner that would leave less free line than this cuts the web (momentum kept).
+@export var wrap_cut_length: float = 6.0
 ## Hard cap on tangential speed gained purely from reeling (stops infinite pumping).
 @export var reel_speed_cap: float = 55.0
 
@@ -49,10 +61,10 @@ extends Resource
 @export var ground_friction: float = 9.0
 ## Speed above run_speed decays at this rate (m/s²) so landings keep some flow.
 @export var ground_overspeed_decel: float = 14.0
-@export var jump_speed: float = 9.5
+@export var jump_speed: float = 16.0
 ## Jumping while touching a wall in the air kicks off it (recovery move).
 @export var wall_kick_speed: float = 11.0
-@export var wall_kick_up: float = 8.0
+@export var wall_kick_up: float = 11.0
 
 @export_group("Impacts")
 ## Speed into a surface above which a hard-impact event fires (bonk, haptics).

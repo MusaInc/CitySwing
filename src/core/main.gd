@@ -112,6 +112,11 @@ func _ready() -> void:
 		start_mode(m[0], m[1] if m.size() > 1 else "")
 	else:
 		to_title()
+	if args.has("front"):
+		# Character review captures: look at the hero from the front.
+		camera.face(camera.yaw + PI)
+		camera.base_pitch = deg_to_rad(-4.0)
+		camera.pitch = camera.base_pitch
 	if args.has("bot"):
 		_attract(SwingBot.Style.NOVICE if args["bot"] == "novice" else SwingBot.Style.EXPERT)
 	if args.has("menu"):

@@ -3,7 +3,7 @@ extends Control
 ## Landscape two-thumb controls with per-finger roles (tracked by touch index).
 ##   Left side   : floating analogue stick → move_* actions.
 ##   LOOK pad    : drag to rotate the camera; never fires a web.
-##   JUMP/IN/OUT : buttons (jump / reel in / reel out).
+##   JUMP        : button (rooftop jump, wall-kick, mid-air trick).
 ##   Anywhere else: the camera ray through that exact pixel. A valid building
 ##                 surface fires the web *there*; holding that finger keeps
 ##                 the web; lifting it releases. An invalid spot never fires:
@@ -22,9 +22,7 @@ const DRAG_THRESHOLD := 14.0
 var camera: SwingCamera
 var player: Player
 var buttons := {
-	"jump": {"pos": Vector2(-118, -112), "r": 64.0, "label": "JUMP"},
-	"reel_in": {"pos": Vector2(-112, -262), "r": 44.0, "label": "IN"},
-	"reel_out": {"pos": Vector2(-228, -238), "r": 44.0, "label": "OUT"},
+	"jump": {"pos": Vector2(-118, -112), "r": 66.0, "label": "JUMP"},
 	"look": {"pos": Vector2(-292, -104), "r": 66.0, "label": "LOOK"},
 }
 

@@ -196,6 +196,28 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 	return Vector3(vh.x, minf(v.y, 0.0), vh.z)
 
 
+## Automatic web pull (fraction of reel_in_speed) – there are no reel buttons.
+## The taut line tightens through the bottom of the arc, where tension peaks:
+## shortening it there conserves angular momentum, so the pull does real work
+## and the swing gains speed and lifts the body. It never pulls the line below
+## auto_tighten_min_fraction of its attach length, and it winches harder when
+## the lowest point of the arc would come too close to the street.
+static func auto_tighten(s: State, p: SwingParams, attach_length: float) -> float:
+	if not (s.attached and s.taut):
+		return 0.0
+	var shortfall := p.swing_ground_clearance - (s.anchor.y - s.rope_length)
+	if shortfall > 0.0:
+		return clampf(1.0 + shortfall / 6.0, 1.0, 2.5)
+	if s.rope_length <= attach_length * p.auto_tighten_min_fraction:
+		return 0.0
+	var r := (s.position - s.anchor).normalized()
+	var vt := (s.velocity - r * s.velocity.dot(r)).length()
+	if vt < 4.0:
+		return 0.0
+	var below := r.angle_to(Vector3.DOWN)
+	return pow(clampf(1.0 - below / deg_to_rad(55.0), 0.0, 1.0), 1.5)
+
+
 ## Mechanical energy per unit mass – used by tests and the debug overlay.
 static func energy(s: State, p: SwingParams) -> float:
 	return 0.5 * s.velocity.length_squared() + p.gravity * s.position.y

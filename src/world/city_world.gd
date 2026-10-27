@@ -97,7 +97,7 @@ func spawn_point() -> Vector3:
 
 ## Clearance (m) to keep from each kind of rooftop prop when standing.
 const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0}
-const ROOF_EDGE_CLEARANCE := 4.0
+const ROOF_EDGE_CLEARANCE := 4.5
 
 var _roof_spawns: Array = []
 

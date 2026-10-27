@@ -266,3 +266,58 @@ func test_attach_rejects_out_of_range(t) -> void:
 	t.check(not SwingPhysics.attach(s, Vector3(0, p.grapple_range + 1.0, 0), p), "too far")
 	t.check(SwingPhysics.attach(s, Vector3(0, 30, 0), p), "in range")
 	t.near(s.rope_length, 30.0, 0.001, "rope length = distance on attach")
+
+
+func test_jump_is_high(t) -> void:
+	var p := _params()
+	var s := SwingPhysics.State.new()
+	s.grounded = true
+	var c := SwingPhysics.Controls.new()
+	c.jump = true
+	SwingPhysics.step(s, c, p, DT)
+	c.jump = false
+	var top := 0.0
+	for i in 120:
+		SwingPhysics.step(s, c, p, DT)
+		top = maxf(top, s.position.y)
+	t.note("jump apex %.1f m" % top)
+	t.check(top > 6.0, "a powerful jump: apex above 6 m")
+
+
+func test_auto_tighten_pumps_each_swing(t) -> void:
+	# No input at all: the web tightens through the bottom of the arc and the
+	# swing gains energy (angular momentum conserved – real work, no boost).
+	var p := _params(true)
+	var plain := _pendulum(p, 40.0, 45.0)
+	var auto := _pendulum(p, 40.0, 45.0)
+	var none := SwingPhysics.Controls.new()
+	var c := SwingPhysics.Controls.new()
+	var min_len := 40.0
+	for i in 60 * 6:
+		SwingPhysics.step(plain, none, p, DT)
+		c.reel = SwingPhysics.auto_tighten(auto, p, 40.0)
+		SwingPhysics.step(auto, c, p, DT)
+		min_len = minf(min_len, auto.rope_length)
+	var e_plain := SwingPhysics.energy(plain, p)
+	var e_auto := SwingPhysics.energy(auto, p)
+	t.note("energy without pull %.0f, with automatic pull %.0f; shortest line %.1f m" % [e_plain, e_auto, min_len])
+	t.check(e_auto > e_plain + 40.0, "automatic pull pumps energy into the swing")
+	t.check(min_len >= 40.0 * p.auto_tighten_min_fraction - 0.2, "never shorter than the minimum fraction")
+
+
+func test_auto_tighten_keeps_the_arc_off_the_street(t) -> void:
+	var p := _params()
+	var s := SwingPhysics.State.new()
+	s.anchor = Vector3(0, 40, 0)
+	s.position = Vector3(30, 30, 0)  # 31.6 m line: the arc would bottom out at 8.4… then lower with momentum
+	SwingPhysics.attach(s, s.anchor, p)
+	s.rope_length = 38.0
+	s.taut = true
+	var c := SwingPhysics.Controls.new()
+	var lowest := INF
+	for i in 120:
+		c.reel = SwingPhysics.auto_tighten(s, p, 38.0)
+		SwingPhysics.step(s, c, p, DT)
+		lowest = minf(lowest, s.position.y)
+	t.note("lowest point %.1f m (clearance %.0f m)" % [lowest, p.swing_ground_clearance])
+	t.check(lowest > 2.0, "the line winches in before the body reaches the street")

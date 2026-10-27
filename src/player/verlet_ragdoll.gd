@@ -8,7 +8,7 @@ extends RefCounted
 ## Only runs while a crash is in progress (~1–3 s), never for idle bodies.
 
 const STEP := 1.0 / 60.0
-const ITERATIONS := 6
+const ITERATIONS := 8
 const GRAVITY := Vector3(0, -19.0, 0)
 const MASK := 1 | (1 << 1) | (1 << 3)
 
@@ -18,6 +18,8 @@ const NAMES := ["pelvis", "chest", "neck", "head", "sh_l", "sh_r", "el_l", "el_r
 var pos := {}
 var prev := {}
 var links: Array = []   # [a, b, rest, kind] kind: 0 = exact, 1 = min-only
+const TORSO := ["pelvis", "chest", "neck", "head", "sh_l", "sh_r", "hip_l", "hip_r"]
+var _torso_rest := {}   # torso particle -> offset in the torso frame (rigid shape)
 var _acc := 0.0
 var space: PhysicsDirectSpaceState3D
 ## While dangling from the web, the web hand's wrist is held here (INF = free).
@@ -41,6 +43,9 @@ func start(joints: Dictionary, vel: Vector3, spin: Vector3) -> void:
 			["hip_l", "hip_r"], ["chest", "hip_l"], ["chest", "hip_r"], ["neck", "sh_l"], ["neck", "sh_r"],
 			["head", "sh_l"], ["head", "sh_r"], ["sh_l", "hip_r"], ["sh_r", "hip_l"]]:
 		_link(pair[0], pair[1], 0)
+	var f := _torso_frame()
+	for n in TORSO:
+		_torso_rest[n] = f.affine_inverse() * (pos[n] as Vector3)
 	for limb in [["sh_l", "el_l", "wr_l"], ["sh_r", "el_r", "wr_r"], ["hip_l", "kn_l", "an_l"], ["hip_r", "kn_r", "an_r"]]:
 		_link(limb[0], limb[1], 0)
 		_link(limb[1], limb[2], 0)
@@ -73,7 +78,7 @@ func _step(anchor: Vector3) -> void:
 		pos[n] = c
 	for it in ITERATIONS:
 		# Soft pin: the body stays with the physics capsule.
-		pos["pelvis"] = (pos["pelvis"] as Vector3).lerp(anchor, 0.35)
+		pos["pelvis"] = (pos["pelvis"] as Vector3).lerp(anchor, 0.25)
 		if hand_pin != Vector3.INF:
 			pos["wr_r"] = (pos["wr_r"] as Vector3).lerp(hand_pin, 0.6)
 		for l in links:
@@ -89,6 +94,30 @@ func _step(anchor: Vector3) -> void:
 			var corr := d * ((len - rest) / len) * 0.5
 			pos[l[0]] = a + corr
 			pos[l[1]] = b - corr
+	# The torso is one rigid piece: snap its particles to the rest shape in the
+	# frame they currently define.
+	var f := _torso_frame()
+	for n in TORSO:
+		pos[n] = f * (_torso_rest[n] as Vector3)
+	# Limbs, root to tip: bones end every step at exactly their length – never
+	# stretched or squashed, whatever collisions or the pelvis pin did.
+	for l in links:
+		if l[3] != 0 or (l[0] in TORSO and l[1] in TORSO):
+			continue
+		var a2: Vector3 = pos[l[0]]
+		var d2: Vector3 = (pos[l[1]] as Vector3) - a2
+		if d2.length() > 1e-5:
+			pos[l[1]] = a2 + d2.normalized() * float(l[2])
+
+
+func _torso_frame() -> Transform3D:
+	var p: Vector3 = pos["pelvis"]
+	var up: Vector3 = ((pos["neck"] as Vector3) - p).normalized()
+	var right: Vector3 = (pos["sh_r"] as Vector3) - (pos["sh_l"] as Vector3)
+	right = (right - up * right.dot(up)).normalized()
+	if right.length_squared() < 0.5:
+		right = up.cross(Vector3.FORWARD).normalized()
+	return Transform3D(Basis(right, up, right.cross(up)), p)
 
 
 func _collide(from: Vector3, to: Vector3) -> Vector3:

@@ -429,7 +429,7 @@ def character():
     jacket = mat("jacket", (0.8, 0.1, 0.09), 0.7)
     jacket_dk = mat("jacket_dark", (0.42, 0.05, 0.05), 0.75)
     yoke = mat("yoke", (0.14, 0.15, 0.17), 0.7)
-    tee = mat("tee", (0.9, 0.9, 0.86), 0.8)
+    tee = mat("tee", (0.16, 0.16, 0.18), 0.6)  # zip line
     pants = mat("pants", (0.12, 0.14, 0.2), 0.85)
     pad = mat("kneepad", (0.2, 0.21, 0.24), 0.6)
     strap = mat("strap", (0.06, 0.06, 0.07), 0.6)
@@ -458,7 +458,7 @@ def character():
 
     abdomen = paint(smooth(loft("abdomen", [(-0.03, 0.15, 0.105), (0.08, 0.152, 0.105), (0.18, 0.168, 0.115),
                                              (0.25, 0.178, 0.12)])), jacket)
-    tee_gap = paint(loft("tee", [(-0.02, 0.05, 0.02, 0.1), (0.2, 0.06, 0.02, 0.112)], segs=8), tee)
+    tee_gap = paint(loft("tee", [(-0.02, 0.012, 0.012, 0.104), (0.24, 0.012, 0.012, 0.118)], segs=6), tee)
     hem = paint(loft("hem", [(-0.035, 0.157, 0.112), (0.0, 0.157, 0.112)], segs=16), jacket_dk)
     part("spine", [abdomen, tee_gap, hem])
 

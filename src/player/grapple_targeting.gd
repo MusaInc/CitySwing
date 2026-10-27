@@ -90,6 +90,7 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 	if not SwingPhysics.attach(s, anchor, p):
 		return false
 	var c := SwingPhysics.Controls.new()
+	var attach_length := s.rope_length
 	var q := PhysicsRayQueryParameters3D.new()
 	q.collision_mask = 1 | GRAPPLE_MASK | (1 << 3)
 	q.exclude = exclude
@@ -98,6 +99,7 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 	var passed_bottom := false
 	for i in 60:
 		var a := s.position
+		c.reel = SwingPhysics.auto_tighten(s, p, attach_length)  # same pull as the real player
 		SwingPhysics.step(s, c, p, dt)
 		var dir := s.position - a
 		q.from = a

@@ -3,9 +3,9 @@ extends RefCounted
 ## Autopilot that plays through the same input interface as a human
 ## (move / aim / grapple held / reel / jump). Used by the automated skill tests,
 ## and for attract-mode / screenshot capture. Two styles:
-##   EXPERT – fires near the apex, pumps by reeling through the bottom,
-##            releases on the upswing at ~30° above horizontal.
-##   NOVICE – fires late while dropping, never pumps, lets go at the bottom.
+##   EXPERT – fires near the apex, releases on the upswing at ~30° above
+##            horizontal, lets go when the line catches a corner.
+##   NOVICE – fires late while dropping, lets go around the bottom of the arc.
 
 enum Style { EXPERT, NOVICE }
 
@@ -17,7 +17,6 @@ var _hold := false
 var _cooldown := 0.0
 var _ground_time := 0.0
 var _stall := 0.0
-var _climb := 0.0  # >0 while climbing the line off a wall (seconds spent)
 var _rng := RandomNumberGenerator.new()
 
 
@@ -54,7 +53,6 @@ func drive(p: Player, dt: float) -> Dictionary:
 	_ground_time = 0.0
 
 	if p.line_state == Player.Line.IDLE:
-		_climb = 0.0
 		_hold = false
 		var fire := false
 		var t := p.targeting
@@ -75,27 +73,20 @@ func drive(p: Player, dt: float) -> Dictionary:
 		_stall = _stall + dt if v.length() < 3.0 else 0.0
 		if style == Style.EXPERT:
 			out["move"] = dir
-			if _stall > 0.6 and _climb <= 0.0:
-				_climb = 0.001
-			if _climb > 0.0:
-				# Pinned against a wall: climb the line, then kick off the wall
-				# and let go to find a better anchor (what a skilled player does).
-				_climb += dt
-				_hold = true
-				out["reel"] = 1.0
-				if p.s.rope_length <= p.params.min_rope_length + 1.0 or _climb > 4.0:
-					out["jump"] = true
-					_hold = false
-					_cooldown = 0.2
-					_stall = 0.0
-					_climb = 0.0
+			if _stall > 0.6:
+				# Pinned against a wall: kick off it and let go to find a better
+				# anchor (the web tightens by itself; there is no climbing).
+				out["jump"] = true
+				_hold = false
+				_cooldown = 0.2
+				_stall = 0.0
 				out["grapple"] = _hold
 				return out
-			# Pump: shorten through the bottom of the arc, and always keep the
-			# bottom of the arc well clear of the street.
-			out["reel"] = 1.0 if below_anchor < deg_to_rad(25.0) and p.s.rope_length > 18.0 else 0.0
-			if p.s.anchor.y - p.s.rope_length < 9.0:
-				out["reel"] = 1.0
+			# The line has caught a corner: the swing is about to bend round
+			# the building. Let go while still heading the right way.
+			if not p.wraps.is_empty() and vh.normalized().dot(dir) > 0.3 and v.y > -6.0:
+				_hold = false
+				_cooldown = 0.2
 			if past and rise_angle > deg_to_rad(28.0):
 				_hold = false
 				_cooldown = 0.25
@@ -112,6 +103,6 @@ func drive(p: Player, dt: float) -> Dictionary:
 	else:
 		out["move"] = dir * 0.5
 	if p.line_state == Player.Line.IDLE and not _hold:
-		out["move"] = dir * (0.6 if style == Style.EXPERT else 0.2)
+		out["move"] = dir * (1.0 if style == Style.EXPERT else 0.2)
 	out["grapple"] = _hold
 	return out

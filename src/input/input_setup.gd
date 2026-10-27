@@ -13,8 +13,6 @@ const BINDINGS := {
 	"look_left": [KEY_LEFT, JOY_AXIS_RIGHT_X, -1.0],
 	"look_right": [KEY_RIGHT, JOY_AXIS_RIGHT_X, 1.0],
 	"grapple": [KEY_SPACE, JOY_AXIS_TRIGGER_RIGHT, 1.0],
-	"reel_in": [KEY_E, JOY_BUTTON_RIGHT_SHOULDER],
-	"reel_out": [KEY_Q, JOY_BUTTON_LEFT_SHOULDER],
 	"jump": [KEY_SHIFT, JOY_BUTTON_A],
 	"respawn": [KEY_R, JOY_BUTTON_Y],
 	"pause": [KEY_ESCAPE, JOY_BUTTON_START],

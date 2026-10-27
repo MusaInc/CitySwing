@@ -14,11 +14,19 @@ func _go() -> void:
 	p.params = load("res://config/swing_params.tres").duplicate()
 	var bot := SwingBot.new(style, Vector3.FORWARD)
 	var goal := func(_pl): return Vector3.ZERO
-	if course_id == "":
+	if course_id == "city":
+		var cw := CityWorld.new()
+		root.add_child(cw)
+		root.add_child(p)
+		p.global_position = cw.spawn_point()
+		bot.goal_fn = cw.bot_goal
+		goal = cw.bot_goal
+	elif course_id == "":
 		var w := PrototypeWorld.new()
 		root.add_child(w)
 		root.add_child(p)
-		p.global_position = w.spawn_point()
+		var off := Vector3(float(OS.get_environment("START_X")) if OS.has_environment("START_X") else 0.0, 0, 0)
+		p.global_position = w.spawn_point() + off
 		bot.goal_fn = w.bot_goal
 		goal = w.bot_goal
 	else:
@@ -58,6 +66,7 @@ func _go() -> void:
 	p.landed.connect(func(s, st): print("   LAND %.1f street=%s" % [s, st]))
 	p.grapple_missed.connect(func(): print("   MISS"))
 	p.rope_wrapped.connect(func(c): print("   WRAP at ", c.snapped(Vector3.ONE * 0.1), " L=%.1f" % p.s.rope_length))
+	p.web_cut.connect(func(c): print("   CUT at ", c.snapped(Vector3.ONE * 0.1)))
 	p.stun_started.connect(func(spd): print("   STUN %.1f" % spd))
 	for i in int(secs * 60):
 		await physics_frame

@@ -21,6 +21,7 @@ signal landed(speed: float, on_street: bool)
 signal impact(speed: float)
 signal rope_snapped(speed: float)
 signal rope_wrapped(corner: Vector3)
+signal web_cut(at: Vector3)
 signal respawned
 signal wall_kicked
 signal trick
@@ -77,6 +78,8 @@ var top_speed := 0.0
 
 var _grapple_held := false
 var _move_smooth := Vector3.ZERO
+var _attach_length := 0.0
+var _prev_pos := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -130,7 +133,8 @@ func rope_points() -> PackedVector3Array:
 func screen_target(cam: Camera3D, screen_pos: Vector2) -> Dictionary:
 	var from := cam.project_ray_origin(screen_pos)
 	var dir := cam.project_ray_normal(screen_pos)
-	return ray_target(from, dir, from.distance_to(hand_position()) + params.grapple_range + 5.0)
+	# Cast far: a distant visible tower must be reported "too far", not "sky".
+	return ray_target(from, dir, 2500.0)
 
 
 func ray_target(from: Vector3, dir: Vector3, length: float) -> Dictionary:
@@ -200,7 +204,6 @@ func _read_input(dt: float) -> Dictionary:
 		"move": (right * mv.x + fwd * mv.y).limit_length(1.0),
 		"aim": -basis.z,
 		"grapple": Input.is_action_pressed("grapple"),
-		"reel": Input.get_action_strength("reel_in") - Input.get_action_strength("reel_out"),
 		"jump": Input.is_action_just_pressed("jump"),
 		"respawn": Input.is_action_just_pressed("respawn"),
 	}
@@ -214,7 +217,7 @@ func _physics_process(dt: float) -> void:
 	var move: Vector3 = inp.get("move", Vector3.ZERO)
 	_move_smooth = _move_smooth.lerp(move, 1.0 - exp(-dt / MOVE_SMOOTH))
 	controls.move = _move_smooth
-	controls.reel = inp.get("reel", 0.0)
+	controls.reel = auto_tighten()
 	controls.jump = inp.get("jump", false)
 	aim_dir = inp.get("aim", aim_dir)
 	if inp.get("respawn", false):
@@ -257,8 +260,10 @@ func _physics_process(dt: float) -> void:
 	velocity = (s.position - start) / dt
 	move_and_slide()
 	_resolve_contacts(dt)
-	if s.attached:
+	if s.attached and params.rope_wrapping:
 		_update_wraps()
+	else:
+		_prev_pos = global_position
 
 	var moved := global_position - start
 	distance_travelled += Vector3(moved.x, 0.0, moved.z).length()
@@ -314,30 +319,54 @@ func _resolve_contacts(dt: float) -> void:
 # ------------------------------------------------------------- rope wrap
 ## Real ropes catch on corners. If a building now blocks the straight line to
 ## the pivot, the corner becomes the new pivot (remaining length shortens);
-## when the two segments straighten out again the rope unwraps.
+## once the straight line to the earlier pivot is clear again, it unwraps.
 func _update_wraps() -> void:
 	var space := get_world_3d().direct_space_state
 	var pos := global_position
 	if not wraps.is_empty():
 		var prev: Vector3 = wraps[-1]["anchor"]
-		var a := (s.anchor - prev).normalized()
-		var b := (pos - s.anchor).normalized()
-		if a.dot(b) > 0.998 or _clear(space, pos, prev):
-			# Segments collinear (or the corner no longer touches): unwrap.
+		# (A new pivot lies on the straight line, so "collinear" can't be the
+		# test.) The rope unwraps once the straight line to the earlier anchor
+		# no longer meets the building.
+		if _clear(space, pos, prev):
 			s.rope_length += s.anchor.distance_to(prev)
 			s.anchor = prev
 			wraps.pop_back()
 			return
-	if wraps.size() >= MAX_WRAPS:
+	if wraps.size() >= MAX_WRAPS or _clear(space, pos, s.anchor):
+		_prev_pos = pos
 		return
-	var to := s.anchor - pos
-	var q := PhysicsRayQueryParameters3D.create(pos, s.anchor - to.normalized() * 0.6, BUILDINGS_MASK, [get_rid()])
+	# The rope has just met an edge. Find when it first touched (binary search
+	# between last tick's clear position and this one) so the new pivot sits
+	# on the corner itself, not partway along a face.
+	var lo := 0.0
+	var hi := 1.0
+	if _clear(space, _prev_pos, s.anchor):
+		for i in 7:
+			var mid := (lo + hi) * 0.5
+			if _clear(space, _prev_pos.lerp(pos, mid), s.anchor):
+				lo = mid
+			else:
+				hi = mid
+	var touch := _prev_pos.lerp(pos, hi)
+	_prev_pos = pos
+	var to := s.anchor - touch
+	var q := PhysicsRayQueryParameters3D.create(touch, s.anchor - to.normalized() * 0.6, BUILDINGS_MASK, [get_rid()])
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
 		return
-	var corner: Vector3 = hit["position"] + (hit["normal"] as Vector3) * 0.2
+	var hn: Vector3 = hit["normal"]
+	if absf((s.anchor - (hit["position"] as Vector3)).dot(hn)) < 0.3:
+		return  # the rope lying along the very wall it's stuck to – not a corner
+	var corner: Vector3 = hit["position"] + hn * 0.15
 	var seg := s.anchor.distance_to(corner)
-	if seg < 1.0 or s.rope_length - seg < params.min_rope_length:
+	if seg < 1.0:
+		return
+	if s.rope_length - seg < params.wrap_cut_length:
+		# Caught tight on an edge with almost no line left: the web cuts against
+		# it and the body flies on with its momentum.
+		web_cut.emit(corner)
+		_let_go()
 		return
 	wraps.append({"anchor": s.anchor})
 	s.anchor = corner
@@ -378,6 +407,7 @@ func _advance_line(dt: float, _origin: Vector3) -> void:
 	line_tip = line_target
 	if line_will_hit and SwingPhysics.attach(s, line_target, _range_tolerant()):
 		wraps.clear()
+		_attach_length = s.rope_length
 		line_state = Line.ATTACHED
 		attached.emit(line_target)
 	else:
@@ -406,6 +436,13 @@ func _let_go() -> void:
 	web_owner = ""
 	web_touch_id = -1
 	wraps.clear()
+
+
+## How hard the web pulls itself in this tick (see SwingPhysics.auto_tighten).
+func auto_tighten() -> float:
+	if stunned:
+		return 0.0
+	return SwingPhysics.auto_tighten(s, params, _attach_length)
 
 
 # ----------------------------------------------------------- stun / reset
