@@ -19,6 +19,7 @@ const float KIND_WALL = 0.0;
 const float KIND_TRIM = 1.0;
 const float KIND_ROOF = 2.0;
 const float KIND_GLASS = 3.0;
+const float KIND_SIGN = 4.0;
 
 varying float v_kind;
 varying vec3 v_world_normal;
@@ -78,6 +79,22 @@ void fragment() {
 	} else if (v_kind == KIND_TRIM) {
 		albedo = base;
 		rough = 0.7;
+	} else if (v_kind == KIND_SIGN) {
+		// Billboard: UV.y is metres up the panel. Frame, a bold headline bar
+		// broken into "words", a thinner strapline and a contrasting stripe.
+		float h = uv.y;
+		vec3 ink = dot(base, vec3(0.33)) > 0.6 ? vec3(0.08, 0.1, 0.14) : vec3(0.97, 0.95, 0.9);
+		float word = step(0.25, hash12(vec2(floor(uv.x / 1.7), seed * 37.0)));
+		float gap = step(0.18, fract(uv.x / 1.7));
+		float headline = step(2.6, h) * step(h, 4.1) * word * gap;
+		float strap = step(1.3, h) * step(h, 1.8) * step(0.4, hash12(vec2(floor(uv.x / 0.9), seed * 53.0)));
+		float frame = 1.0 - step(0.35, h) * step(h, 6.9 + seed * 0.0);
+		float stripe = step(0.35, h) * step(h, 0.9);
+		albedo = mix(base, ink, max(headline, strap) * detail);
+		albedo = mix(albedo, base * 0.35, stripe);
+		albedo = mix(albedo, vec3(0.16), clamp(frame, 0.0, 1.0) * 0.0);
+		emit = base * 0.18;
+		rough = 0.55;
 	} else {
 		float glass;
 		vec2 cell;

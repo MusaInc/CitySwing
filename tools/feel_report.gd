@@ -18,7 +18,8 @@ func _go() -> void:
 	root.add_child(w)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 21
-	var tot := {"air_speed": 0.0, "air": 0.0, "perfect": 0.0, "releases": 0.0, "chain": 0.0, "street": 0.0, "stun": 0.0, "far": 0.0}
+	var tot := {"air_speed": 0.0, "air": 0.0, "perfect": 0.0, "releases": 0.0, "chain": 0.0, "street": 0.0, "stun": 0.0, "far": 0.0,
+		"struct": 0.0}
 	for k in runs:
 		var p := Player.new()
 		p.params = load("res://config/swing_params.tres").duplicate()
@@ -28,7 +29,12 @@ func _go() -> void:
 		var bot := SwingBot.new(style, Vector3.FORWARD, 7 + k)
 		bot.goal_fn = w.bot_goal
 		p.bot = bot
-		var c := {"street": 0, "stun": 0}
+		var c := {"street": 0, "stun": 0, "struct": 0}
+		p.attached.connect(func(a: Vector3):
+			for line in GrappleTargeting.anchor_lines:
+				if Geometry3D.get_closest_point_to_segment(a, line[0], line[1]).distance_to(a) < 0.3:
+					c["struct"] += 1
+					break)
 		p.landed.connect(func(_s, st): if st: c["street"] += 1)
 		p.stun_started.connect(func(sp): c["stun"] += 1; print("   crash %.0f m/s %s" % [sp, "floor" if p.is_on_floor() else "wall"]))
 		var start := p.global_position
@@ -44,15 +50,15 @@ func _go() -> void:
 			far = maxf(far, Vector2(p.global_position.x - start.x, p.global_position.z - start.z).length())
 		var r := {"air_speed": air_speed / maxf(air_frames, 1) * 3.6, "air": 100.0 * air_frames / frames,
 			"perfect": p.perfects, "releases": p.swings, "chain": p.best_chain, "street": c["street"],
-			"stun": c["stun"], "far": far}
-		print("run %d: air speed %.0f km/h, airborne %.0f%%, perfect %d/%d releases, best chain %d, street %d, crashes %d, %.0f m" % [
-			k, r["air_speed"], r["air"], r["perfect"], r["releases"], r["chain"], r["street"], r["stun"], r["far"]])
+			"stun": c["stun"], "far": far, "struct": c["struct"]}
+		print("run %d: air speed %.0f km/h, airborne %.0f%%, perfect %d/%d releases, best chain %d, street %d, crashes %d, %.0f m, %d webs on cranes/cables" % [
+			k, r["air_speed"], r["air"], r["perfect"], r["releases"], r["chain"], r["street"], r["stun"], r["far"], r["struct"]])
 		for key in tot:
 			tot[key] += r[key]
 		p.queue_free()
 		await process_frame
 	for key in tot:
 		tot[key] /= runs
-	print("MEAN: air speed %.0f km/h, airborne %.0f%%, perfect %.1f/%.1f, best chain %.1f, street %.1f, crashes %.1f, %.0f m" % [
-		tot["air_speed"], tot["air"], tot["perfect"], tot["releases"], tot["chain"], tot["street"], tot["stun"], tot["far"]])
+	print("MEAN: air speed %.0f km/h, airborne %.0f%%, perfect %.1f/%.1f, best chain %.1f, street %.1f, crashes %.1f, %.0f m, %.1f structure webs" % [
+		tot["air_speed"], tot["air"], tot["perfect"], tot["releases"], tot["chain"], tot["street"], tot["stun"], tot["far"], tot["struct"]])
 	quit()

@@ -19,6 +19,7 @@ var goal_fn: Callable
 var _hold := false
 var _cooldown := 0.0
 var _ground_time := 0.0
+var _idle_held := false  # the button was down last frame with no line out
 var _stall := 0.0
 var _trust := 0.0  # s left trusting a web fired to avoid a wall
 var _rng := RandomNumberGenerator.new()
@@ -53,7 +54,7 @@ func drive(p: Player, dt: float) -> Dictionary:
 			out["jump"] = true
 		if _ground_time > 0.5 and p.targeting.has_target:
 			_hold = true
-		out["grapple"] = _hold
+		out["grapple"] = _repress(_hold) if p.line_state == Player.Line.IDLE else _hold
 		return out
 	_ground_time = 0.0
 
@@ -92,7 +93,7 @@ func drive(p: Player, dt: float) -> Dictionary:
 			else:
 				# Beginners fire once they notice they're dropping.
 				fire = ahead > 0.25 and (v.y < -4.0 or pos.y < 15.0)
-		_hold = fire
+		_hold = _repress(fire)
 	elif p.line_state == Player.Line.ATTACHED:
 		var rope := pos - p.s.anchor
 		var past := Vector3(-rope.x, 0.0, -rope.z).dot(vh.normalized()) < 0.0  # moving away from beneath anchor
@@ -139,6 +140,14 @@ func drive(p: Player, dt: float) -> Dictionary:
 ## [wall normal, seconds to impact] if a knockout-speed head-on hit is under
 ## ~0.9 s ahead, following the real path (the swing's curve on the web);
 ## [] otherwise.
+## The game fires on a press, not a hold: if the button is still down from a
+## press that didn't leave a line out, let go for a frame so the next one fires.
+func _repress(want: bool) -> bool:
+	var press := want and not _idle_held
+	_idle_held = press
+	return press
+
+
 func _wall_ahead(p: Player) -> Array:
 	if p.s.velocity.length() < p.params.wall_run_max_speed * 0.9:
 		return []

@@ -1,6 +1,60 @@
-# Status: 2026-10-28 (lethal walls, air acrobatics)
+# Status: 2026-10-28 (compact city, cranes, bridge, roads)
 
-## Lethal walls, air acrobatics, arms (latest)
+## Map rework (latest)
+
+- **Smaller, denser, taller**: the playable grid shrank from 1390 x 1880 m to
+  940 x 1240 m (416 buildings, was 678; 64 streaming chunks, was 120), with
+  tighter blocks (66–100 m). The CBD peaks at ~250 m (was 187 m), midtown has
+  30% towers of 105–160 m, and 8 supertalls carry a slim spire (up to ~290 m,
+  the highest anchors). 95 buildings over 100 m.
+- **Tower cranes** (7) on construction sites in the CBD/midtown: lattice mast,
+  jib reaching out over a street, counter-jib with weights, pendant ties,
+  trolley, hoist line and a hook carrying steel beams. Mast height is set so
+  the jib clears every neighbour. Sites have a concrete core, open floor
+  slabs with perimeter columns, hoarding and an edge barrier.
+- **Quay cranes** (7) on the dock basins, booms out over the water (the
+  basins now actually show water – they used to be paved over).
+- **Suspension bridge** from the waterfront across the river (towers 132 m,
+  deck at 24 m, 260 m main span) to a far shore that now has ground and
+  colliding buildings near the landing.
+- **Billboards** (29) on low/mid roofs: grappleable panels on legs, low
+  anchors over the technical districts. Roofs vary (gravel, tar, concrete,
+  rust, green on low buildings).
+- **Anchor lines**: cranes, booms, bridge cables and tower beams publish 75
+  segments (`CityLayout.anchor_lines` → `GrappleTargeting.anchor_lines`);
+  web targeting offers the best point on nearby lines as an extra candidate
+  (+0.35 score) since the ray fan mostly misses thin jibs and cables. Tap-
+  to-web still needs real collision (jibs/booms/beams have it; cables don't).
+- **Roads**: per-segment markings (dashed centre lines, double yellow on
+  avenues), zebra crossings and stop lines at every junction, nothing painted
+  inside junctions (own mesh, 320 m visibility range); traffic lights with
+  mast arms on two corners of every junction.
+- Costs (`tools/city_stats.gd`): chunk tris detail 12.9k / low 5.5k /
+  ground 2.5k / marks 16.5k (marks culled past 320 m), structures 18k detail
+  tris (one mesh each, low LOD beyond the detail range), 907 collision boxes
+  (was 1154). Not measured on a phone.
+- **Feel report** (6 x 40 s expert, same seeds) vs the old map: 79 vs 72 km/h
+  airborne, street touches 0.5 vs 1.5/run, 485 vs 396 m, crashes 0.3 vs 0.3,
+  ~0.7 webs per run on cranes/cables (the autopilot follows avenues).
+- **Autopilot fix**: the bot held the button after a press that left no line
+  out, and the game fires on press – it could hop down an avenue for a whole
+  run without webbing. It now re-presses (`SwingBot._repress`).
+- **Camera fix**: hugging a facade, the lens could end up a few cm inside the
+  wall (the sphere sweep ignores walls it starts against). It is now pushed
+  out through the box side facing the hero and slides along the facade
+  instead of cutting in (`SwingCamera._push_out`).
+- Time Trial courses re-recorded (canyon shortened to 8 waypoints for the
+  smaller map). Tests: 72 native; browser Chromium 17/17, WebKit 9/9 (test
+  seed 6 → 13: the old seed's spawn now starts with a plunge into a facade).
+- Known: holding SWING while standing still on a fresh spawn roof ends in a
+  wall knockout on ~25% of spawns – the same rate as the old map (6/24).
+  Players normally run and jump first; a spawn-heading check could fix it.
+- Gotcha: `tools/build.sh assets` runs `build_kit.py`, whose old `character()`
+  overwrites the skinned `character.glb` (and re-exports landmarks with
+  binary churn). Restore with git or rebuild with build_character.py.
+
+
+## Lethal walls, air acrobatics, arms
 
 - **Walls knock you out**: a head-on facade hit at ≥22 m/s (≈79 km/h into
   the wall, ≥37° from glancing) is a knockout: the web lets go, the body

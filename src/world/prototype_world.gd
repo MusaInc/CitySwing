@@ -47,6 +47,7 @@ static func add_box(parent: Node3D, center: Vector3, size: Vector3, color: Color
 
 
 func _ready() -> void:
+	GrappleTargeting.anchor_lines = []  # no cranes or cables here
 	add_box(self, Vector3(0, -0.5, -300), Vector3(600, 1, 1000), Color(0.32, 0.33, 0.36), false, true)
 	var palette := [Color(0.82, 0.74, 0.62), Color(0.55, 0.62, 0.72), Color(0.72, 0.5, 0.42), Color(0.6, 0.66, 0.6)]
 	for i in TOWERS.size():

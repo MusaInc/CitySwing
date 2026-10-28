@@ -31,6 +31,12 @@ var pick_path := PackedVector3Array()
 var heading := Vector3.FORWARD  # the wanted direction (horizontal, unit)
 var _pick_age := INF
 
+## Thin things worth swinging from that the ray fan would mostly miss (crane
+## jibs, bridge cables): [from, to] segments set by the world. Each update
+## offers the best point on nearby lines as an extra candidate.
+static var anchor_lines: Array = []
+const LINE_BONUS := 0.35  # cranes and cables are the fun anchors: nudge toward them
+
 const PREDICT_TOP := 6           # candidates flown through per evaluation
 const PICK_REFRESH := 0.12       # s between evaluations
 const STREET_CLEARANCE := 10.0   # m: arcs bottoming out lower than this rank down
@@ -59,6 +65,8 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 	q.exclude = exclude
 	var candidates: Array = []
 	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, ELEVATIONS, YAWS, candidates)
+	if not anchor_lines.is_empty():
+		_scan_lines(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, candidates)
 	# (Tried: a ±65–90° side fan when nothing ahead qualifies. Novices flew
 	# further, but skilled runs grabbed orbiting side webs and hit the street
 	# 3× as often. Steering covers it: push the stick toward the tower.)
@@ -106,6 +114,61 @@ func _scan(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vector3, 
 			if bottom < 2.0:
 				s -= (2.0 - bottom) * 0.04
 			candidates.append([s, pt, hit["normal"]])
+
+
+## Candidates on `anchor_lines`: for each line in range, the points closest
+## to two ideal web directions (45° and 65° up along the heading), kept if
+## in reach, ahead, and in plain sight (the line's own box may block the last
+## few metres).
+func _scan_lines(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vector3, travel_h: Vector3,
+		speed: float, aim_pitch: float, p: SwingParams, grounded: bool, q: PhysicsRayQueryParameters3D,
+		candidates: Array) -> void:
+	var reach := p.grapple_range
+	for line in anchor_lines:
+		var a: Vector3 = line[0]
+		var b: Vector3 = line[1]
+		# Cheap reject: the segment's box is out of reach.
+		if origin.x < minf(a.x, b.x) - reach or origin.x > maxf(a.x, b.x) + reach \
+				or origin.z < minf(a.z, b.z) - reach or origin.z > maxf(a.z, b.z) + reach \
+				or origin.y > maxf(a.y, b.y) or origin.y < minf(a.y, b.y) - reach:
+			continue
+		for el: float in [45.0, 65.0]:
+			var e := deg_to_rad(el)
+			var dir := (heading * cos(e) + Vector3.UP * sin(e)).normalized()
+			var pt := _closest_on_segment_to_ray(a, b, origin, dir)
+			var off := pt - origin
+			var dist := off.length()
+			var rise := off.y
+			if dist < 8.0 or dist > reach or rise < (0.5 if grounded else p.min_anchor_height):
+				continue
+			var flat := Vector3(off.x, 0.0, off.z)
+			if flat.length() > 1.0 and flat.normalized().dot(heading) < 0.72:
+				continue  # more than ~44° off the heading: the fan's limit
+			q.from = origin
+			q.to = pt
+			var hit := space.intersect_ray(q)
+			if not hit.is_empty() and (hit["position"] as Vector3).distance_to(pt) > 3.5:
+				continue
+			var d := off / dist
+			var s := _score(d, heading, travel_h, speed, rise, dist, rad_to_deg(asin(d.y)), aim_pitch, p) + LINE_BONUS
+			if grounded:
+				s += clampf(rise / 35.0, 0.0, 1.0) * 1.5
+			if pt.y - dist < 2.0:
+				s -= (2.0 - (pt.y - dist)) * 0.04
+			candidates.append([s, pt, Vector3.DOWN])
+
+
+static func _closest_on_segment_to_ray(a: Vector3, b: Vector3, o: Vector3, d: Vector3) -> Vector3:
+	var u := b - a
+	var w := a - o
+	var uu := u.dot(u)
+	var ud := u.dot(d)
+	var dd := d.dot(d)
+	var uw := u.dot(w)
+	var dw := d.dot(w)
+	var den := uu * dd - ud * ud
+	var t := 0.0 if den < 0.000001 else clampf((ud * dw - dd * uw) / den, 0.0, 1.0)
+	return a + u * t
 
 
 ## Re-evaluates `pick` when it is stale (call every tick; cheap otherwise).

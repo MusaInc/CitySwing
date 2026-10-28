@@ -57,8 +57,8 @@ static func route(id: String, layout: CityLayout) -> Dictionary:
 	match id:
 		"canyon":
 			var x := _avenue_x(layout, CityLayout.CBD_CENTER.x)
-			for i in 9:
-				wps.append(Vector3(x, 0, CityLayout.CBD_CENTER.y + 330.0 - i * 100.0))
+			for i in 8:
+				wps.append(Vector3(x, 0, CityLayout.CBD_CENTER.y + 300.0 - i * 100.0))
 		"waterfront":
 			var x0 := _avenue_x(layout, 560.0)
 			var z0 := _avenue_z(layout, -150.0)

@@ -357,6 +357,32 @@ def crane():
     export("crane.glb", [join("crane", p)])
 
 
+def traffic_light():
+    """Mast-arm signal: pole on the kerb, arm out over the road (+X), two heads."""
+    reset()
+    pole_m = mat("signal_pole", (0.18, 0.2, 0.2), 0.5, 0.6)
+    head_m = mat("signal_head", (0.08, 0.08, 0.08), 0.6)
+    red = mat("lamp_red", (0.9, 0.1, 0.05), 0.3, emit=(1.0, 0.12, 0.05))
+    amber = mat("lamp_amber", (0.3, 0.22, 0.05), 0.3)
+    green = mat("lamp_green", (0.05, 0.25, 0.1), 0.3)
+    p = [cyl("pole", 0.13, 6.2, (0, 0, 0), pole_m, 10)]
+    p.append(cyl("base", 0.22, 0.6, (0, 0, 0), pole_m, 10))
+    arm = cyl("arm", 0.08, 5.2, (0, 0, 0), pole_m, 8)
+    arm.rotation_euler = (0, math.radians(90), 0)
+    arm.location = (0, 0, 5.9)
+    p.append(arm)
+    for x in (2.6, 4.9):
+        p.append(box("head", (0.38, 0.32, 1.05), (x, 0, 5.3), head_m))
+        p.append(box("visor", (0.42, 0.06, 1.1), (x, 0.17, 5.3), head_m))
+        for i, m in enumerate((red, amber, green)):
+            p.append(cyl("lamp", 0.11, 0.05, (x, -0.18, 5.62 - i * 0.32), m, 10))
+    for o in p:
+        if o.name.startswith("lamp"):
+            o.rotation_euler = (math.radians(90), 0, 0)
+    p.append(box("ped", (0.3, 0.3, 0.55), (0, -0.2, 2.6), head_m))
+    export("traffic_light.glb", [join("traffic_light", p)])
+
+
 # ------------------------------------------------------------- character
 def loft(name, rings, segs=14, cap=True):
     """Lofted body part. rings: [(z, rx, ry, cy)] – ellipse half-widths in x/y,
@@ -589,6 +615,6 @@ def character():
 
 if __name__ == "__main__":
     for fn in (water_tower, ac_unit, antenna, streetlight, car, tree, clock_crown, harbour_dome, beacon,
-               cathedral_tower_top, viaduct, crane, character):
+               cathedral_tower_top, viaduct, crane, traffic_light, character):
         fn()
     print("KIT DONE")

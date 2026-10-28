@@ -14,7 +14,9 @@ const CHUNK := CityLayout.CHUNK
 const MODEL_DIR := "res://assets/models/"
 const PROP_RANGES := {
 	"streetlight": 260.0, "tree": 420.0, "water_tower": 520.0, "ac_unit": 240.0, "antenna": 700.0, "crane": 1200.0,
+	"traffic_light": 220.0,
 }
+const MARKS_RANGE := 320.0
 const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62, 0.08, 0.07), Color(0.12, 0.24, 0.45),
 	Color(0.55, 0.57, 0.6), Color(0.9, 0.72, 0.15), Color(0.2, 0.35, 0.3)]
 
@@ -64,9 +66,16 @@ func _ready() -> void:
 	_build_collision()
 	_build_water()
 	_build_landmarks()
+	_build_structures()
 	_build_outskirts()
+	GrappleTargeting.anchor_lines = layout.anchor_lines
 	print("CityWorld: %d buildings, %d props, %d chunks, layout+collision %d ms" % [
 		layout.buildings.size(), layout.props.size(), _all_keys.size(), Time.get_ticks_msec() - t0])
+
+
+func _exit_tree() -> void:
+	if GrappleTargeting.anchor_lines == layout.anchor_lines:
+		GrappleTargeting.anchor_lines = []
 
 
 func set_viewer(v: Node3D) -> void:
@@ -261,7 +270,7 @@ func _load_mesh(name: String) -> Mesh:
 
 func _load_props() -> void:
 	for k in ["streetlight", "tree", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
-			"harbour_dome", "beacon", "cathedral_top"]:
+			"harbour_dome", "beacon", "cathedral_top", "traffic_light"]:
 		var m := _load_mesh(k)
 		if m:
 			prop_meshes[k] = m
@@ -293,7 +302,7 @@ func _build_collision() -> void:
 			for t in b["tiers"]:
 				var shape := CollisionShape3D.new()
 				var box := BoxShape3D.new()
-				var lip := 0.0 if b["kind"] == "invisible" else 0.6
+				var lip := 0.6 if b["kind"] in ["normal", "landmark"] else 0.0
 				box.size = Vector3(t[2] - t[0], t[5] - t[4] + lip, t[3] - t[1])
 				shape.shape = box
 				shape.position = Vector3((t[0] + t[2]) * 0.5, (t[4] + t[5] + lip) * 0.5, (t[1] + t[3]) * 0.5)
@@ -364,6 +373,32 @@ func _build_landmarks() -> void:
 		add_child(mmi)
 
 
+## Cranes and the bridge: one mesh per structure (own culling box), detailed
+## lattices near, solid massing far. Always loaded – they're the skyline's
+## landmarks and few in number. Collision comes from the layout boxes.
+func _build_structures() -> void:
+	for i in layout.structures.size():
+		var s: Dictionary = layout.structures[i]
+		var root := Node3D.new()
+		root.name = "Structure_%s_%d" % [s["type"], i]
+		for detailed in [true, false]:
+			var m := BuildingMesher.new()
+			m.add_structure(s, detailed)
+			var mi := MeshInstance3D.new()
+			mi.name = "Detail" if detailed else "Low"
+			mi.mesh = _mesh_from(m.arrays())
+			mi.material_override = building_mat
+			if detailed:
+				mi.visibility_range_end = detail_range
+				mi.visibility_range_end_margin = 30.0
+			else:
+				mi.visibility_range_begin = detail_range
+				mi.visibility_range_begin_margin = 30.0
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(mi)
+		add_child(root)
+
+
 ## Low-detail skyline beyond the playable grid (and a far river shore) so every
 ## horizon reads as city. One mesh, low LOD only; outskirt blocks still collide.
 func _build_outskirts() -> void:
@@ -402,17 +437,37 @@ func _build_outskirts() -> void:
 					col_body.add_child(shape)
 			z += rng.randf_range(60.0, 90.0)
 		x += rng.randf_range(60.0, 90.0)
-	# Far shore across the river: low hills, terraces, a few towers.
-	var shore_x := -1100.0
+	# Far shore across the river (where the bridge lands): a quay road, then
+	# terraces and a few towers. Near the bridge they collide, so it's a place
+	# to land, not a painted backdrop.
+	var shore_x := CityLayout.FAR_SHORE - 40.0
 	var z2 := -2200.0
 	while z2 < 2200.0:
-		var w2 := rng.randf_range(30.0, 70.0)
-		var h2 := rng.randf_range(8.0, 22.0) if rng.randf() > 0.08 else rng.randf_range(40.0, 70.0)
-		var b2 := {"tiers": [[shore_x - rng.randf_range(0, 300), z2, shore_x - rng.randf_range(0, 300) + w2, z2 + w2, 0.0, h2]],
-			"style": CityLayout.Style.BRICK, "color": Color(0.5, 0.42, 0.4), "kind": "normal", "seed": rng.randf()}
-		m.add_building(b2, false)
-		z2 += rng.randf_range(35.0, 80.0)
-	m.top(-2600.0, -2600.0, -900.0, 2600.0, 0.2, Color(0.3, 0.34, 0.27), BuildingMesher.KIND_ROOF, 0, 0)
+		var w2 := rng.randf_range(24.0, 50.0)
+		var d2 := rng.randf_range(24.0, 50.0)
+		var bx := shore_x - w2 - rng.randf_range(0.0, 30.0)
+		var near_bridge := absf(z2 - CityLayout.BRIDGE_Z) < 300.0
+		while bx > shore_x - (520.0 if near_bridge else 260.0):
+			if absf(z2 + d2 * 0.5 - CityLayout.BRIDGE_Z) < 40.0 + d2 * 0.5:
+				break  # keep the bridge's landing road open
+			var h2 := rng.randf_range(10.0, 26.0) if rng.randf() > 0.12 else rng.randf_range(40.0, 75.0)
+			var st2: int = [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.SANDSTONE][rng.randi() % 3]
+			var cols2: Array = CityLayout.STYLE_COLORS[st2]
+			var b2 := {"tiers": [[bx, z2, bx + w2, z2 + d2, 0.0, h2]], "style": st2,
+				"color": cols2[rng.randi() % cols2.size()], "kind": "normal", "seed": rng.randf()}
+			m.add_building(b2, near_bridge)
+			if near_bridge:
+				var shape2 := CollisionShape3D.new()
+				var box2 := BoxShape3D.new()
+				box2.size = Vector3(w2, h2, d2)
+				shape2.shape = box2
+				shape2.position = Vector3(bx + w2 * 0.5, h2 * 0.5, z2 + d2 * 0.5)
+				col_body.add_child(shape2)
+			bx -= w2 + rng.randf_range(14.0, 24.0)
+		z2 += d2 + rng.randf_range(14.0, 24.0)
+	m.top(-2600.0, -2600.0, CityLayout.FAR_SHORE, 2600.0, 0.0, Color(0.33, 0.33, 0.34), BuildingMesher.KIND_ROOF, 0, 0)
+	m.walls(CityLayout.FAR_SHORE - 0.6, -2600.0, CityLayout.FAR_SHORE, 2600.0, -4.0, 1.1, Color(0.42, 0.38, 0.33),
+		BuildingMesher.KIND_TRIM, 0, 0)
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.arrays())
 	var mi := MeshInstance3D.new()
@@ -490,14 +545,17 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 	var detail := BuildingMesher.new()
 	var low := BuildingMesher.new()
 	var ground := BuildingMesher.new()
+	var marks := BuildingMesher.new()
 	for b in _by_chunk.get(key, []):
 		detail.add_building(b, true)
 		low.add_building(b, false)
 	ground.add_ground(layout, rect)
+	marks.add_road_marks(layout, rect)
 	return {
 		"detail": null if detail.is_empty() else detail.arrays(),
 		"low": null if low.is_empty() else low.arrays(),
 		"ground": null if ground.is_empty() else ground.arrays(),
+		"marks": null if marks.is_empty() else marks.arrays(),
 	}
 
 
@@ -555,6 +613,15 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	var detail := _mesh_from(res.get("detail"))
 	var low := _mesh_from(res.get("low"))
 	var ground := _mesh_from(res.get("ground"))
+	var marks := _mesh_from(res.get("marks"))
+	if marks:
+		var mk := MeshInstance3D.new()
+		mk.name = "Marks"
+		mk.mesh = marks
+		mk.material_override = ground_mat
+		mk.visibility_range_end = MARKS_RANGE
+		mk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mk)
 	if detail:
 		var mi := MeshInstance3D.new()
 		mi.name = "Detail"
@@ -592,7 +659,8 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 	var i := 0
 	for p in _props_by_chunk.get(key, []):
 		i += 1
-		if prop_density < 1.0 and p[0] in ["streetlight", "tree", "ac_unit"] and fmod(i * 0.618, 1.0) > prop_density:
+		if prop_density < 1.0 and p[0] in ["streetlight", "tree", "ac_unit", "traffic_light"] \
+				and fmod(i * 0.618, 1.0) > prop_density:
 			continue
 		if not by_kind.has(p[0]):
 			by_kind[p[0]] = []
@@ -613,7 +681,7 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 		mmi.multimesh = mm
 		mmi.visibility_range_end = PROP_RANGES.get(kind, 300.0)
 		mmi.visibility_range_end_margin = 20.0
-		if kind in ["ac_unit", "streetlight"]:
+		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)
 
@@ -684,7 +752,7 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 	var v := PackedVector3Array()
 	var idx := PackedInt32Array()
 	for b in _by_chunk.get(key, []):
-		if b["kind"] == "bridge":
+		if b["kind"] not in ["normal", "landmark"]:
 			continue
 		var t: Array = b["tiers"][0]
 		if t[5] - t[4] < 20.0 or t[2] - t[0] < 12.0 or t[3] - t[1] < 12.0:

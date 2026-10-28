@@ -224,6 +224,9 @@ func _process(dt: float) -> void:
 	if off.length() > _dist * 1.2:
 		_pos = _focus + off.normalized() * _dist * 1.2
 	var shaken := _focus + Vector3.UP * _bump * 0.5
+	# The focus leads/lags the body; hugging a facade it can end up inside the
+	# wall, and every wall check from there passes. Keep it on the body's side.
+	shaken = _ray_clear(target.global_position + Vector3.UP * 0.6, shaken)
 	var cam_goal := _pos + Vector3.UP * _bump + (_pos - _focus).normalized() * _tug
 	var placed := _avoid_walls(shaken, cam_goal, dt)
 	# A wall right behind would push the lens into the body: crane up and
@@ -284,11 +287,53 @@ func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 		var pq := PhysicsPointQueryParameters3D.new()
 		pq.position = from + dir * minf(_col_dist, full)
 		pq.collision_mask = 1 | (1 << 1)
-		if not space.intersect_point(pq).is_empty():
-			_col_dist = allowed
+		if not space.intersect_point(pq).is_empty() and _push_out(space, pq.position, from) == Vector3.INF:
+			_col_dist = allowed  # can't slide along the face: cut in
 	else:
 		_col_dist = lerpf(_col_dist, allowed, 1.0 - exp(-3.0 * dt))
-	return from + dir * minf(_col_dist, full)
+	var out := from + dir * minf(_col_dist, full)
+	# The sweep ignores walls the sphere starts against (grazing a facade):
+	# a lens that ends up inside a box is pushed out through its nearest side
+	# (a few cm, so no visible jump).
+	var pushed := _push_out(space, out, from)
+	return pushed if pushed != Vector3.INF else _ray_clear(from, out)
+
+
+## `p` moved just outside the box it is in, through a side facing `fallback_from`
+## (the focus); INF if that isn't possible (not a box, or round a corner).
+func _push_out(space: PhysicsDirectSpaceState3D, p: Vector3, fallback_from: Vector3) -> Vector3:
+	var pq := PhysicsPointQueryParameters3D.new()
+	pq.collision_mask = 1 | (1 << 1)
+	for attempt in 3:
+		pq.position = p
+		var hits := space.intersect_point(pq, 1)
+		if hits.is_empty():
+			return p
+		var col = hits[0]["collider"]
+		var owner_id: int = col.shape_find_owner(hits[0]["shape"]) if col is CollisionObject3D else -1
+		var cs = col.shape_owner_get_owner(owner_id) if owner_id >= 0 else null
+		if not (cs is CollisionShape3D and (cs as CollisionShape3D).shape is BoxShape3D):
+			return Vector3.INF
+		var xf := (cs as CollisionShape3D).global_transform
+		var ext: Vector3 = ((cs as CollisionShape3D).shape as BoxShape3D).size * 0.5
+		var local := xf.affine_inverse() * p
+		var lf := xf.affine_inverse() * fallback_from
+		var best_axis := -1
+		var best_d := INF
+		for a in 3:
+			# Only through a side the focus is outside of: going round a corner
+			# would put the building between the lens and the hero.
+			if absf(lf[a]) <= ext[a] or signf(lf[a]) != signf(local[a]):
+				continue
+			var d := ext[a] - absf(local[a])
+			if d < best_d:
+				best_d = d
+				best_axis = a
+		if best_axis < 0:
+			return Vector3.INF
+		local[best_axis] = signf(local[best_axis]) * (ext[best_axis] + 0.08)
+		p = xf * local
+	return Vector3.INF
 
 
 ## The furthest point from `from` toward `to` that is clear of buildings.

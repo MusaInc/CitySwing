@@ -9,7 +9,15 @@ const KIND_WALL := 0.0
 const KIND_TRIM := 1.0
 const KIND_ROOF := 2.0
 const KIND_GLASS := 3.0
+const KIND_SIGN := 4.0
 const ROOF_COLOR := Color(0.40, 0.40, 0.41)
+## Roof finishes picked per building: gravel, tar, pale concrete, rust, green.
+const ROOF_COLORS := [Color(0.40, 0.40, 0.41), Color(0.24, 0.25, 0.27), Color(0.6, 0.59, 0.56),
+	Color(0.45, 0.33, 0.28), Color(0.36, 0.44, 0.3)]
+const CRANE_YELLOW := Color(0.93, 0.68, 0.12)
+const STEEL := Color(0.22, 0.23, 0.25)
+const CONCRETE := Color(0.6, 0.59, 0.56)
+const BRIDGE_RED := Color(0.66, 0.17, 0.12)
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -76,6 +84,94 @@ func bottom(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, ki
 		Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0), Vector2(x0, z0), col, kind, style, seed)
 
 
+## Box of cross-section w x h from a to b (any direction), four sides + caps.
+func beam(a: Vector3, b: Vector3, w: float, h: float, col: Color, kind := KIND_TRIM, caps := false) -> void:
+	var d := b - a
+	var length := d.length()
+	if length < 0.001:
+		return
+	var f := d / length
+	var up := Vector3.UP if absf(f.y) < 0.95 else Vector3.RIGHT
+	var s := f.cross(up).normalized()
+	var u := s.cross(f).normalized()
+	var hs := s * w * 0.5
+	var hu := u * h * 0.5
+	var sides := [[hu, s], [hs, -u], [-hu, -s], [-hs, u]]
+	for k in 4:
+		var c0: Vector3 = sides[k][0]
+		var c1: Vector3 = sides[(k + 1) % 4][0]
+		var p0 := c0 + c1
+		var p1 := c0 - c1
+		var n: Vector3 = (c0).normalized()
+		# Pick the winding that faces outward (clockwise seen from outside).
+		var qa := a + p0
+		var qb := b + p0
+		var qc := b + p1
+		var qd := a + p1
+		if (qb - qa).cross(qc - qa).dot(n) > 0.0:
+			quad(qa, qd, qc, qb, n, Vector2.ZERO, Vector2(0, length), Vector2(w, length), Vector2(w, 0), col, kind, 0, 0)
+		else:
+			quad(qa, qb, qc, qd, n, Vector2.ZERO, Vector2(0, length), Vector2(w, length), Vector2(w, 0), col, kind, 0, 0)
+	if caps:
+		for e in [[b, f], [a, -f]]:
+			var o: Vector3 = e[0]
+			var n2: Vector3 = e[1]
+			var v := [o + hs + hu, o - hs + hu, o - hs - hu, o + hs - hu]
+			if (v[1] - v[0]).cross(v[2] - v[0]).dot(n2) > 0.0:
+				v.reverse()
+			quad(v[0], v[1], v[2], v[3], n2, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col, kind, 0, 0)
+
+
+## Solid axis-aligned box (walls, top, bottom) in one flat colour.
+func solid(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color, kind := KIND_TRIM) -> void:
+	walls(x0, z0, x1, z1, y0, y1, col, kind, 0, 0)
+	top(x0, z0, x1, z1, y1, col, kind, 0, 0)
+	bottom(x0, z0, x1, z1, y0, col.darkened(0.25), kind, 0, 0)
+
+
+## Square lattice mast (4 chords, zig-zag bracing on every face).
+func lattice(base: Vector3, height: float, size: float, col: Color, section := 4.0, detailed := true) -> void:
+	var hs := size * 0.5
+	var cs := [Vector3(-hs, 0, -hs), Vector3(hs, 0, -hs), Vector3(hs, 0, hs), Vector3(-hs, 0, hs)]
+	if not detailed:
+		solid(base.x - hs, base.z - hs, base.x + hs, base.z + hs, base.y, base.y + height, col)
+		return
+	for c in cs:
+		beam(base + c, base + c + Vector3.UP * height, 0.45, 0.45, col)
+	var n := maxi(1, int(height / section))
+	var step := height / n
+	for i in n:
+		var y0 := base.y + i * step
+		for k in 4:
+			var a: Vector3 = cs[k]
+			var b: Vector3 = cs[(k + 1) % 4]
+			var p0 := Vector3(base.x, y0, base.z) + (a if i % 2 == 0 else b)
+			var p1 := Vector3(base.x, y0 + step, base.z) + (b if i % 2 == 0 else a)
+			beam(p0, p1, 0.22, 0.22, col)
+
+
+## Triangular lattice girder from a to b (a jib or boom), apex on top.
+func girder(a: Vector3, b: Vector3, width: float, depth: float, col: Color, detailed := true) -> void:
+	var d := b - a
+	var length := d.length()
+	var f := d / length
+	var s := f.cross(Vector3.UP).normalized() * width * 0.5
+	var up := Vector3.UP * depth
+	if not detailed:
+		beam(a + up * 0.5, b + up * 0.5, width, depth, col, KIND_TRIM, true)
+		return
+	var chords := [a - s, a + s, a + up]
+	for c in chords:
+		beam(c, c + d, 0.4, 0.4, col)
+	var n := maxi(1, int(length / 3.0))
+	for i in n:
+		var p := a + f * (length * i / n)
+		var q := a + f * (length * (i + 1) / n)
+		beam(p - s, q + up, 0.14, 0.14, col)
+		beam(p + s, q + up, 0.14, 0.14, col)
+		beam(q - s, q + s, 0.14, 0.14, col)
+
+
 static func trim_color(b: Dictionary) -> Color:
 	var c: Color = b["color"]
 	match int(b["style"]):
@@ -89,14 +185,28 @@ static func trim_color(b: Dictionary) -> Color:
 
 ## Detailed LOD: walls, cornice slabs with undersides, parapet roof.
 func add_building(b: Dictionary, detailed: bool) -> void:
-	if b["kind"] == "invisible":
-		return
+	match b["kind"]:
+		"invisible", "structure":
+			return
+		"sign":
+			_add_sign(b, detailed)
+			return
+		"frame":
+			_add_frame(b, detailed)
+			return
+		"plain":
+			for t in b["tiers"]:
+				solid(t[0], t[1], t[2], t[3], t[4], t[5], b["color"])
+			return
 	var style := float(b["style"])
 	var seed: float = b["seed"]
 	var col: Color = b["color"]
 	var glassy := style == CityLayout.Style.GLASS or style == CityLayout.Style.DARK_GLASS
 	var wall_kind := KIND_GLASS if glassy else KIND_WALL
 	var trim := trim_color(b)
+	var roof: Color = ROOF_COLORS[int(seed * 997.0) % ROOF_COLORS.size()]
+	if roof == ROOF_COLORS[4] and tiers_top(b) > 60.0:
+		roof = ROOF_COLORS[0]  # green roofs on low buildings only
 	var tiers: Array = b["tiers"]
 	for i in tiers.size():
 		var t: Array = tiers[i]
@@ -114,12 +224,196 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 			var ch := 0.6 if glassy else 1.2
 			walls(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
 			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim, KIND_TRIM, style, seed)
-			top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, ROOF_COLOR, KIND_ROOF, style, seed)
+			top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, KIND_ROOF, style, seed)
 			# Ground-floor plinth band on the base tier.
 			if i == 0 and y0 == 0.0 and not glassy and b["kind"] != "bridge":
 				walls(x0 - 0.15, z0 - 0.15, x1 + 0.15, z1 + 0.15, 0.0, 0.9, col.darkened(0.3), KIND_TRIM, style, seed)
 		else:
-			top(x0, z0, x1, z1, y1, ROOF_COLOR, KIND_ROOF, style, seed)
+			top(x0, z0, x1, z1, y1, roof, KIND_ROOF, style, seed)
+
+
+static func tiers_top(b: Dictionary) -> float:
+	return b["tiers"][-1][5]
+
+
+func _add_sign(b: Dictionary, detailed: bool) -> void:
+	var t: Array = b["tiers"][0]
+	var col: Color = b["color"]
+	walls(t[0], t[1], t[2], t[3], t[4], t[5], col, KIND_SIGN, 0, b["seed"], 0.0)
+	top(t[0], t[1], t[2], t[3], t[5], STEEL, KIND_TRIM, 0, 0)
+	bottom(t[0], t[1], t[2], t[3], t[4], STEEL, KIND_TRIM, 0, 0)
+	if not detailed:
+		return
+	var roof: float = b.get("roof", t[4] - 2.6)
+	var along_x: bool = t[2] - t[0] > t[3] - t[1]
+	var length: float = (t[2] - t[0]) if along_x else (t[3] - t[1])
+	var n := maxi(2, int(length / 5.0) + 1)
+	for i in n:
+		var u := lerpf(0.1, 0.9, i / float(n - 1))
+		var x: float = lerpf(t[0], t[2], u) if along_x else (t[0] + t[2]) * 0.5
+		var z: float = (t[1] + t[3]) * 0.5 if along_x else lerpf(t[1], t[3], u)
+		beam(Vector3(x, roof, z), Vector3(x, t[4], z), 0.25, 0.25, STEEL)
+	# Catwalk along the bottom edge.
+	var o := Vector3(0, 0, 0.9) if along_x else Vector3(0.9, 0, 0)
+	var c := Vector3((t[0] + t[2]) * 0.5, t[4] - 0.1, (t[1] + t[3]) * 0.5)
+	var half := Vector3(length * 0.5, 0, 0) if along_x else Vector3(0, 0, length * 0.5)
+	beam(c - half + o * 0.3, c + half + o * 0.3, 0.9, 0.12, STEEL)
+
+
+## Construction frame: open floor slabs, columns, a safety-net band on the top floors.
+func _add_frame(b: Dictionary, detailed: bool) -> void:
+	var tiers: Array = b["tiers"]
+	var t0: Array = tiers[0]
+	for t in tiers:
+		solid(t[0], t[1], t[2], t[3], t[4], t[5], CONCRETE)
+	if not detailed:
+		return
+	var ytop: float = tiers[-1][5]
+	var nx := maxi(2, int((t0[2] - t0[0]) / 8.0) + 1)
+	var nz := maxi(2, int((t0[3] - t0[1]) / 8.0) + 1)
+	for i in nx:
+		for j in nz:
+			if i != 0 and i != nx - 1 and j != 0 and j != nz - 1:
+				continue  # perimeter columns only
+			var x: float = lerpf(t0[0] + 0.5, t0[2] - 0.5, i / float(nx - 1))
+			var z: float = lerpf(t0[1] + 0.5, t0[3] - 0.5, j / float(nz - 1))
+			beam(Vector3(x, 0.0, z), Vector3(x, ytop + 3.0, z), 0.6, 0.6, CONCRETE.darkened(0.12))
+	# Hoarding round the site at street level, safety screens on the top two floors.
+	walls(t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, 0.0, 2.6, Color(0.2, 0.36, 0.3), KIND_TRIM, 0, 0)
+	# Edge-protection barrier round the working floor.
+	walls(t0[0] - 0.2, t0[1] - 0.2, t0[2] + 0.2, t0[3] + 0.2, ytop + 0.1, ytop + 1.2,
+		Color(0.95, 0.55, 0.15), KIND_TRIM, 0, 0)
+
+
+## Cranes and the bridge. `detailed` = lattice/girder geometry, else solid massing.
+func add_structure(s: Dictionary, detailed: bool) -> void:
+	match s["type"]:
+		"tower_crane":
+			_tower_crane(s, detailed)
+		"quay_crane":
+			_quay_crane(s, detailed)
+		"bridge":
+			_bridge(s, detailed)
+
+
+func _tower_crane(s: Dictionary, detailed: bool) -> void:
+	var m := Vector3(s["x"], 0.0, s["z"])
+	var h: float = s["h"]
+	var d2: Vector2 = s["dir"]
+	var d := Vector3(d2.x, 0.0, d2.y)
+	var side := Vector3(-d.z, 0.0, d.x)
+	var jib: float = s["jib"]
+	var counter: float = s["counter"]
+	solid(m.x - 3.0, m.z - 3.0, m.x + 3.0, m.z + 3.0, 0.0, 1.2, CONCRETE)
+	lattice(m, h, 2.8, CRANE_YELLOW, 4.0, detailed)
+	var ytop := m + Vector3.UP * h
+	# Slewing unit, cab and tower head.
+	solid(m.x - 1.8, m.z - 1.8, m.x + 1.8, m.z + 1.8, h, h + 1.2, STEEL)
+	var cab := ytop + side * 2.2 + d * 0.6
+	solid(cab.x - 1.2, cab.z - 1.2, cab.x + 1.2, cab.z + 1.2, h - 1.2, h + 1.4, Color(0.92, 0.92, 0.9))
+	var apex := ytop + Vector3.UP * 13.0
+	lattice(ytop + Vector3.UP * 1.2, 11.8, 1.6, CRANE_YELLOW, 3.0, detailed)
+	# Jib and counter-jib.
+	var j0 := ytop + Vector3.UP * 1.2
+	girder(j0, j0 + d * jib, 2.0, 2.2, CRANE_YELLOW, detailed)
+	girder(j0, j0 - d * counter, 3.0, 1.8, CRANE_YELLOW, detailed)
+	var back := j0 - d * counter
+	var w := back + d * 2.0
+	solid(minf(w.x, back.x) - 1.8 * absf(side.x) - 0.1, minf(w.z, back.z) - 1.8 * absf(side.z) - 0.1,
+		maxf(w.x, back.x) + 1.8 * absf(side.x) + 0.1, maxf(w.z, back.z) + 1.8 * absf(side.z) + 0.1,
+		h - 2.6, h + 1.2, CONCRETE.darkened(0.15))
+	# Pendant ties from the head to the jib and counter-jib.
+	beam(apex, j0 + Vector3.UP * 2.2 + d * jib * 0.62, 0.12, 0.12, STEEL)
+	beam(apex, j0 + Vector3.UP * 1.8 - d * counter * 0.9, 0.12, 0.12, STEEL)
+	# Trolley, hoist line and hook block (with a load of steel beams).
+	var tr := j0 + d * jib * float(s["trolley"])
+	solid(tr.x - 0.8, tr.z - 0.8, tr.x + 0.8, tr.z + 0.8, tr.y - 0.5, tr.y, STEEL)
+	var hook_y: float = lerpf(8.0, h - 6.0, float(s["hook"]))
+	beam(tr, Vector3(tr.x, hook_y + 1.4, tr.z), 0.07, 0.07, STEEL)
+	solid(tr.x - 0.5, tr.z - 0.5, tr.x + 0.5, tr.z + 0.5, hook_y + 0.4, hook_y + 1.4, CRANE_YELLOW)
+	if detailed:
+		for k in 3:
+			var o := side * (k - 1) * 0.5
+			beam(Vector3(tr.x, hook_y - 0.5, tr.z) + o - d * 3.0, Vector3(tr.x, hook_y - 0.5, tr.z) + o + d * 3.0,
+				0.35, 0.5, Color(0.5, 0.24, 0.16))
+	# Red warning light on the head.
+	solid(apex.x - 0.3, apex.z - 0.3, apex.x + 0.3, apex.z + 0.3, apex.y, apex.y + 0.5, Color(1.0, 0.15, 0.1))
+
+
+func _quay_crane(s: Dictionary, detailed: bool) -> void:
+	var qx: float = s["x"]
+	var z: float = s["z"]
+	var ytop: float = s["top"]
+	var reach: float = s["reach"]
+	var col: Color = s["color"]
+	for lx: float in [qx - 3.0, qx + 13.0]:
+		for lz: float in [z - 6.0, z + 6.0]:
+			solid(lx - 0.8, lz - 0.8, lx + 0.8, lz + 0.8, -2.0, ytop, col)
+		if detailed:
+			beam(Vector3(lx, 4.0, z - 6.0), Vector3(lx, ytop - 4.0, z + 6.0), 0.4, 0.4, col)
+			beam(Vector3(lx, 4.0, z + 6.0), Vector3(lx, ytop - 4.0, z - 6.0), 0.4, 0.4, col)
+	for lz: float in [z - 6.0, z + 6.0]:
+		solid(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, ytop - 4.0, ytop, col)
+		solid(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, 7.0, 8.4, col)
+	# Boom (out over the water) and back-reach with the machinery house.
+	girder(Vector3(qx - 11.0, ytop, z), Vector3(qx + reach, ytop, z), 3.6, 3.0, col, detailed)
+	solid(qx - 11.0, z - 2.6, qx - 3.0, z + 2.6, ytop + 3.0, ytop + 7.0, Color(0.9, 0.9, 0.88))
+	lattice(Vector3(qx + 4.5, ytop + 3.0, z), 19.0, 2.0, col, 4.0, detailed)
+	var apex := Vector3(qx + 4.5, ytop + 22.0, z)
+	beam(apex, Vector3(qx + reach * 0.75, ytop + 3.0, z), 0.14, 0.14, STEEL)
+	beam(apex, Vector3(qx - 10.0, ytop + 3.0, z), 0.14, 0.14, STEEL)
+	# Trolley with a hanging container spreader.
+	var tx := qx + reach * 0.6
+	solid(tx - 1.5, z - 2.0, tx + 1.5, z + 2.0, ytop - 1.0, ytop, STEEL)
+	beam(Vector3(tx, ytop - 1.0, z), Vector3(tx, 14.0, z), 0.08, 0.08, STEEL)
+	solid(tx - 6.0, z - 1.3, tx + 6.0, z + 1.3, 11.4, 14.0, [Color(0.2, 0.42, 0.62), Color(0.75, 0.25, 0.15),
+		Color(0.2, 0.5, 0.3)][int(absf(z)) % 3])
+
+
+func _bridge(s: Dictionary, detailed: bool) -> void:
+	var zc: float = s["z"]
+	var deck: float = s["deck"]
+	var ytop: float = s["top"]
+	var xe: float = s["x_east"]
+	var xw: float = s["x_west"]
+	# Deck: road surface, red side girders, railings.
+	top(xw, zc - 10.0, xe, zc + 10.0, deck, Color(0.23, 0.24, 0.26), KIND_TRIM, 0, 0)
+	bottom(xw, zc - 10.0, xe, zc + 10.0, deck - 2.0, BRIDGE_RED.darkened(0.4), KIND_TRIM, 0, 0)
+	for sz: float in [-1.0, 1.0]:
+		var z0 := zc + sz * 10.0
+		solid(xw, minf(z0, z0 - sz * 1.2), xe, maxf(z0, z0 - sz * 1.2), deck - 2.4, deck + 0.4, BRIDGE_RED)
+		if detailed:
+			beam(Vector3(xw, deck + 1.2, z0 - sz * 0.4), Vector3(xe, deck + 1.2, z0 - sz * 0.4), 0.12, 0.12, STEEL)
+	if detailed:
+		var x := xw
+		while x < xe:
+			top(x, zc - 0.12, x + 3.0, zc + 0.12, deck + 0.02, Color(0.9, 0.85, 0.6), KIND_TRIM, 0, 0)
+			x += 9.0
+	# Towers: two legs, three portal beams.
+	for tx: float in s["towers"]:
+		for sz: float in [-1.0, 1.0]:
+			solid(tx - 3.0, minf(zc + sz * 15.0, zc + sz * 9.5), tx + 3.0, maxf(zc + sz * 15.0, zc + sz * 9.5),
+				-2.0, ytop, BRIDGE_RED)
+			solid(tx - 3.5, minf(zc + sz * 15.5, zc + sz * 9.0), tx + 3.5, maxf(zc + sz * 15.5, zc + sz * 9.0),
+				ytop, ytop + 2.5, BRIDGE_RED.darkened(0.2))
+		for yy in [[deck - 6.0, deck - 2.0], [88.0, 92.0], [ytop - 6.0, ytop - 2.0]]:
+			solid(tx - 2.5, zc - 9.5, tx + 2.5, zc + 9.5, yy[0], yy[1], BRIDGE_RED)
+		solid(tx - 5.0, zc - 18.0, tx + 5.0, zc + 18.0, -3.0, 1.0, Color(0.5, 0.47, 0.42))
+	# Main cables and vertical suspenders down to the deck.
+	for pts in s["cables"]:
+		var cable: PackedVector3Array = pts
+		for i in cable.size() - 1:
+			beam(cable[i], cable[i + 1], 0.9, 0.9, BRIDGE_RED)
+		if not detailed:
+			continue
+		for i in cable.size() - 1:
+			var a := cable[i]
+			var b := cable[i + 1]
+			var n := int(absf(b.x - a.x) / 10.0)
+			for k in n:
+				var p := a.lerp(b, (k + 0.5) / n)
+				if p.y > deck + 2.0:
+					beam(p, Vector3(p.x, deck + 0.4, p.z), 0.12, 0.12, STEEL)
 
 
 ## Ground for one chunk: asphalt, raised pavement blocks with kerbs, park
@@ -148,7 +442,14 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		for w in layout.water:
 			if (w as Rect2).encloses(blk.grow(-7.0)) and w.position.x > 0.0:
 				is_basin = true
-		top(g.position.x, g.position.y, g.end.x, g.end.y, 0.15, grass if is_park else pave, KIND_ROOF, 0, 0)
+		if is_basin:
+			# Only the quay ring is paved; the middle is open water.
+			for q in CityLayout._subtract(blk, blk.grow(-6.0)):
+				var gq: Rect2 = (q as Rect2).intersection(chunk_rect)
+				if gq.has_area():
+					top(gq.position.x, gq.position.y, gq.end.x, gq.end.y, 0.15, pave, KIND_ROOF, 0, 0)
+		else:
+			top(g.position.x, g.position.y, g.end.x, g.end.y, 0.15, grass if is_park else pave, KIND_ROOF, 0, 0)
 		walls(g.position.x, g.position.y, g.end.x, g.end.y, 0.0, 0.15, kerb, KIND_TRIM, 0, 0)
 		if is_basin:
 			# Quay walls down to the basin water.
@@ -163,20 +464,68 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
 			Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
 		walls(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33), KIND_TRIM, 0, 0)
-	for m in layout.avenue_marks:
-		var a: Vector3 = m[0]
-		var b: Vector3 = m[1]
-		var dir := (b - a).normalized()
-		var length := a.distance_to(b)
-		var side := dir.cross(Vector3.UP) * 0.12
-		var d := 0.0
-		while d < length:
-			var p0 := a + dir * d
-			var p1 := a + dir * minf(d + 3.0, length)
-			if chunk_rect.has_point(Vector2(p0.x, p0.z)):
-				quad(p0 - side, p1 - side, p1 + side, p0 + side, Vector3.UP, Vector2.ZERO, Vector2.ZERO,
-					Vector2.ZERO, Vector2.ZERO, Color(0.85, 0.82, 0.7), KIND_TRIM, 0, 0)
-			d += 9.0
+
+
+## Road markings for one chunk (own mesh, short visibility range): centre
+## lines (dashed on streets, double solid on avenues), zebra crossings and
+## stop lines at every junction. Nothing is painted inside a junction.
+func add_road_marks(layout: CityLayout, chunk_rect: Rect2) -> void:
+	var white := Color(0.9, 0.9, 0.86)
+	var yellow := Color(0.92, 0.76, 0.25)
+	for axis in 2:
+		var mains: Array = layout.x_streets if axis == 0 else layout.z_streets
+		var cross: Array = layout.z_streets if axis == 0 else layout.x_streets
+		for st in mains:
+			var c: float = st[0]
+			var w: float = st[1]
+			for k in cross.size() - 1:
+				var a: float = cross[k][0] + cross[k][1] * 0.5
+				var b: float = cross[k + 1][0] - cross[k + 1][1] * 0.5
+				var mid := (a + b) * 0.5
+				var probe := Vector2(c, mid) if axis == 0 else Vector2(mid, c)
+				if not chunk_rect.has_point(probe):
+					continue
+				if w > 20.0:
+					for o: float in [-0.22, 0.22]:
+						_mark(axis, c + o, a + 4.6, b - 4.6, 0.14, yellow)
+				else:
+					var d := a + 5.0
+					while d < b - 5.0:
+						_mark(axis, c, d, minf(d + 3.0, b - 5.0), 0.14, white)
+						d += 8.0
+				# Zebra crossings at both ends, stop line on the approach lane.
+				for e in [[a, 1.0], [b, -1.0]]:
+					var edge: float = e[0]
+					var sgn: float = e[1]
+					var s0 := edge + sgn * 1.0
+					var s1 := edge + sgn * 4.0
+					var x := c - w * 0.5 + 1.2
+					while x < c + w * 0.5 - 1.4:
+						_mark(axis, x + 0.3, minf(s0, s1), maxf(s0, s1), 0.6, white)
+						x += 1.2
+					var sl := edge + sgn * 4.8
+					# Traffic towards this end: x-streets run -Z on +x, z-streets -X on -z.
+					var lane_c := c + w * 0.25 * sgn * (1.0 if axis == 0 else -1.0)
+					_mark_across(axis, lane_c, w * 0.5 - 0.6, sl, 0.45, white)
+
+
+## A strip painted along the street direction (axis 0: along Z at x = c).
+func _mark(axis: int, c: float, from: float, to: float, width: float, col: Color) -> void:
+	var y := 0.04
+	var h := width * 0.5
+	if axis == 0:
+		top(c - h, from, c + h, to, y, col, KIND_TRIM, 0, 0)
+	else:
+		top(from, c - h, to, c + h, y, col, KIND_TRIM, 0, 0)
+
+
+## A strip painted across the street at `at` along it, centred on `c`.
+func _mark_across(axis: int, c: float, length: float, at: float, width: float, col: Color) -> void:
+	var y := 0.04
+	if axis == 0:
+		top(c - length * 0.5, at - width * 0.5, c + length * 0.5, at + width * 0.5, y, col, KIND_TRIM, 0, 0)
+	else:
+		top(at - width * 0.5, c - length * 0.5, at + width * 0.5, c + length * 0.5, y, col, KIND_TRIM, 0, 0)
 
 
 func _inner_walls(r: Rect2, y0: float, y1: float, col: Color) -> void:

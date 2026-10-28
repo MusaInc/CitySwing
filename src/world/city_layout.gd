@@ -7,14 +7,26 @@ extends RefCounted
 ## huge sandstone cathedral, and an elevated railway along the waterfront.
 ## Heights are shaped for swinging: tall clusters, wide avenues as launch gaps,
 ## low-rise districts as technical terrain.
+## Compact (~0.94 x 1.24 km) so every street is worth swinging down: a
+## supertall core, construction sites with tower cranes, quay cranes over the
+## dock basins, rooftop billboards as low anchors, and a red suspension bridge
+## over the river. Structures that aren't buildings (cranes, bridge) are
+## collision boxes ("structure" kind) plus `structures` specs for the mesher
+## and `anchor_lines` the web targeting can snap to.
 
 const CHUNK := 200.0
 const MIN_X := 70.0
-const MAX_X := 1460.0
-const MIN_Z := -940.0
-const MAX_Z := 940.0
+const MAX_X := 1010.0
+const MIN_Z := -640.0
+const MAX_Z := 600.0
 const RIVER_EDGE := 30.0
-const CBD_CENTER := Vector2(640.0, -230.0)
+const FAR_SHORE := -440.0
+const CBD_CENTER := Vector2(560.0, -170.0)
+const CBD_RADIUS := 330.0
+const BRIDGE_Z := -17.0
+const BRIDGE_DECK := 24.0
+const BRIDGE_TOWERS := [-80.0, -340.0]
+const BRIDGE_TOWER_TOP := 132.0
 
 enum Style { STONE, BRICK, GLASS, WAREHOUSE, MODERN, SANDSTONE, DARK_GLASS, DECO }
 
@@ -37,13 +49,16 @@ var parks: Array = []          # Rect2
 var water: Array = []          # Rect2 water surfaces (river + basins)
 var props: Array = []          # [kind:String, Transform3D]
 var lanes: Array = []          # [from:Vector3, to:Vector3]
-var avenue_marks: Array = []   # [from:Vector3, to:Vector3] centre lines to dash
 var x_streets: Array = []      # [centre, width]
 var z_streets: Array = []
 var land: Array = []           # Rect2 ground collision (land minus basins)
 var landmarks: Array = []      # [scene:String, Transform3D]
 var spawn := Vector3(330, 0, -60)
 var reserved: Array = []      # Rect2 footprints owned by landmarks
+var structures: Array = []    # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
+var anchor_lines: Array = []  # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
+var crossings: Array = []     # [x, z] street intersection centres
+var _sites: Array = []        # [Rect2, district] construction lots, built after the blocks
 
 
 func generate(p_seed := 1207) -> CityLayout:
@@ -51,7 +66,9 @@ func generate(p_seed := 1207) -> CityLayout:
 	rng.seed = seed
 	_streets()
 	_landmarks()
+	_bridge()
 	_blocks()
+	_construction()
 	_viaduct()
 	_skybridges()
 	_traffic()
@@ -67,7 +84,7 @@ func _streets() -> void:
 	while x < MAX_X:
 		var w := 26.0 if i % 3 == 0 else 16.0
 		xs.append([x + w * 0.5, w])
-		var bw := rng.randf_range(72.0, 112.0)
+		var bw := rng.randf_range(66.0, 100.0)
 		x += w + bw
 		i += 1
 	x_streets = xs
@@ -77,10 +94,13 @@ func _streets() -> void:
 	while z < MAX_Z:
 		var w := 28.0 if i % 3 == 1 else 16.0
 		zs.append([z + w * 0.5, w])
-		var bd := rng.randf_range(70.0, 115.0)
+		var bd := rng.randf_range(64.0, 100.0)
 		z += w + bd
 		i += 1
 	z_streets = zs
+	for xs_ in x_streets:
+		for zs_ in z_streets:
+			crossings.append([xs_[0], zs_[0]])
 
 
 func district(x: float, z: float) -> String:
@@ -88,10 +108,10 @@ func district(x: float, z: float) -> String:
 		return "waterfront"
 	if z >= 260.0 and x < 560.0:
 		return "docks"
-	if x > 980.0 or z < -700.0 or z > 640.0:
+	if x > 780.0 or z < -540.0 or z > 520.0:
 		return "georgian"
 	var d := Vector2(x, z).distance_to(CBD_CENTER)
-	if d < 420.0:
+	if d < CBD_RADIUS:
 		return "cbd"
 	return "midtown"
 
@@ -100,7 +120,7 @@ func district(x: float, z: float) -> String:
 func _landmarks() -> void:
 	# Clock building: stone block, two clock towers crowned with domes + birds.
 	_add(_building([[92, -112, 162, -40, 0, 50]], Style.SANDSTONE, Color(0.76, 0.74, 0.7), "landmark"))
-	for tx in [94.0, 144.0]:
+	for tx: float in [94.0, 144.0]:
 		_add(_building([[tx, -84, tx + 16, -68, 50, 64]], Style.SANDSTONE, Color(0.76, 0.74, 0.7), "landmark"))
 		landmarks.append(["clock_crown", Transform3D(Basis(), Vector3(tx + 8, 64, -76))])
 		_add(_building([[tx + 2, -82, tx + 14, -70, 64, 92]], Style.SANDSTONE, Color(0.76, 0.74, 0.7), "invisible"))
@@ -120,8 +140,8 @@ func _landmarks() -> void:
 	_add(_building([[bx - 6, bz - 6, bx + 6, bz + 6, 0, 115]], Style.MODERN, Color(0.82, 0.8, 0.76), "invisible"))
 	_add(_building([[bx - 11, bz - 11, bx + 11, bz + 11, 115, 127]], Style.MODERN, Color(0.82, 0.8, 0.76), "invisible"))
 	# Sandstone cathedral on the eastern ridge.
-	var cx := 1210.0
-	var cz := -420.0
+	var cx := 900.0
+	var cz := -390.0
 	var sand := Color(0.64, 0.4, 0.31)
 	_add(_building([[cx - 90, cz - 24, cx + 90, cz + 24, 0, 44]], Style.SANDSTONE, sand, "landmark"))
 	_add(_building([[cx - 22, cz - 60, cx + 22, cz + 60, 0, 40]], Style.SANDSTONE, sand, "landmark"))
@@ -164,12 +184,10 @@ func _blocks() -> void:
 				_park_props(rect, brng)
 				cbd_plaza_done = true
 				continue
-			if dist == "docks" and brng.randf() < 0.32 and c.x < 470.0:
+			if dist == "docks" and brng.randf() < 0.4 and c.x < 470.0:
 				var basin := rect.grow(-6.0)
 				water.append(basin)
-				if brng.randf() < 0.7:
-					props.append(["crane", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)),
-						Vector3(basin.position.x + 4, 0, basin.get_center().y))])
+				_quay_cranes(basin, brng)
 				continue
 			if dist == "georgian" and brng.randf() < 0.12 or dist == "midtown" and brng.randf() < 0.06:
 				parks.append(rect)
@@ -207,8 +225,17 @@ func _fill_block(rect: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	var inner := rect.grow(-3.5)
 	var lots: Array = []
 	_split(inner, lots, brng, 26.0 if dist in ["georgian", "docks"] else 34.0, 0)
+	# Construction sites (cbd/midtown): the biggest lot gets a half-built
+	# frame and a tower crane instead of a building.
+	var site := Rect2()
+	if dist in ["cbd", "midtown"] and _sites.size() < 9 and brng.randf() < 0.17:
+		for lot in lots:
+			if lot.get_area() > site.get_area() and minf(lot.size.x, lot.size.y) > 26.0 and not _reserved(lot):
+				site = lot
+		if site.has_area():
+			_sites.append([site, dist])
 	for lot in lots:
-		if _reserved(lot):
+		if lot == site or _reserved(lot):
 			continue
 		var r: Rect2 = lot.grow(-1.2)
 		if r.size.x < 9.0 or r.size.y < 9.0:
@@ -238,12 +265,12 @@ func _height_for(dist: String, c: Vector2, brng: RandomNumberGenerator) -> float
 	match dist:
 		"cbd":
 			var d := c.distance_to(CBD_CENTER)
-			var peak := 60.0 + 120.0 * exp(-pow(d / 300.0, 2.0))
-			if brng.randf() < 0.12:
+			var peak := 70.0 + 165.0 * exp(-pow(d / 250.0, 2.0))
+			if brng.randf() < 0.1:
 				return brng.randf_range(24.0, 40.0)  # technical low spots
-			return peak * brng.randf_range(0.7, 1.25)
+			return peak * brng.randf_range(0.72, 1.22)
 		"midtown":
-			return brng.randf_range(32.0, 82.0) if brng.randf() > 0.15 else brng.randf_range(90.0, 120.0)
+			return brng.randf_range(38.0, 95.0) if brng.randf() > 0.3 else brng.randf_range(105.0, 160.0)
 		"waterfront":
 			return brng.randf_range(34.0, 70.0)
 		"docks":
@@ -315,8 +342,15 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	if (style == Style.BRICK or style == Style.STONE or style == Style.SANDSTONE) and h < 80.0 and brng.randf() < 0.55:
 		props.append(["water_tower", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)),
 			Vector3(rx + brng.randf_range(-tw, tw) * 0.25, ry, rz + brng.randf_range(-td, td) * 0.25))])
-	if h > 100.0 and brng.randf() < 0.55:
+	if h > 175.0 and tw > 16.0 and td > 16.0:
+		# Supertall crown: a slim spire, the highest anchor in the city.
+		var sp := brng.randf_range(2.5, 3.5)
+		_add(_building([[rx - sp, rz - sp, rx + sp, rz + sp, ry, ry + brng.randf_range(28.0, 48.0)]], style,
+			col.lightened(0.15), "spire"))
+	elif h > 100.0 and brng.randf() < 0.55:
 		props.append(["antenna", Transform3D(Basis(), Vector3(rx, ry, rz))])
+	if h > 14.0 and h < 75.0 and tiers.size() == 1 and minf(tw, td) > 16.0 and brng.randf() < 0.16:
+		_billboard(tiers[0], brng)
 	for i in brng.randi_range(0, 3):
 		if tw > 10.0 and td > 10.0:
 			props.append(["ac_unit", Transform3D(Basis(Vector3.UP, (brng.randi() % 2) * PI * 0.5),
@@ -332,6 +366,188 @@ func _add(b: Dictionary) -> void:
 	if b["kind"] == "landmark" or b["kind"] == "invisible":
 		var t: Array = b["tiers"][0]
 		reserved.append(Rect2(t[0], t[1], t[2] - t[0], t[3] - t[1]))
+
+
+# ------------------------------------------------------------ structures
+## Collision-only box (the visuals come from `structures` specs).
+func _box(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float) -> void:
+	buildings.append({"tiers": [[minf(x0, x1), minf(z0, z1), maxf(x0, x1), maxf(z0, z1), y0, y1]],
+		"style": Style.MODERN, "color": Color.WHITE, "kind": "structure", "seed": 0.0})
+
+
+func _anchor(a: Vector3, b: Vector3) -> void:
+	anchor_lines.append([a, b])
+
+
+## Container cranes on the west quay of a dock basin, booms out over the water.
+func _quay_cranes(basin: Rect2, brng: RandomNumberGenerator) -> void:
+	var n := 2 if basin.size.y > 72.0 else 1
+	var reach := minf(46.0, basin.size.x - 6.0)
+	for i in n:
+		var qx := basin.position.x
+		var z := basin.position.y + basin.size.y * (i + 1.0) / (n + 1.0) + brng.randf_range(-4.0, 4.0)
+		var top := 34.0
+		for lx: float in [qx - 3.0, qx + 13.0]:
+			for lz: float in [z - 6.0, z + 6.0]:
+				_box(lx - 0.8, lz - 0.8, lx + 0.8, lz + 0.8, -2.0, top)
+		for lz: float in [z - 6.0, z + 6.0]:
+			_box(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, top - 4.0, top)
+		_box(qx - 11.0, z - 1.8, qx + reach, z + 1.8, top, top + 3.0)
+		_box(qx + 3.5, z - 1.0, qx + 5.5, z + 1.0, top + 3.0, top + 22.0)
+		_anchor(Vector3(qx + 4.0, top - 0.1, z), Vector3(qx + reach - 1.0, top - 0.1, z))
+		structures.append({"type": "quay_crane", "x": qx, "z": z, "top": top, "reach": reach,
+			"color": [Color(0.16, 0.36, 0.58), Color(0.78, 0.2, 0.14), Color(0.92, 0.68, 0.12)][brng.randi() % 3]})
+
+
+## A rooftop billboard on one roof edge: a low, grappleable panel on legs.
+func _billboard(t: Array, brng: RandomNumberGenerator) -> void:
+	var side := brng.randi() % 4
+	var along_x := side < 2
+	var len := minf((t[2] - t[0]) if along_x else (t[3] - t[1]), 18.0) - 4.0
+	var cx: float = (t[0] + t[2]) * 0.5
+	var cz: float = (t[1] + t[3]) * 0.5
+	var y0: float = t[5] + 2.6
+	var y1 := y0 + brng.randf_range(5.5, 7.5)
+	var r: Array
+	match side:
+		0: r = [cx - len * 0.5, t[1] + 1.0, cx + len * 0.5, t[1] + 1.6]
+		1: r = [cx - len * 0.5, t[3] - 1.6, cx + len * 0.5, t[3] - 1.0]
+		2: r = [t[0] + 1.0, cz - len * 0.5, t[0] + 1.6, cz + len * 0.5]
+		_: r = [t[2] - 1.6, cz - len * 0.5, t[2] - 1.0, cz + len * 0.5]
+	var cols := [Color(0.95, 0.75, 0.15), Color(0.85, 0.2, 0.18), Color(0.15, 0.6, 0.62), Color(0.95, 0.95, 0.92),
+		Color(0.25, 0.32, 0.75), Color(0.9, 0.45, 0.6)]
+	var b := _building([[r[0], r[1], r[2], r[3], y0, y1]], Style.MODERN, cols[brng.randi() % cols.size()], "sign")
+	b["roof"] = t[5]
+	b["seed"] = brng.randf()
+	_add(b)
+
+
+## Half-built towers on the construction lots picked while filling blocks:
+## concrete core, open floor slabs, and a tower crane whose jib clears the
+## neighbours (it's placed to swing from: the jib reaches out over a street).
+func _construction() -> void:
+	for entry in _sites:
+		var lot: Rect2 = (entry[0] as Rect2).grow(-1.2)
+		var dist: String = entry[1]
+		var brng := RandomNumberGenerator.new()
+		brng.seed = hash(Vector2i(int(lot.position.x), int(lot.position.y))) ^ seed
+		var c := lot.get_center()
+		var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 30.0, 95.0)
+		var f := lot.grow(-4.0)
+		var floors: Array = []
+		var y := 4.2
+		while y <= h:
+			floors.append([f.position.x, f.position.y, f.end.x, f.end.y, y - 0.45, y])
+			y += 4.2
+		var top: float = floors[-1][5]
+		var fb := _building(floors, Style.MODERN, Color(0.66, 0.65, 0.62), "frame")
+		_add(fb)
+		_add(_building([[c.x - 4.5, c.y - 4.5, c.x + 4.5, c.y + 4.5, 0.0, top + 6.0]], Style.MODERN,
+			Color(0.62, 0.61, 0.58), "plain"))
+		props.append(["ac_unit", Transform3D(Basis(), Vector3(c.x + 6.0, top, c.y + 6.0))])
+		_tower_crane(lot, top, brng)
+
+
+func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> void:
+	var jib := 52.0
+	var counter := 16.0
+	var best := {}
+	var best_obst := INF
+	var corners := [lot.position + Vector2(2.5, 2.5), Vector2(lot.end.x - 2.5, lot.position.y + 2.5),
+		lot.end - Vector2(2.5, 2.5), Vector2(lot.position.x + 2.5, lot.end.y - 2.5)]
+	for m in corners:
+		for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+			# Jib pointing out of the lot (over the street), not back over the frame.
+			if (m + d * 10.0).distance_to(lot.get_center()) < m.distance_to(lot.get_center()):
+				continue
+			var obst := _max_height_along(m - d * counter, m + d * jib, 4.0)
+			obst += brng.randf() * 4.0
+			if obst < best_obst:
+				best_obst = obst
+				best = {"m": m, "d": d}
+	if best.is_empty():
+		return
+	var mh := maxf(best_obst + 12.0, site_top + 30.0)
+	if mh > 235.0:
+		return
+	var m: Vector2 = best["m"]
+	var d: Vector2 = best["d"]
+	var tip := m + d * jib
+	var back := m - d * counter
+	_box(m.x - 1.3, m.y - 1.3, m.x + 1.3, m.y + 1.3, 0.0, mh)
+	var side := Vector2(-d.y, d.x)
+	var j0 := m - side * 1.0
+	var j1 := tip + side * 1.0
+	_box(j0.x, j0.y, j1.x, j1.y, mh + 1.2, mh + 3.4)
+	var c0 := m - side * 1.6
+	var c1 := back + side * 1.6
+	_box(c0.x, c0.y, c1.x, c1.y, mh + 1.2, mh + 3.0)
+	var w0 := back + d * 4.0 - side * 1.8
+	var w1 := back + side * 1.8
+	_box(w0.x, w0.y, w1.x, w1.y, mh - 2.6, mh + 1.2)
+	_box(m.x - 0.8, m.y - 0.8, m.x + 0.8, m.y + 0.8, mh + 3.4, mh + 13.0)
+	_anchor(Vector3(m.x + d.x * 4.0, mh + 1.1, m.y + d.y * 4.0), Vector3(tip.x, mh + 1.1, tip.y))
+	_anchor(Vector3(m.x - d.x * 3.0, mh + 1.1, m.y - d.y * 3.0), Vector3(back.x + d.x * 4.0, mh + 1.1, back.y + d.y * 4.0))
+	structures.append({"type": "tower_crane", "x": m.x, "z": m.y, "h": mh, "dir": d, "jib": jib, "counter": counter,
+		"trolley": brng.randf_range(0.35, 0.85), "hook": brng.randf_range(0.25, 0.6)})
+
+
+## Tallest building/structure top whose footprint touches the strip a→b (width w).
+func _max_height_along(a: Vector2, b: Vector2, w: float) -> float:
+	var r := Rect2(a, Vector2.ZERO).expand(b).grow(w * 0.5)
+	var best := 0.0
+	for bd in buildings:
+		for t in bd["tiers"]:
+			if Rect2(t[0], t[1], t[2] - t[0], t[3] - t[1]).intersects(r):
+				best = maxf(best, t[5])
+	return best
+
+
+## Suspension bridge from the waterfront to the far shore: two red towers,
+## sagging main cables (anchor lines) and a deck to land on.
+func _bridge() -> void:
+	var zc := BRIDGE_Z
+	var deck := BRIDGE_DECK
+	var top := BRIDGE_TOWER_TOP
+	var x_east := 56.0
+	var x_west := FAR_SHORE + 14.0
+	_box(x_west, zc - 10.0, x_east, zc + 10.0, deck - 2.0, deck)
+	for tx: float in BRIDGE_TOWERS:
+		for sz: float in [-1.0, 1.0]:
+			_box(tx - 3.0, zc + sz * 15.0, tx + 3.0, zc + sz * 9.5, -2.0, top)
+		for yy in [[deck - 6.0, deck - 2.0], [88.0, 92.0], [top - 6.0, top - 2.0]]:
+			_box(tx - 2.5, zc - 9.5, tx + 2.5, zc + 9.5, yy[0], yy[1])
+			_anchor(Vector3(tx, yy[0] - 0.1, zc - 9.0), Vector3(tx, yy[0] - 0.1, zc + 9.0))
+	# Anchorages (solid stone blocks at both ends).
+	_add(_building([[x_east - 2.0, zc - 14.0, x_east + 14.0, zc + 14.0, 0.0, deck + 6.0]], Style.STONE,
+		Color(0.62, 0.58, 0.52), "plain"))
+	_add(_building([[x_west - 16.0, zc - 14.0, x_west + 2.0, zc + 14.0, -2.0, deck + 6.0]], Style.STONE,
+		Color(0.62, 0.58, 0.52), "plain"))
+	var cables: Array = []
+	for sz: float in [-1.0, 1.0]:
+		var pts := PackedVector3Array()
+		var z := zc + sz * 12.25
+		var ta: float = BRIDGE_TOWERS[0]
+		var tb: float = BRIDGE_TOWERS[1]
+		var sag := deck + 5.0
+		# East side span: anchorage → tower A (slight sag).
+		for i in 6:
+			var u := i / 6.0
+			pts.append(Vector3(lerpf(x_east + 4.0, ta, u), lerpf(deck + 5.0, top - 1.0, u) - sin(u * PI) * 5.0, z))
+		for i in 15:
+			var u := i / 14.0
+			var x := lerpf(ta, tb, u)
+			var k := (u - 0.5) * 2.0
+			pts.append(Vector3(x, sag + (top - 1.0 - sag) * k * k, z))
+		for i in range(1, 7):
+			var u := i / 6.0
+			pts.append(Vector3(lerpf(tb, x_west - 4.0, u), lerpf(top - 1.0, deck + 5.0, u) - sin(u * PI) * 5.0, z))
+		cables.append(pts)
+		for i in pts.size() - 1:
+			if pts[i].y > deck + 9.0 or pts[i + 1].y > deck + 9.0:
+				_anchor(pts[i] + Vector3.DOWN * 0.6, pts[i + 1] + Vector3.DOWN * 0.6)
+	structures.append({"type": "bridge", "z": zc, "deck": deck, "top": top, "towers": BRIDGE_TOWERS,
+		"x_east": x_east, "x_west": x_west, "cables": cables})
 
 
 # ------------------------------------------------------- elevated & bridges
@@ -352,12 +568,12 @@ func _skybridges() -> void:
 			continue
 		var t: Array = b["tiers"][0]
 		var top: float = b["tiers"][-1][5]
-		if top > 80.0 and district((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5) == "cbd":
+		if top > 80.0 and district((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5) in ["cbd", "midtown"]:
 			tall.append(b)
 	var made := 0
 	for i in tall.size():
 		for j in range(i + 1, tall.size()):
-			if made >= 14:
+			if made >= 20:
 				return
 			var a: Array = tall[i]["tiers"][0]
 			var b2: Array = tall[j]["tiers"][0]
@@ -376,17 +592,31 @@ func _skybridges() -> void:
 func _traffic() -> void:
 	for s in x_streets:
 		var x: float = s[0]
-		if s[1] > 20.0:
-			avenue_marks.append([Vector3(x, 0.03, MIN_Z), Vector3(x, 0.03, MAX_Z)])
 		lanes.append([Vector3(x - 3.2, 0.0, MIN_Z), Vector3(x - 3.2, 0.0, MAX_Z)])
 		lanes.append([Vector3(x + 3.2, 0.0, MAX_Z), Vector3(x + 3.2, 0.0, MIN_Z)])
 	for s in z_streets:
 		var z: float = s[0]
-		if s[1] > 20.0:
-			avenue_marks.append([Vector3(MIN_X, 0.03, z), Vector3(MAX_X, 0.03, z)])
 		lanes.append([Vector3(MIN_X, 0.0, z + 3.2), Vector3(MAX_X, 0.0, z + 3.2)])
 		lanes.append([Vector3(MAX_X, 0.0, z - 3.2), Vector3(MIN_X, 0.0, z - 3.2)])
-	water.append(Rect2(-1500, -2500, 1500 + RIVER_EDGE, 5000))
+	water.append(Rect2(FAR_SHORE, -2500, RIVER_EDGE - FAR_SHORE, 5000))
+	# Traffic lights on two opposite corners of every junction, arms over the road.
+	for xs in x_streets:
+		for zs in z_streets:
+			var hx: float = xs[1] * 0.5 + 1.0
+			var hz: float = zs[1] * 0.5 + 1.0
+			var a := Vector3(xs[0] + hx, 0.15, zs[0] - hz)
+			var b := Vector3(xs[0] - hx, 0.15, zs[0] + hz)
+			if not is_water(a) and not _in_park(a):
+				props.append(["traffic_light", Transform3D(Basis(Vector3.UP, PI), a)])
+			if not is_water(b) and not _in_park(b):
+				props.append(["traffic_light", Transform3D(Basis(), b)])
+
+
+func _in_park(p: Vector3) -> bool:
+	for r in parks:
+		if (r as Rect2).grow(2.0).has_point(Vector2(p.x, p.z)):
+			return true
+	return false
 
 
 func _land() -> void:
@@ -398,6 +628,8 @@ func _land() -> void:
 		for r in rects:
 			next.append_array(_subtract(r, w))
 		rects = next
+	# Far shore (where the bridge lands): plain ground, so it isn't "water".
+	rects.append(Rect2(FAR_SHORE - 1500.0, -2500.0, 1500.0, 5000.0))
 	land = rects
 
 

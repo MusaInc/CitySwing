@@ -19,7 +19,10 @@ void fragment() {
 	vec3 c = COLOR.rgb;
 	float n = vnoise(UV * 0.35) * 0.6 + vnoise(UV * 2.1) * 0.4;
 	float slabs = 1.0;
-	if (c.r > 0.5 && c.g > 0.5) {
+	bool paint = c.r > 0.85;  // road markings
+	if (paint) {
+		n = 0.7 + 0.3 * n;  // worn paint, less mottled than asphalt
+	} else if (c.r > 0.5 && c.g > 0.5) {
 		// Pavement flagstones.
 		vec2 f = fract(UV / 1.8);
 		slabs = 1.0 - 0.1 * (step(f.x, 0.03) + step(f.y, 0.03));
