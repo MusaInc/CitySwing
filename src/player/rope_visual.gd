@@ -9,7 +9,7 @@ const SEGMENTS := 14
 var player: Player
 ## Optional node whose position the web leaves from (the rig's launcher hand).
 var hand: Node3D
-var width := 0.04
+var width := 0.022  # half-width (m); thin like a real web line
 var _mesh := ImmediateMesh.new()
 var _wave := 0.0
 var _mat: StandardMaterial3D
@@ -82,7 +82,7 @@ func _process(dt: float) -> void:
 				p += Vector3.DOWN * sag * 4.0 * t * (1.0 - t)
 				p += side * sin(t * 9.0 - _wave) * amp * t * (1.0 - t) * 4.0
 			var to_cam := (cam_pos - p).normalized()
-			var w := tangent.cross(to_cam).normalized() * width * w_scale * (1.0 + p.distance_to(cam_pos) * 0.012)
+			var w := tangent.cross(to_cam).normalized() * width * w_scale * (1.0 + p.distance_to(cam_pos) * 0.009)
 			_mesh.surface_add_vertex(p - w)
 			_mesh.surface_add_vertex(p + w)
 	_mesh.surface_end()

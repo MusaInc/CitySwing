@@ -5,7 +5,7 @@ extends Node
 
 const SCENARIOS := ["idle", "accelerate", "reverse", "zigzag", "walk_stop", "run_jump", "drop", "roll_land",
 	"steps", "swing_slow", "swing_fast", "release_refire", "rapid_webs", "swing_to_land", "wall_run",
-	"knockout", "crash_recover", "tricks"]
+	"knockout", "crash_recover", "tricks", "ledge_dive", "run_into_wall", "swing_graze"]
 const TOWER := Vector3(0, 40, -40)
 
 var player: Player
@@ -106,6 +106,12 @@ func _plan(name: String) -> Array:
 			return [Vector3(0, 30, -20), Vector3(0, 1, -35), 4.5, {}]
 		"crash_recover":  # crash on the ground at speed, get up, run on
 			return [Vector3(0, 3, -10), Vector3(0, 0, -30), 5.0, {2.5: func(): drv.move = Vector3.RIGHT}]
+		"ledge_dive":  # sprint off a 120 m tower: swan dive, pull out, land
+			return [Vector3(-118, 121, -120), Vector3.ZERO, 7.5, {0.0: func(): drv.move = Vector3.RIGHT}]
+		"run_into_wall":  # sprint straight into the tower's foot
+			return [Vector3(0, 1, -10), Vector3.ZERO, 3.0, {0.0: func(): drv.move = Vector3.FORWARD}]
+		"swing_graze":  # a swing that scrapes along a facade
+			return [Vector3(-14, 40, -24), Vector3(10, 0, -6), 3.0, {0.0: func(): p.fire_at(Vector3(-2, 70, -32), 1)}]
 		"tricks":
 			return [Vector3(-20, 90, 200), Vector3(9, 9, 0), 3.0, {0.1: func(): rig.start_trick("corkscrew"),
 				1.4: func(): rig.start_trick("aerial")}]

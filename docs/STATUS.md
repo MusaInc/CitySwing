@@ -1,6 +1,39 @@
 # Status: 2026-10-29 (movement & body physics pass)
 
-## Movement & body physics pass (latest)
+## Dives, knockouts, bumps, turning, walk control (latest)
+
+- **Swan dive**: running or jumping off a building with > 12 m below (no web
+  since leaving the ground) pitches the body head-first – arms spread wide,
+  back arched, legs long – closing into a streamline as the fall gets fast,
+  then tucks and swings the feet under ~0.6 s before the ground (scaled with
+  fall speed). Webbing at any point takes over as usual. Test:
+  `test_jumping_off_a_building_dives_head_first`.
+- **Knockout fall**: limbs no longer teleport/spin (the ragdoll's joint-cone
+  clamps and hinge mirroring moved a limb up to 180° in one step; the visible
+  limbs now chase the simulation at ≤ 26 rad/s, mirrored joints keep their
+  roll, mirrored particles lose their velocity). Arms reach down to break the
+  fall in the last 4 m. A landing that turns into a crash no longer plays its
+  roll after the get-up.
+- **Get-up** rebuilt by how the body came to rest: face-down → push up onto
+  hands and knees (hands IK'd to the ground, head up) → crouch → stand;
+  face-up → sit up leaning on the hands behind → roll forward onto the feet →
+  stand. The body rises from where the ragdoll left it (no pop to standing
+  height), 1.05 s, quicker with the stick held, cut short if already moving.
+- **Bumps**: every wall contact over 1.5 m/s (`Player.bumped`, visual only)
+  knocks the upper body back off the surface, whips the head, folds the knees
+  and pushes the arms off the wall with bent elbows; a look-ahead ray raises
+  the arms to brace ~0.45 s before a fast hit.
+- **Turning**: walking turns follow the path tighter (facing 10/s walk → 6/s
+  sprint), the head and chest lead toward the stick, planted feet keep the
+  heading they landed in (pivoting on the ball past ~35°) instead of spinning
+  flat on the ground.
+- **Walk control**: stick response curve (speed ∝ deflection²) for human
+  input – half deflection is a walk-to-jog – and the touch stick's full
+  throw is 96 px (was 78). The autopilot is unaffected.
+- **Webs** drawn thinner (half-width 4 → 2.2 cm, less widening with distance).
+- Tests: 80 native. Not yet checked on a device.
+
+## Movement & body physics pass
 
 Driven by a new measurement tool rather than by eye alone:
 `tools/motion_audit.gd` (headless, ~3 s) runs 18 scripted scenarios –

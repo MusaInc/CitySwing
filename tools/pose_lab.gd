@@ -5,9 +5,9 @@ extends SceneTree
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
 ## Scenarios: idle run steps jump swing swing34 swingfast release wallrun crash
-##   land jumpclose tricks freefall dive knockout drop chain
+##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns"]
 
 var player: Player
 var rig: CharacterRig
@@ -185,6 +185,44 @@ func _sc_chain() -> void:
 		3.8: func(): player.release_web()})
 
 
+## Sprint off a 120 m tower: swan dive, pull-out, landing.
+func _sc_ledgedive() -> void:
+	var sc := _reset(Vector3(126, 121, -160))
+	sc.move = Vector3.LEFT
+	_cam_off = Vector3(0.5, 0.8, 5.5)
+	var shots := []
+	for i in 14:
+		shots.append(1.2 + i * 0.36 if i < 9 else 4.4 + (i - 9) * 0.12)
+	await _film("ledgedive", 6.5, shots)
+	sc.move = Vector3.ZERO
+
+
+## Running into a wall, then a swing that scrapes along a facade.
+func _sc_bump() -> void:
+	var sc := _reset(Vector3(0, 1.0, -18))
+	sc.move = Vector3.FORWARD
+	_cam_off = Vector3(3.5, 0.6, 1.0)
+	await _film("bump_run", 1.6, [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.5])
+	sc.move = Vector3.ZERO
+	_reset(Vector3(-14, 40, -24), Vector3(10, 0, -6))
+	_cam_off = Vector3(-2.0, 0.6, 4.5)
+	player.fire_at(Vector3(-2, 70, -32), 1)
+	await _film("bump_swing", 2.4, [0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.6, 2.0])
+
+
+## Walking 90° turns, then sprint cuts (camera high three-quarter).
+func _sc_turns() -> void:
+	var sc := _reset(Vector3(-20, 1.0, 20))
+	_cam_off = Vector3(2.5, 2.2, 3.0)
+	sc.move = Vector3.RIGHT * 0.3
+	await _film("turn_walk", 2.6, [1.0, 1.15, 1.3, 1.45, 1.6, 1.8, 2.0, 2.3],
+		{1.0: func(): sc.move = Vector3.FORWARD * 0.3})
+	sc.move = Vector3.RIGHT
+	await _film("turn_run", 2.4, [1.2, 1.3, 1.4, 1.5, 1.6, 1.75, 1.9, 2.1],
+		{1.2: func(): sc.move = Vector3.FORWARD})
+	sc.move = Vector3.ZERO
+
+
 func _sc_release() -> void:
 	_reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
 	_cam_off = Vector3(0, 0.3, 5.5)
@@ -238,6 +276,17 @@ func _sc_knockout() -> void:
 	_reset(Vector3(0, 30, -20), Vector3(0, 1, -35))
 	_cam_off = Vector3(7.0, 0.8, 3.0)
 	await _film("knockout", 4.0, [0.3, 0.36, 0.42, 0.5, 0.6, 0.75, 0.95, 1.2, 1.6, 2.1, 2.8, 3.8])
+	# The get-up, close: every 0.12 s from the moment the stun ends.
+	_reset(Vector3(0, 30, -20), Vector3(0, 1, -35))
+	_cam_off = Vector3(3.2, 0.6, 1.6)
+	while not rig.ragdolling:
+		await process_frame
+	while rig.ragdolling:
+		await process_frame
+	var shots := []
+	for i in 12:
+		shots.append(0.02 + i * 0.11)
+	await _film("getup", 1.45, shots)
 
 
 func _sc_steps() -> void:

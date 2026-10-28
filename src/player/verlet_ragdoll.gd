@@ -26,6 +26,10 @@ var _acc := 0.0
 var space: PhysicsDirectSpaceState3D
 ## While dangling from the web, the web hand's wrist is held here (INF = free).
 var hand_pin := Vector3.INF
+## Protective reflex: particle -> world point it is pulled toward (weakly),
+## e.g. the wrists reaching for the ground to break a fall. Set per update.
+var reach := {}
+var reach_k := 0.0
 var exclude: Array[RID] = []
 
 
@@ -84,6 +88,8 @@ func _step(anchor: Vector3) -> void:
 		pos["pelvis"] = (pos["pelvis"] as Vector3).lerp(anchor, 0.25)
 		if hand_pin != Vector3.INF:
 			pos["wr_r"] = (pos["wr_r"] as Vector3).lerp(hand_pin, 0.6)
+		for n in reach:
+			pos[n] = (pos[n] as Vector3).lerp(reach[n], reach_k)
 		for l in links:
 			var a: Vector3 = pos[l[0]]
 			var b: Vector3 = pos[l[1]]
@@ -176,6 +182,9 @@ func _hinge(root: String, mid: String, end: String, bend: Vector3) -> void:
 	var b := bend - ax.normalized() * bend.dot(ax.normalized())
 	if off.dot(b) < 0.0:
 		pos[mid] = closest - off  # mirror the joint to the side it can bend
+		# ...and drop its velocity, or it keeps driving back across the line
+		# and the limb flips side to side (visibly spinning about itself).
+		prev[mid] = pos[mid]
 
 
 func _torso_frame() -> Transform3D:

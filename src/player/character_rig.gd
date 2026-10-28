@@ -108,6 +108,17 @@ var _time := 0.0
 var _load := 0.0           # rope load 0..1 (smoothed)
 var _lgrip := 0.0          # free hand on the line 0..1
 var _swing_lead := "l"     # leg that folds/leads on this web (alternates web to web)
+var _off_ledge := false    # airborne straight off the ground (jumped / ran off), no web since
+var _swan := 0.0           # head-first dive off a building 0..1
+var _swan_peak := 0.0      # how deep the current dive got (drives the pull-out tuck)
+var _bump_t := 0.0         # wall-contact reaction remaining (s)
+var _bump_n := Vector3.ZERO
+var _bump_k := 0.0         # its strength 0..1
+var _brace := 0.0          # arms coming up before an impact 0..1
+var _brace_n := Vector3.ZERO
+var _brace_probe := 0.0
+var _getup_down := true    # get-up from face-down (push up) or face-up (sit up, roll onto the feet)
+var _getup_off := Vector3.ZERO  # where the ragdoll left the body, relative to the capsule
 var _wall_time := 0.0      # wall run / wall tap pose remaining
 var _wall_n := Vector3.BACK
 var _takeoff_t := 0.0
@@ -223,6 +234,7 @@ func _connect_player() -> void:
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)
+	player.bumped.connect(_on_bumped)
 	player.attached.connect(func(_a) -> void:
 		_swing_lead = "r" if _swing_lead == "l" else "l"
 		_jolt(0.6))
@@ -364,6 +376,54 @@ func _jolt(strength: float) -> void:
 		_angvel["shin_" + sd] += Vector3(-4.0, 0, 0) * strength
 
 
+## Any wall contact: the body physically gives – the upper body is knocked
+## back off the surface (spring impulses scaled by the speed into it), the
+## head whips, the arms brace toward the wall and the knees absorb.
+func _on_bumped(speed: float, n: Vector3) -> void:
+	if ragdolling:
+		return
+	var k := clampf(speed / 12.0, 0.15, 1.0)
+	var axis := (global_basis.inverse() * n.cross(Vector3.UP)).normalized()
+	if axis.length_squared() < 0.5:
+		axis = Vector3.RIGHT
+	# Torso bones bend backward on +X: a hit on the chest (normal toward the
+	# back) tips the torso back about the axis along the wall.
+	_angvel["spine"] += axis * 3.0 * k
+	_angvel["chest"] += axis * 4.0 * k
+	_angvel["head"] += axis * 7.0 * k
+	_angvel["neck"] += axis * 2.5 * k
+	for sd in ["l", "r"]:
+		_angvel["thigh_" + sd] += Vector3(2.5, 0, 0) * k
+		_angvel["shin_" + sd] += Vector3(-3.5, 0, 0) * k
+	if speed >= 3.0:
+		_bump_t = 0.4
+		_bump_n = n
+		_bump_k = maxf(k, _bump_k if _bump_t > 0.0 else 0.0)
+		_land_squash = maxf(_land_squash, 0.25 * k) if player.is_on_floor() else _land_squash
+
+
+## Looks ahead along the motion a few times a second: a facade coming up
+## fast raises the arms to take it (visual only).
+func _update_brace(dt: float, v: Vector3, speed: float, wall_run: bool) -> void:
+	_brace_probe -= dt
+	var want := _brace if _brace_probe > 0.0 else 0.0
+	if _brace_probe <= 0.0:
+		_brace_probe = 0.08
+		if speed > 7.0 and not wall_run and not ragdolling and is_inside_tree():
+			var from := player.global_position + Vector3.UP * 0.4
+			var rq := PhysicsRayQueryParameters3D.create(from, from + v * 0.5, Player.BUILDINGS_MASK)
+			rq.exclude = [player.get_rid()]
+			var hit := get_world_3d().direct_space_state.intersect_ray(rq)
+			if not hit.is_empty():
+				var n: Vector3 = hit.normal
+				var into := -v.dot(n)
+				if n.y < 0.6 and into > 6.0:
+					var tti := from.distance_to(hit.position) / into
+					want = clampf((0.45 - tti) / 0.3, 0.0, 1.0)
+					_brace_n = n
+	_brace = move_toward(_brace, want, dt * 8.0)
+
+
 ## JUMP in the air (or a wall tap): a trick that fits the air time left.
 func _on_trick() -> void:
 	start_trick()
@@ -462,6 +522,15 @@ func _on_stun(speed: float) -> void:
 	ragdolling = true
 	_rag_time = 0.0
 	_trick = ""
+	# A landing that turns into a crash must not leave its roll / crouch
+	# queued for after the get-up.
+	_roll_time = 0.0
+	_hard_t = 0.0
+	_flip = 0.0
+	_swan = 0.0
+	_swan_peak = 0.0
+	_bump_t = 0.0
+	_brace = 0.0
 	ragdoll.space = get_world_3d().direct_space_state
 	if player.knocked_out:
 		_knockout_ragdoll(speed)
@@ -608,23 +677,40 @@ func _update_animated(dt: float) -> void:
 	_hard_t = maxf(_hard_t - dt, 0.0)
 	if _hard_t > 0.0 and (not player.is_on_floor() or player.controls.move.length() > 0.3 and _hard_t < HARD_TIME * 0.6):
 		_hard_t = minf(_hard_t, 0.12)  # off again / running on: rise quickly
-	_getup_t = maxf(_getup_t - dt, 0.0)
+	# Getting up: quicker if the player is already pushing the stick.
+	_getup_t = maxf(_getup_t - dt * (1.8 if player.controls.move.length() > 0.3 else 1.0), 0.0)
+	if _getup_t > 0.2 and Vector3(v.x, 0.0, v.z).length() > 2.5:
+		_getup_t = 0.2  # already running off: finish rising in stride
+	_bump_t = maxf(_bump_t - dt, 0.0)
 	if grounded and not _was_grounded:
 		_air_t = 0.0
 	if not grounded and _was_grounded and v.y > 6.0 and not on_rope:
 		_takeoff_t = 0.3  # push-off: legs extend, arms drive up
 		_jump_t = 0.0
+	if not grounded and _was_grounded and not on_rope:
+		_off_ledge = true  # jumped or ran off: no web since
+	if grounded or on_rope or ragdolling:
+		_off_ledge = false
 	_was_grounded = grounded
 	if not grounded:
 		_air_t += dt
 		_jump_t += dt
 	var air := not grounded and not on_rope
+	# Off a building with a long way down: a swan dive – the body pitches
+	# head-first as the fall steepens, and pulls out (tucks feet-first)
+	# in time to land on the feet.
+	# (The pull-out starts ~0.6 s before the ground at the current fall speed.)
+	var room := _ground_h == INF or _ground_h > 12.0
+	var pull := _ground_h < maxf(9.0, -v.y * 0.6)
+	var swan_go := air and _off_ledge and _trick == "" and v.y < -1.0 and room and not pull
+	_swan = move_toward(_swan, 1.0 if swan_go else 0.0, dt * (1.3 if swan_go else 2.6))
+	_swan_peak = maxf(_swan_peak, _swan) if air else 0.0
 	_loco = move_toward(_loco, 1.0 if grounded and _getup_t <= 0.0 and _hard_t <= 0.0 and _roll_time <= 0.0
 		else 0.0, dt * 6.0)
-	# Feet stay on the ground in every grounded pose (landings, crouches),
-	# not just locomotion – only a roll, a wall run or getting up off the
-	# ground (posed directly from the ragdoll's limbs) lifts them.
-	var contact := grounded and _roll_time <= 0.0 and not wall_run and _getup_t <= 0.0
+	# Feet stay on the ground in every grounded pose (landings, crouches,
+	# get-ups), not just locomotion – only a roll or a wall run lifts them.
+	# (Early in a get-up the feet aren't planted, only kept above the ground.)
+	var contact := grounded and _roll_time <= 0.0 and not wall_run
 	_contact = move_toward(_contact, 1.0 if contact else 0.0, dt * (12.0 if contact else 8.0))
 	for sd in ["l", "r"]:
 		_stance_w[sd] = -1.0
@@ -635,7 +721,10 @@ func _update_animated(dt: float) -> void:
 	if wall_run:
 		_facing = _facing.slerp(-_wall_n, 1.0 - exp(-14.0 * dt)).normalized()
 	elif hs > 1.0:
-		_facing = _facing.slerp(vh.normalized(), 1.0 - exp(-(6.0 if grounded else 3.5) * dt)).normalized()
+		# Walking turns follow the path closely (feet and hips stay lined up
+		# with where the body is going); at a run the body swings round more.
+		var turn_rate := lerpf(10.0, 6.0, clampf((hs - 1.8) / 5.0, 0.0, 1.0)) if grounded else 3.5
+		_facing = _facing.slerp(vh.normalized(), 1.0 - exp(-turn_rate * dt)).normalized()
 	elif grounded and player.controls.move.length() > 0.1:
 		_facing = _facing.slerp(player.controls.move.normalized(), 1.0 - exp(-8.0 * dt)).normalized()
 	var ang := atan2(_facing.x, _facing.z)
@@ -659,6 +748,9 @@ func _update_animated(dt: float) -> void:
 			# Three-point landing: the whole body pitches forward over the knee.
 			fa = 0.3 * _hard_k()
 		up = (Vector3.UP + _facing * (fa + run_lean) + right_w * bank).normalized()
+		if _getup_t > 0.0:
+			var gp := _getup_pitch(_getup_u())
+			up = (Vector3.UP * cos(gp) + _facing * sin(gp)).normalized()
 	elif wall_run:
 		up = (Vector3.UP + _wall_n * 0.12).normalized()  # chest to the wall, hips just off it
 	elif on_rope:
@@ -686,6 +778,7 @@ func _update_animated(dt: float) -> void:
 			var ahead := (_facing + Vector3.UP * 0.2).normalized()
 			up = up.slerp(ahead, sky * 0.8).normalized()
 			fwd_hint = fwd_hint.slerp(Vector3.DOWN, sky * 0.9).normalized()
+		dive = maxf(dive, smoothstep(0.0, 1.0, _swan))
 		if dive > 0.0:
 			up = up.slerp(v.normalized(), dive * 0.85).normalized()
 			fwd_hint = Vector3.DOWN.slerp(_facing, 0.5).normalized()
@@ -697,7 +790,9 @@ func _update_animated(dt: float) -> void:
 	var want := Basis.looking_at(fwd, up).orthonormalized()
 	var rate := 12.0 if grounded else (8.0 if on_rope else 5.0)
 	if _getup_t > 0.0:
-		rate = 5.0  # rise from the ground, don't pop upright
+		rate = 9.0  # the phases set the pitch; follow them closely
+	if air and _swan_peak > 0.3 and _swan < _swan_peak:
+		rate = 9.0  # pulling out of a dive: swing the feet under quickly
 	if wall_run:
 		rate = 14.0
 	_body_basis = _body_basis.slerp(want, 1.0 - exp(-rate * dt)).orthonormalized()
@@ -729,6 +824,12 @@ func _update_animated(dt: float) -> void:
 	global_basis = body
 	_step_off = move_toward(_step_off, 0.0, dt * 2.2) * exp(-8.0 * dt)
 	global_position = player.global_position + Vector3.DOWN * _step_off
+	if _getup_t > 0.0:
+		# The body starts where the ragdoll left it (on the ground) and rises
+		# through the phases instead of popping up to standing height.
+		var gu := _getup_u()
+		var hips := Vector3(0.0, _getup_height(gu), 0.0)
+		global_position += _getup_off.lerp(hips, smoothstep(0.0, 0.3, gu))
 	var to_local := body.inverse()
 
 	# --- pose targets --------------------------------------------------------
@@ -757,7 +858,7 @@ func _update_animated(dt: float) -> void:
 			q["upper_arm_" + sd] = _rx(1.1) * _rz(0.25 if sd == "r" else -0.25)
 			q["forearm_" + sd] = _rx(1.5)
 	elif _getup_t > 0.0:
-		_pose_getup(q, _getup_t / GETUP_TIME)
+		_pose_getup(q, _getup_u())
 	elif _hard_t > 0.0 and grounded:
 		bob = -_pose_hard_land(q)
 		_plant_both(1.2 * _hard_k())
@@ -800,6 +901,25 @@ func _update_animated(dt: float) -> void:
 			"upper_arm_" + trail: _rx(2.1) * _rz(0.25 * sgn[trail]), "forearm_" + trail: _rx(0.75),
 			"upper_arm_" + lead: _rx(-0.55) * _rz(0.3 * sgn[lead]), "forearm_" + lead: _rx(0.95),
 		}, k)
+	# Reacting to the world: arms come up toward a wall about to be hit
+	# (brace), and after any contact they push off it with bent elbows.
+	_update_brace(dt, v, speed, wall_run)
+	var bw := 0.0
+	if _bump_t > 0.0:
+		bw = _bump_k * smoothstep(0.0, 0.05, 0.4 - _bump_t) * (_bump_t / 0.4)
+	var react_w := maxf(bw, _brace)
+	if react_w > 0.01 and not ragdolling:
+		var n := _brace_n if _brace > bw else _bump_n
+		var into := (-n + Vector3.UP * 0.25).normalized()
+		var chest_b := (bones["chest"] as Node3D).global_basis.orthonormalized()
+		for sd in ["l", "r"]:
+			if (sd == "r" and on_rope) or (sd == "l" and _lgrip > 0.5):
+				continue
+			var sgn := -1.0 if sd == "l" else 1.0
+			var ik := _two_bone(chest_b, into, 0.42, Vector3(0.75 * sgn, -0.2, 0.6))
+			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], react_w)
+			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], react_w)
+		q["head"] = (q["head"] as Quaternion).slerp(_rx(-0.25), react_w * 0.6)  # chin tucks
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
@@ -821,7 +941,7 @@ func _update_animated(dt: float) -> void:
 		_hip_drop = move_toward(_hip_drop, 0.0, dt * 1.5)
 
 
-const GETUP_TIME := 0.75
+const GETUP_TIME := 1.05
 
 
 ## Ground: idle → walk → sprint. Each leg alternates a stance phase, in
@@ -963,6 +1083,14 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 			for sd in ["l", "r"]:
 				_stance_w[sd] = 0.5
 				_toe[sd] = 0.0
+	# Turning: the head leads toward where the stick points, the chest
+	# follows a little – the body visibly decides before it goes.
+	var mvd := Vector3(player.controls.move.x, 0.0, player.controls.move.z)
+	if mvd.length() > 0.2:
+		var lead := clampf(_facing.signed_angle_to(mvd.normalized(), Vector3.UP), -1.0, 1.0)
+		q["head"] = _ry(lead * 0.5) * (q["head"] as Quaternion)
+		q["neck"] = _ry(lead * 0.15) * (q["neck"] as Quaternion)
+		q["chest"] = _ry(lead * 0.12) * (q["chest"] as Quaternion)
 	return bob - crouch - _land_squash * 0.18
 
 
@@ -1164,7 +1292,7 @@ func _plant_feet(dt: float) -> void:
 			# The heel rolls up about the ball of the foot: for toe-off, and
 			# whenever a flat foot would be out of the leg's reach (long
 			# running contacts are on the forefoot).
-			var f := (_facing - n * _facing.dot(n)).normalized()
+			var f := _plant_heading(sd, n)
 			var toe: float = _toe[sd]
 			desired = _roll(lock, f, n, toe)
 			# Out of reach with the gait's heel roll: the hips sink (knees
@@ -1218,7 +1346,7 @@ func _plant_feet(dt: float) -> void:
 		if _flat[sd] > 0.0:
 			# Sole on the ground plane, toes along the facing, heel rolled up.
 			var n: Vector3 = normals[sd]
-			var f := (_facing - n * _facing.dot(n)).normalized()
+			var f := _plant_heading(sd, n) if _plant.has(sd) else (_facing - n * _facing.dot(n)).normalized()
 			if f.length_squared() < 0.5:
 				continue
 			var want := Basis.looking_at(f, n) * Basis(Vector3.RIGHT, _heel[sd] - _toe[sd])
@@ -1243,6 +1371,22 @@ func _plant_both(trail_toe: float) -> void:
 		var hip := (bones["thigh_" + tr] as Node3D).global_position
 		var back := hip - _facing * 0.4
 		_plant[tr] = [Vector3(back.x, player.global_position.y - 0.9 + ANKLE_H, back.z), Vector3.UP]
+
+
+## Heading of a planted foot: it keeps the direction it landed in while the
+## body turns over it, pivoting on the ball only when the twist would pass
+## ~35° (no feet spinning flat on the ground through a turn).
+func _plant_heading(sd: String, n: Vector3) -> Vector3:
+	var face := (_facing - n * _facing.dot(n)).normalized()
+	var pl: Array = _plant[sd]
+	if pl.size() < 3:
+		pl.append(face)
+	var f: Vector3 = pl[2]
+	var ang := f.signed_angle_to(face, n)
+	if absf(ang) > 0.6:
+		f = f.rotated(n, ang - signf(ang) * 0.6)
+		pl[2] = f
+	return f
 
 
 ## Ankle position with the foot rolled `toe` rad (heel up) about its ball.
@@ -1344,6 +1488,26 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"thigh_l": _rx(0.05) * _rz(0.03), "thigh_r": _rx(-0.05) * _rz(-0.03),
 		"shin_l": _rx(-0.15), "shin_r": _rx(-0.25), "foot_l": _rx(-0.7), "foot_r": _rx(-0.7),
 	}, dive)
+	# Swan dive off a building: arms spread wide and a little back, back
+	# arched, chin up, legs long and together – closing into the streamline
+	# above as the fall gets fast.
+	var stream := clampf((speed - 20.0) / 14.0, 0.0, 1.0)
+	_put(q, {
+		"spine": _rx(0.22), "chest": _rx(0.14), "neck": _rx(0.12), "head": _rx(0.25),
+		"upper_arm_l": _rz(-1.45 - drift * 0.05) * _rx(-0.25), "upper_arm_r": _rz(1.45 + drift * 0.05) * _rx(-0.25),
+		"forearm_l": _rx(0.2), "forearm_r": _rx(0.2),
+		"thigh_l": _rx(-0.08) * _rz(0.02), "thigh_r": _rx(-0.12) * _rz(-0.02),
+		"shin_l": _rx(-0.12), "shin_r": _rx(-0.3), "foot_l": _rx(-0.75), "foot_r": _rx(-0.7),
+	}, smoothstep(0.0, 1.0, _swan) * (1.0 - stream))
+	# Pulling out of the dive: a tuck swings the feet under the body.
+	if _swan_peak > 0.3 and _swan < _swan_peak:
+		var po := sin(PI * clampf(1.0 - _swan / _swan_peak, 0.0, 1.0))
+		_put(q, {
+			"spine": _rx(-0.45), "chest": _rx(-0.2), "head": _rx(-0.2),
+			"thigh_l": _rx(1.6), "thigh_r": _rx(1.5), "shin_l": _rx(-1.9), "shin_r": _rx(-1.8),
+			"upper_arm_l": _rx(0.9) * _rz(-0.35), "upper_arm_r": _rx(0.9) * _rz(0.35),
+			"forearm_l": _rx(0.9), "forearm_r": _rx(0.9),
+		}, po)
 
 
 ## 0..1 how much the freefall arch applies: falling fast, not diving, with
@@ -1466,32 +1630,88 @@ func _pose_hard_land(q: Dictionary) -> float:
 		"upper_arm_" + tr: _rx(0.15) * _rz(0.2 * sg[tr]), "forearm_" + tr: _rx(0.1),
 		"upper_arm_" + ld: _rx(-1.1) * _rz(0.6 * sg[ld]), "forearm_" + ld: _rx(0.35),
 	}, k)
-	# The trailing hand really touches down: IK to the ground just ahead of
-	# and outside the shoulder, elbow soft and pointing back.
-	var sh := (bones["upper_arm_" + tr] as Node3D).global_position
-	var right := Vector3.UP.cross(_facing).normalized() * -1.0
-	var palm: Vector3 = Vector3(sh.x, player.global_position.y - 0.9 + 0.06, sh.z) + _facing * 0.12 + right * float(sg[tr]) * 0.08
-	var d: Vector3 = palm - sh
-	var ik := _two_bone((bones["chest"] as Node3D).global_basis.orthonormalized(), d.normalized(),
-		minf(d.length(), 0.53), Vector3(0.4 * sg[tr], 0.0, 0.9))
-	q["upper_arm_" + tr] = (q["upper_arm_" + tr] as Quaternion).slerp(ik[0], k)
-	q["forearm_" + tr] = (q["forearm_" + tr] as Quaternion).slerp(ik[1], k)
+	# The trailing hand really touches down, just ahead of and outside the shoulder.
+	_hand_to_ground(q, tr, 0.12, 0.08, k)
 	return 0.48 * k
 
 
-func _pose_getup(q: Dictionary, k: float) -> void:
-	var low := clampf((k - 0.35) / 0.65, 0.0, 1.0)  # first part: on the ground
-	var crouch := clampf(k / 0.35, 0.0, 1.0) if k < 0.35 else 1.0
-	q["spine"] = _rx(0.35 * crouch + 0.5 * low)
-	q["chest"] = _rx(0.15 * crouch + 0.2 * low)
-	q["head"] = _rx(-0.3 * low)
-	for sd in ["l", "r"]:
-		var side := 1.0 if sd == "r" else -1.0
-		q["thigh_" + sd] = _rx(1.2 * crouch + 0.5 * low + (0.25 if sd == "l" else 0.0) * crouch)
-		q["shin_" + sd] = _rx(-1.7 * crouch - 0.5 * low)
-		q["foot_" + sd] = _rx(0.5 * crouch)
-		q["upper_arm_" + sd] = _rx(0.7 * crouch + 0.4 * low) * _rz(0.15 * side)
-		q["forearm_" + sd] = _rx(0.3 + 0.3 * low)
+## IK a hand onto the ground near its shoulder (`fwd`/`out` metres ahead
+## and outward), elbow soft and pointing back; blended in by `k`.
+func _hand_to_ground(q: Dictionary, sd: String, fwd: float, out: float, k: float) -> void:
+	if k <= 0.001:
+		return
+	var sg := -1.0 if sd == "l" else 1.0
+	var sh := (bones["upper_arm_" + sd] as Node3D).global_position
+	var right := Vector3.UP.cross(_facing).normalized() * -1.0
+	var palm := Vector3(sh.x, player.global_position.y - 0.9 + 0.06, sh.z) + _facing * fwd + right * sg * out
+	var d := palm - sh
+	var ik := _two_bone((bones["chest"] as Node3D).global_basis.orthonormalized(), d.normalized(),
+		minf(d.length(), 0.53), Vector3(0.4 * sg, 0.0, 0.9))
+	q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], k)
+	q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], k)
+
+
+## Get-up progress 0..1 (1 = not getting up).
+func _getup_u() -> float:
+	return 1.0 - _getup_t / GETUP_TIME if _getup_t > 0.0 else 1.0
+
+
+## Whole-body pitch through the get-up (+ = forward): face-down it goes
+## all fours → crouch → standing; face-up, sitting (leaning back) → rolled
+## forward onto the feet → standing.
+func _getup_pitch(u: float) -> float:
+	var crouch := 0.4
+	var start := 1.25 if _getup_down else -0.45
+	if u < 0.55:
+		return lerpf(start, crouch, smoothstep(0.3, 0.55, u))
+	return lerpf(crouch, 0.0, smoothstep(0.65, 1.0, u))
+
+
+## Rig root height relative to standing through the get-up.
+func _getup_height(u: float) -> float:
+	var low := -0.42 if _getup_down else -0.8
+	if u < 0.55:
+		return lerpf(low, -0.4, smoothstep(0.3, 0.55, u))
+	return lerpf(-0.4, 0.0, smoothstep(0.6, 1.0, u))
+
+
+func _pose_getup(q: Dictionary, u: float) -> void:
+	var wa := 1.0 - smoothstep(0.3, 0.55, u)                          # on the ground
+	var wb := smoothstep(0.3, 0.55, u) * (1.0 - smoothstep(0.65, 1.0, u))  # crouch
+	if _getup_down:
+		# All fours: thighs straight down to the knees, shins along the
+		# ground, arms under the shoulders, head up looking ahead.
+		_put(q, {
+			"spine": _rx(0.08), "chest": _rx(0.05), "neck": _rx(0.3), "head": _rx(0.45),
+			"thigh_l": _rx(1.25) * _rz(-0.1), "thigh_r": _rx(1.3) * _rz(0.1),
+			"shin_l": _rx(-1.55), "shin_r": _rx(-1.5), "foot_l": _rx(-0.5), "foot_r": _rx(-0.5),
+			"upper_arm_l": _rx(1.2) * _rz(-0.15), "upper_arm_r": _rx(1.2) * _rz(0.15),
+			"forearm_l": _rx(0.15), "forearm_r": _rx(0.15),
+		}, wa)
+		for sd in ["l", "r"]:
+			_hand_to_ground(q, sd, 0.05, 0.05, wa)
+	else:
+		# Sitting up: legs out in front (one knee up), leaning back on the
+		# hands behind the hips, chin down.
+		_put(q, {
+			"spine": _rx(-0.25), "chest": _rx(-0.1), "head": _rx(-0.15),
+			"thigh_l": _rx(1.1) * _rz(-0.12), "thigh_r": _rx(1.45) * _rz(0.1),
+			"shin_l": _rx(-0.35), "shin_r": _rx(-1.5), "foot_l": _rx(-0.2), "foot_r": _rx(0.25),
+			"upper_arm_l": _rx(-0.75) * _rz(-0.3), "upper_arm_r": _rx(-0.75) * _rz(0.3),
+			"forearm_l": _rx(0.25), "forearm_r": _rx(0.25),
+		}, wa)
+		for sd in ["l", "r"]:
+			_hand_to_ground(q, sd, -0.18, 0.08, wa)
+	# Crouch, weight over the feet, arms forward for balance, then rise.
+	_put(q, {
+		"spine": _rx(-0.35), "chest": _rx(-0.1), "neck": _rx(0.15), "head": _rx(0.3),
+		"thigh_l": _rx(1.7) * _rz(-0.1), "thigh_r": _rx(1.6) * _rz(0.1),
+		"shin_l": _rx(-2.0), "shin_r": _rx(-1.9), "foot_l": _rx(0.35), "foot_r": _rx(0.35),
+		"upper_arm_l": _rx(0.7) * _rz(-0.3), "upper_arm_r": _rx(0.7) * _rz(0.3),
+		"forearm_l": _rx(0.6), "forearm_r": _rx(0.6),
+	}, wb)
+	if u > 0.5:
+		_plant_both(0.0)
 
 
 func _drive_springs(q: Dictionary, dt: float, rope_arm: bool, grounded := true) -> void:
@@ -1562,8 +1782,22 @@ func _update_ragdoll(dt: float) -> void:
 	var anchor := player.global_position + Vector3(0, 0.08, 0)
 	var hanging := player.line_state == Player.Line.ATTACHED
 	ragdoll.hand_pin = player.hand_position() if hanging else Vector3.INF
+	# Protective reflex while dropping toward the ground: the arms reach down
+	# and a little forward to break the fall (weakly – still a limp body).
+	ragdoll.reach.clear()
+	ragdoll.reach_k = 0.0
+	var fall_v := player.s.velocity.y
+	if not hanging and fall_v < -3.0 and not player.is_on_floor():
+		var gh := _probe_ground() if _rag_time < 3.0 else INF
+		if gh < 4.0:
+			var p: Dictionary = ragdoll.pos
+			var fwd := Vector3(player.s.velocity.x, 0.0, player.s.velocity.z).normalized() * 0.25
+			for sd in ["l", "r"]:
+				var sh: Vector3 = p["sh_" + sd]
+				ragdoll.reach["wr_" + sd] = Vector3(sh.x, sh.y - 0.6, sh.z) + fwd
+			ragdoll.reach_k = 0.06 * clampf(1.0 - gh / 4.0, 0.2, 1.0)
 	ragdoll.update(dt, anchor)
-	_pose_from_ragdoll()
+	_pose_from_ragdoll(dt)
 
 
 ## Player decided the body has recovered: springs carry it back to a pose.
@@ -1572,9 +1806,18 @@ func _on_stun_ended() -> void:
 	_getup_t = GETUP_TIME if player.is_on_floor() else 0.0
 	_flip = 0.0
 	_body_basis = global_basis.orthonormalized()
+	# How did the body come to rest? Chest to the ground: push up onto hands
+	# and knees, facing where the head points. On the back: sit up, then roll
+	# forward onto the feet, facing the way the legs lie.
+	var head := _body_basis.y
+	_getup_down = _body_basis.z.dot(Vector3.UP) > 0.0  # back (+Z) faces the sky
+	var f := Vector3(head.x, 0.0, head.z) * (1.0 if _getup_down else -1.0)
+	if f.length_squared() > 0.01:
+		_facing = f.normalized()
+	_getup_off = global_position - player.global_position
 
 
-func _pose_from_ragdoll() -> void:
+func _pose_from_ragdoll(dt: float) -> void:
 	var p: Dictionary = ragdoll.pos
 	var pelvis: Vector3 = p["pelvis"]
 	var up: Vector3 = ((p["neck"] as Vector3) - pelvis).normalized()
@@ -1592,16 +1835,22 @@ func _pose_from_ragdoll() -> void:
 	_aim_bone("head", basis, (p["head"] as Vector3) - (p["neck"] as Vector3), Vector3.UP)
 	for sd in ["l", "r"]:
 		_aim_limb("upper_arm_" + sd, "forearm_" + sd, basis, (p["el_" + sd] as Vector3) - (p["sh_" + sd] as Vector3),
-			(p["wr_" + sd] as Vector3) - (p["el_" + sd] as Vector3), 1.0)
+			(p["wr_" + sd] as Vector3) - (p["el_" + sd] as Vector3), 1.0, dt)
 		_aim_limb("thigh_" + sd, "shin_" + sd, basis, (p["kn_" + sd] as Vector3) - (p["hip_" + sd] as Vector3),
-			(p["an_" + sd] as Vector3) - (p["kn_" + sd] as Vector3), -1.0)
+			(p["an_" + sd] as Vector3) - (p["kn_" + sd] as Vector3), -1.0, dt)
 
 
 ## Poses a two-bone limb from its segment directions (world) so the middle
 ## joint stays a pure hinge: the upper bone's roll is chosen so the lower
 ## bone bends in its own bending plane (elbows toward -Z, knees toward +Z,
 ## like _two_bone) – a ragdolled knee never comes back twisted sideways.
-func _aim_limb(upper: String, lower: String, parent_basis: Basis, d_up: Vector3, d_low: Vector3, bend_dir: float) -> void:
+## The simulation can move a limb a long way in one step (a joint-cone clamp,
+## a collision push): the visible limb chases it at no more than this rate.
+const RAG_LIMB_RATE := 26.0  # rad/s
+
+
+func _aim_limb(upper: String, lower: String, parent_basis: Basis, d_up: Vector3, d_low: Vector3, bend_dir: float,
+		dt := 1.0 / 60.0) -> void:
 	if d_up.length_squared() < 1e-6 or d_low.length_squared() < 1e-6:
 		return
 	var inv := parent_basis.inverse()
@@ -1616,16 +1865,25 @@ func _aim_limb(upper: String, lower: String, parent_basis: Basis, d_up: Vector3,
 		prev_z = Vector3.BACK - u * u.z
 	var z := -bend_dir * (w - u * w.dot(u))
 	var bent := smoothstep(0.08, 0.3, z.length())  # sin of the bend angle
+	if z.dot(prev_z.normalized()) < -0.2 * z.length():
+		# The simulation mirrored the joint across the limb line (its hinge
+		# rule): keep the roll the limb has and bend it the normal way – a
+		# hand a few cm off the simulated point instead of a half-turn spin.
+		z = prev_z
 	z = prev_z.normalized().slerp(z.normalized(), bent) if z.length_squared() > 1e-6 else prev_z.normalized()
 	var y := -u
 	var x := y.cross(z).normalized()
 	z = x.cross(y).normalized()
 	var uq := Basis(x, y, z).get_rotation_quaternion()
 	var lq := _rx(acos(clampf(u.dot(w), -1.0, 1.0)) * bend_dir)
+	var cap := RAG_LIMB_RATE * maxf(dt, 1.0 / 120.0)
 	for pair in [[upper, uq], [lower, lq]]:
-		_rot[pair[0]] = pair[1]
+		var cur: Quaternion = _rot[pair[0]]
+		var ang := cur.angle_to(pair[1])
+		var qq: Quaternion = pair[1] if ang <= cap else cur.slerp(pair[1], cap / ang)
+		_rot[pair[0]] = qq
 		_angvel[pair[0]] = Vector3.ZERO
-		(bones[pair[0]] as Node3D).quaternion = pair[1]
+		(bones[pair[0]] as Node3D).quaternion = qq
 
 
 ## Rotates `b` so its rest axis points along world `dir`; returns its world basis.

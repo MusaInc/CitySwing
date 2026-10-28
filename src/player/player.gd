@@ -33,6 +33,9 @@ signal wall_saved(speed: float)
 signal stun_ended
 signal launched
 signal stepped_up(height: float)
+## Any contact with a wall or obstacle worth a visible reaction (visual only):
+## speed into the surface and its normal.
+signal bumped(speed: float, normal: Vector3)
 ## Let go inside the sweet spot (see SwingParams "Release"). streak counts
 ## consecutive perfect releases without touching the ground.
 signal perfect_release(streak: int)
@@ -103,6 +106,7 @@ var _launch_pending := false
 ## Touch finger still holding SWING with no target yet: fire as soon as one appears.
 var _armed_touch := -1
 var _prev_pos := Vector3.ZERO
+var _bump_cool := 0.0
 
 
 func _ready() -> void:
@@ -220,6 +224,9 @@ func _read_input(dt: float) -> Dictionary:
 	if not input_enabled:
 		return {"move": Vector3.ZERO, "aim": aim_dir, "grapple": false, "reel": 0.0, "jump": false}
 	var mv := Input.get_vector("move_left", "move_right", "move_back", "move_forward")
+	# Response curve: the first half of the stick is a walk-to-jog range, so
+	# walking is easy to hold; full deflection still sprints.
+	mv = mv.normalized() * pow(mv.length(), 2.0) if mv.length() > 0.001 else Vector2.ZERO
 	var basis := view.global_transform.basis if view else global_transform.basis
 	var fwd := -basis.z
 	fwd.y = 0.0
@@ -351,6 +358,7 @@ func _try_step_up(motion: Vector3) -> void:
 
 
 func _resolve_contacts(dt: float) -> void:
+	_bump_cool = maxf(_bump_cool - dt, 0.0)
 	var pre_hit := s.velocity
 	var worst_into := 0.0
 	var wall_n := Vector3.ZERO  # normal of the hardest wall hit this tick
@@ -370,6 +378,9 @@ func _resolve_contacts(dt: float) -> void:
 				worst_into = maxf(worst_into, into)
 			elif not was_on_floor:
 				worst_into = maxf(worst_into, into * 0.5)
+		if into > 1.5 and n.y < 0.6 and _bump_cool <= 0.0:
+			bumped.emit(into, n)
+			_bump_cool = 0.15
 		if absf(n.y) < 0.6:
 			# Scraping along a facade bleeds speed (no frictionless wall-surfing).
 			var vn := n * s.velocity.dot(n)
