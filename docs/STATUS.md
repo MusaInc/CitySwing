@@ -1,6 +1,15 @@
 # Status: 2026-10-28 (front end, street life)
 
-## Front end + realism pass (latest)
+## Walking, landing, torso fix (latest)
+
+- Torso bones bend back on +X; several recent poses had it inverted (the
+  landing squash leaned the chest back). Fixed; head keeps the eyes level.
+- Three-point hard landing on high drops without much run (crouch, chest
+  over the lead knee, arm swept back, rise); fast running landings still roll.
+- Walk: heel strike, pelvis sway, fuller arm swing; braking sits back with
+  arms forward; relaxed idle arms. Tests: 74 native.
+
+## Front end + realism pass
 
 - **Front end** (`src/ui/menus.gd`, `src/ui/menu_parts.gd`): tap-to-start
   splash (CITY/SWING logo hanging off a web, breathing prompt, studio
