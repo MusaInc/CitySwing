@@ -1,6 +1,68 @@
-# Status: 2026-10-28 (front end, street life)
+# Status: 2026-10-29 (movement & body physics pass)
 
-## Walking, landing, torso fix (latest)
+## Movement & body physics pass (latest)
+
+Driven by a new measurement tool rather than by eye alone:
+`tools/motion_audit.gd` (headless, ~3 s) runs 18 scripted scenarios –
+idle, accelerate, 180° reversal, zigzag cuts, walk-stop, running jump, high
+drop, fast roll landing, kerb steps, slow/fast swings, release→refire, webs
+swapped every 0.35 s, swing→running landing, wall run, knockout, ground crash,
+tricks – and reports bone snap rates, joint-limit violations (knee/elbow
+hyperextension and off-hinge twist, hip/ankle/neck/torso range), planted-foot
+skating, feet below/above the ground, web hand off the line. `AUDIT_TRACE=<scenario>`
+prints per-frame detail. `tests/test_motion_quality.gd` runs the same scenarios
+with limits just above today's numbers.
+
+Fixed (before → after, audit numbers):
+- **Feet through the ground** in hard landings, wall-run landings and running
+  jumps (they skipped foot IK): 23–25 cm → 2–4 cm. Foot contact is now a layer
+  for every grounded pose except rolls, wall runs and get-ups.
+- **Sprint skating**: stance length is now derived from what the legs can
+  reach (hips ride a little lower at pace, landing ahead / toe-off behind the
+  hip split by reach, thigh angle tracks the ground exactly, whole-body lean
+  compensated). Average planted-foot drift: accelerate 0.91 → 0.45 m/s,
+  zigzag 3.2 → 2.1, roll landing 2.2 → 0.9, swing→land 2.2 → 0.9.
+- **Toe-off pivot** rolled the heel about a point behind the ankle (sign
+  bug); it now pivots on the ball of the foot. Mid-stance tiptoe replaced by
+  knee flex (hips sink before the heel lifts). Soles ease flat at touchdown
+  and heel-strike shows on planted feet.
+- **Split stance forever after landing/stopping**: standing feet that are out
+  of place now take small settle steps back under the hips.
+- **Three-point landing** really is one now: trailing knee drops (foot goes
+  back onto its toes) and the trailing hand is IK'd to the ground. Only for
+  near-vertical drops (< 3.5 m/s drift); faster landings run on.
+- **Back-pedal gait** when the body drifts against its facing with no stick
+  (e.g. bouncing off a wall), instead of feet skating forwards.
+- **Take-off pop**: leaving the ground handed the limbs from exact gait
+  tracking to the air pose in one frame (arm 8 700°/s). Springs take over at
+  once with the stride's velocity (capped), take-off and release stretches ease in.
+- **Respawn carry-over**: rig state (foot offsets, timers, acceleration from
+  the teleport, stale "on floor") leaked into the next life – thighs flung to
+  148°, knees "hyperextended 180°". All reset.
+- **Ragdoll → get-up**: knees/elbows came back twisted off their hinge
+  (58 joint-limit frames per knockout → 0); limbs are rebuilt as true hinges
+  with roll continuity. Get-up legs stay on plain FK (IK made it worse).
+- **Swinging**: legs follow the swing phase – downswing trails long with one
+  knee folded (lead leg alternates web to web), a loose pike through the fast
+  bottom, knee-drive on the climb; hips and legs swing out wide of turns; the
+  free hand reaches ahead/up for the next web on the climb. While the line is
+  still flying or slack the body keeps its airborne pose with only the web arm
+  reaching (it used to hang in a static tuck for up to a second).
+
+Not changed: physics (the rig is still visual only – bot/course tests
+unchanged), camera (already tested at 0 snaps/flips; kept stable per earlier
+feedback).
+
+Known / not verified:
+- Ragdoll limbs can still spin about their own axis for a frame at violent
+  impacts (pre-existing, measured up to ~180°/frame of roll); a roll-rate cap
+  was tried and made the get-up worse, so it was reverted.
+- Get-up from lying still passes through an odd one-legged tilt (~0.3 s).
+- Sprint direction changes still skate ~2 m/s on average during the cut.
+- Visual review was pose-lab and autopilot captures on the VPS software
+  renderer only; no device check. Tests: 79 native.
+
+## Walking, landing, torso fix
 
 - Torso bones bend back on +X; several recent poses had it inverted (the
   landing squash leaned the chest back). Fixed; head keeps the eyes level.

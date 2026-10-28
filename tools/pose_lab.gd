@@ -4,10 +4,10 @@ extends SceneTree
 ## motion reads clearly), saved as frames + one contact sheet per scenario.
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
-## Scenarios: idle run steps jump swing release wallrun crash land jumpclose
-##   tricks freefall dive knockout drop
+## Scenarios: idle run steps jump swing swing34 swingfast release wallrun crash
+##   land jumpclose tricks freefall dive knockout drop chain
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose", "drop"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain"]
 
 var player: Player
 var rig: CharacterRig
@@ -46,6 +46,7 @@ func _go() -> void:
 	PrototypeWorld.add_box(stage, Vector3(0, -0.5, 0), Vector3(600, 1, 600), Color(0.42, 0.43, 0.45), false, true)
 	PrototypeWorld.add_box(stage, Vector3(0, 40, -40), Vector3(16, 80, 16), Color(0.75, 0.72, 0.68))
 	PrototypeWorld.add_box(stage, Vector3(40, 10, 30), Vector3(30, 20, 30), Color(0.6, 0.55, 0.5))
+	PrototypeWorld.add_box(stage, Vector3(120, 60, -160), Vector3(20, 120, 20), Color(0.7, 0.68, 0.66))
 	for i in 4:  # kerb-height steps up, then down again (the "steps" scenario)
 		var h := 0.15 * (i + 1)
 		PrototypeWorld.add_box(stage, Vector3(-10 + i * 1.2, h * 0.5, 60), Vector3(1.2, h, 4), Color(0.55, 0.52, 0.5), false)
@@ -156,6 +157,32 @@ func _sc_swing() -> void:
 	_cam_off = Vector3(0, 0.3, 5.0)
 	player.fire_at(Vector3(0, 72, -32.0), 1)
 	await _film("swing", 3.0, [0.1, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 2.9])
+
+
+## Same swing, close three-quarter view (arm/leg depth reads), fewer frames.
+func _sc_swing34() -> void:
+	_reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
+	_cam_off = Vector3(2.6, 0.6, 2.6)
+	player.fire_at(Vector3(0, 72, -32.0), 1)
+	await _film("swing34", 2.6, [0.15, 0.4, 0.8, 1.1, 1.4, 1.7, 2.0, 2.3])
+
+
+## A fast, deep swing (≈ 34 m/s entry) from the side.
+func _sc_swingfast() -> void:
+	_reset(Vector3(-40, 50, -20), Vector3(34, -6, 0))
+	_cam_off = Vector3(0.5, 0.6, 5.0)
+	player.fire_at(Vector3(0, 74, -32.0), 1)
+	await _film("swingfast", 2.2, [0.05, 0.15, 0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5, 1.7, 1.9, 2.1])
+
+
+## Web → release → web → release: the transitions between swings.
+func _sc_chain() -> void:
+	_reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
+	_cam_off = Vector3(3.0, 0.7, 4.0)
+	player.fire_at(Vector3(0, 72, -32.0), 1)
+	await _film("chain", 4.2, [1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.1, 3.4, 3.7, 4.0],
+		{1.6: func(): player.release_web(), 2.3: func(): player.fire_at(Vector3(110, 100, -150), 2),
+		3.8: func(): player.release_web()})
 
 
 func _sc_release() -> void:

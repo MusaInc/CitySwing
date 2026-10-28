@@ -107,6 +107,7 @@ var _recover_blend := 0.0
 var _time := 0.0
 var _load := 0.0           # rope load 0..1 (smoothed)
 var _lgrip := 0.0          # free hand on the line 0..1
+var _swing_lead := "l"     # leg that folds/leads on this web (alternates web to web)
 var _wall_time := 0.0      # wall run / wall tap pose remaining
 var _wall_n := Vector3.BACK
 var _takeoff_t := 0.0
@@ -114,6 +115,9 @@ var _getup_t := 0.0
 var _air_t := 0.0
 var _was_grounded := true
 var _loco := 0.0           # 0..1 how much ground locomotion drives the limbs
+var _contact := 0.0        # 0..1 how much the feet are held on the ground (IK), any grounded pose
+var _flat := {"l": 0.0, "r": 0.0}  # 0..1 sole laid on the ground (eases in at touchdown)
+var _heel := {"l": 0.0, "r": 0.0}  # heel-strike toes-up angle (rad) from the gait
 var _lead := "l"           # leg that was driving forward at take-off (it leads the jump)
 var _jump_t := 0.0         # time since leaving the ground on a jump (not a web)
 var _release_t := 0.0      # launch stretch after letting go of a web (s left)
@@ -134,6 +138,9 @@ var _foot_off := {"l": Vector3.ZERO, "r": Vector3.ZERO}  # eases out target jump
 var _foot_last := {}                     # side -> last solved ankle target
 var _foot_mode := {}                     # side -> planted ankle pos, or null when free
 var _hip_drop := 0.0
+var _settle := {}          # side -> [progress 0..1, from ankle pos]: a small step back under the hips
+const SETTLE_DIST := 0.16  # a standing foot further than this from its rest spot steps in
+const SETTLE_TIME := 0.28
 var _step_off := 0.0       # visual ease after the capsule steps up a kerb
 var _grips := {}           # "l"/"r" -> [open_node, grip_node]
 var _scarf: Array[Node3D] = []
@@ -216,7 +223,9 @@ func _connect_player() -> void:
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)
-	player.attached.connect(func(_a): _jolt(0.6))
+	player.attached.connect(func(_a) -> void:
+		_swing_lead = "r" if _swing_lead == "l" else "l"
+		_jolt(0.6))
 	player.rope_snapped.connect(func(spd): _jolt(clampf(spd / 8.0, 0.3, 1.5)))
 	ragdoll.exclude = [player.get_rid()]
 
@@ -325,7 +334,7 @@ func on_landed(speed: float) -> void:
 		return
 	if player and impact > player.params.roll_landing_speed and vh > 8.0:
 		_roll_time = 0.55  # shoulder roll to carry a fast landing forward
-	elif impact > 12.0:
+	elif impact > 12.0 and vh < 3.5:
 		# Dropped from height without much run: a three-point landing – lead
 		# knee up, the other knee nearly down, one hand to the ground.
 		_hard_t = HARD_TIME
@@ -491,10 +500,28 @@ func _on_respawned() -> void:
 	_roll_time = 0.0
 	for b in BONES:
 		_angvel[b] = Vector3.ZERO
+		_rot[b] = Quaternion.IDENTITY  # start clean, not from wherever the last life ended
+	_prev_vel = player.s.velocity if player else Vector3.ZERO
+	_accel = Vector3.ZERO  # the teleport is not an acceleration
+	_loco = 0.0
+	_contact = 0.0
+	_was_grounded = false
+	for sd in ["l", "r"]:
+		_foot_off[sd] = Vector3.ZERO
+		_flat[sd] = 0.0
+		_toe[sd] = 0.0
+		_heel[sd] = 0.0
+	_hard_t = 0.0
+	_getup_t = 0.0
+	_release_t = 0.0
+	_takeoff_t = 0.0
+	_land_squash = 0.0
+	_wall_time = 0.0
 	_plant.clear()
 	_foot_last.clear()
 	_foot_mode.clear()
 	_hip_drop = 0.0
+	_settle.clear()
 	_step_off = 0.0
 	_reset_scarf()
 
@@ -592,10 +619,17 @@ func _update_animated(dt: float) -> void:
 		_air_t += dt
 		_jump_t += dt
 	var air := not grounded and not on_rope
-	_loco = move_toward(_loco, 1.0 if grounded and _getup_t <= 0.0 and _hard_t <= 0.0 else 0.0, dt * 6.0)
+	_loco = move_toward(_loco, 1.0 if grounded and _getup_t <= 0.0 and _hard_t <= 0.0 and _roll_time <= 0.0
+		else 0.0, dt * 6.0)
+	# Feet stay on the ground in every grounded pose (landings, crouches),
+	# not just locomotion – only a roll, a wall run or getting up off the
+	# ground (posed directly from the ragdoll's limbs) lifts them.
+	var contact := grounded and _roll_time <= 0.0 and not wall_run and _getup_t <= 0.0
+	_contact = move_toward(_contact, 1.0 if contact else 0.0, dt * (12.0 if contact else 8.0))
 	for sd in ["l", "r"]:
 		_stance_w[sd] = -1.0
 		_swing_w[sd] = -1.0
+		_heel[sd] = 0.0
 
 	# --- facing & turn rate -----------------------------------------------
 	if wall_run:
@@ -726,6 +760,7 @@ func _update_animated(dt: float) -> void:
 		_pose_getup(q, _getup_t / GETUP_TIME)
 	elif _hard_t > 0.0 and grounded:
 		bob = -_pose_hard_land(q)
+		_plant_both(1.2 * _hard_k())
 	elif wall_run:
 		_pose_wall_run(q, dt)
 	elif grounded:
@@ -738,7 +773,8 @@ func _update_animated(dt: float) -> void:
 		# Release: the whole body extends along the throw – arms reaching
 		# overhead, chest open, legs long and together, toes pointed – then
 		# lets the rising stride and the apex gather take over.
-		var r := smoothstep(0.0, 1.0, _release_t / RELEASE_TIME)
+		# (Eases in over a few frames too: limbs never jump into it.)
+		var r := smoothstep(0.0, 1.0, _release_t / RELEASE_TIME) * smoothstep(0.0, 0.07, RELEASE_TIME - _release_t)
 		_put(q, {
 			"spine": _rx(0.2), "chest": _rx(0.14), "neck": _rx(0.06), "head": _rx(0.12),
 			"upper_arm_r": _rx(2.75) * _rz(0.22), "upper_arm_l": _rx(2.55) * _rz(-0.32),
@@ -750,7 +786,7 @@ func _update_animated(dt: float) -> void:
 		# Push-off: the lead knee drives up, the take-off leg extends behind
 		# with the toes pointed, the opposite arm punches up – a running
 		# jump, not a hop. Blends out over 0.3 s into the airborne poses.
-		var k := smoothstep(0.0, 1.0, _takeoff_t / 0.3)
+		var k := smoothstep(0.0, 1.0, _takeoff_t / 0.3) * smoothstep(0.0, 0.07, 0.3 - _takeoff_t)
 		var lead := _lead
 		var trail := "r" if lead == "l" else "l"
 		var sgn := {"l": -1.0, "r": 1.0}
@@ -768,7 +804,7 @@ func _update_animated(dt: float) -> void:
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
 
-	_drive_springs(q, dt, on_rope)
+	_drive_springs(q, dt, on_rope, grounded)
 	if air:
 		_ground_t -= dt
 		if _ground_t <= 0.0:
@@ -776,7 +812,7 @@ func _update_animated(dt: float) -> void:
 			_ground_h = _probe_ground()
 	else:
 		_ground_h = INF
-	if _loco > 0.0 and grounded and not wall_run and _getup_t <= 0.0 and _hard_t <= 0.0:
+	if _contact > 0.0 and grounded and not wall_run:
 		_plant_feet(dt)
 	else:
 		_plant.clear()
@@ -794,15 +830,41 @@ const GETUP_TIME := 0.75
 ## the knee forward and folds the heel up. Stance is ~60% of a walking cycle and
 ## ~28% of a sprint (longer flight). The cycle advances with distance.
 func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
-	var stride_len := clampf(0.45 + hs * 0.15, 0.5, 2.1)  # metres per step
+	var stride_len := clampf(0.4 + hs * 0.15, 0.5, 2.1)  # metres per step
 	_run_phase += dt * hs * PI / stride_len
 	var run := clampf((hs - 1.8) / 5.0, 0.0, 1.0)  # 0 walk … 1 run
 	var mv := clampf(hs / 1.2, 0.0, 1.0)            # 0 standing … 1 moving
-	var stance := lerpf(0.58, 0.24, run)
-	var leg := 0.86
-	# Half the hip→ankle sweep covered while the foot is planted.
-	var period := TAU / maxf(hs * PI / stride_len, 0.01)
-	var a := clampf(hs * stance * period / (2.0 * leg), 0.0, 0.75) * mv
+	# Stance geometry. The hips ride a little lower as the pace rises (knees
+	# flexed – athletic, and it buys the legs reach). A foot lands up to
+	# reach_f ahead of the hip and leaves up to reach_b behind it, rolled onto
+	# the ball of the foot. Stance is shortened to what the legs can
+	# actually cover at this stride, so a planted foot never has to skate.
+	var crouch := (0.02 + 0.06 * run) * mv
+	var hh := LEG_LEN - 0.01 - crouch - (0.012 + 0.01 * run)  # hip above ankle, mid-stance
+	var reach_f := sqrt(maxf(LEG_LEN * LEG_LEN - hh * hh, 0.0)) * 0.92
+	var toe_end := 0.5 + 0.25 * run
+	var hb := hh - BALL * sin(toe_end)
+	var reach_b := (sqrt(maxf(LEG_LEN * LEG_LEN - hb * hb, 0.0)) + BALL * (1.0 - cos(toe_end))) * 0.95
+	var stance := minf(lerpf(0.58, 0.24, run), (reach_f + reach_b) / (2.0 * stride_len))
+	# Ground covered while a foot is down (each step = stride_len, one cycle =
+	# two steps), split ahead/behind the hip in proportion to the reach.
+	var cover := 2.0 * stride_len * stance * mv
+	var xf := cover * reach_f / (reach_f + reach_b)
+	# Drifting backwards (bounced off a wall, braking past a reversal before
+	# the body has turned): back-pedal – feet land behind and push off ahead,
+	# so the stride still matches the ground instead of skating.
+	var vh := Vector3(player.s.velocity.x, 0.0, player.s.velocity.z)
+	if hs > 0.8 and vh.dot(_facing) < -0.3 * hs and player.controls.move.length() < 0.3:
+		cover = -cover
+		xf = cover * reach_b / (reach_f + reach_b)
+	# The whole body leans (from the ankles) at speed; legs are posed in the
+	# body's frame, so add that lean back or the feet plant behind the hips.
+	var pitch := asin(clampf(global_basis.y.normalized().dot(_facing), -0.6, 0.6))
+	var th_f := atan2(xf, hh)
+	var th_b := atan2(xf - cover, hh)
+	# Thigh angular rate (per unit of stance progress) at landing and toe-off.
+	var rate_f := -cover / hh / (1.0 + pow(xf / hh, 2.0))
+	var rate_b := -cover / hh / (1.0 + pow((xf - cover) / hh, 2.0))
 	var brake := clampf(la.z * 0.03, 0.0, 0.5) * clampf(hs / 3.0, 0.0, 1.0)
 	# Forward bend of the torso (+ = forward; torso bones tilt back on +X, so
 	# it's applied negated). Landing folds forward, braking sits back.
@@ -828,15 +890,16 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		var foot: float
 		if u < stance:
 			var w := u / stance
-			thigh = a * (1.0 - 2.0 * w)                 # front → back at ground speed
+			thigh = atan2(xf - cover * w, hh) + pitch   # front → back at exactly ground speed
 			knee = 0.1 + (0.12 + 0.3 * run) * sin(PI * w)  # absorbs the load mid-stance
 			foot = -thigh + knee                         # sole parallel to the ground
 			# Heel strike: walking, the foot lands heel first, toes up, and rolls flat.
-			foot += (1.0 - smoothstep(0.0, 0.22, w)) * 0.3 * (1.0 - run) * mv
+			_heel[sd] = (1.0 - smoothstep(0.0, 0.22, w)) * 0.3 * (1.0 - run) * mv
+			foot += _heel[sd]
 			_toe[sd] = smoothstep(0.7, 1.0, w) * (0.5 + 0.25 * run) * mv  # toe-off: heel rolls up
 			foot -= _toe[sd]
 			_stance_w[sd] = w
-			bob -= (0.025 + 0.02 * run) * sin(PI * w)
+			bob -= (0.025 + 0.02 * run) * sin(PI * w) * mv
 		else:
 			var w := (u - stance) / (1.0 - stance)
 			var e := smoothstep(0.0, 1.0, w)
@@ -847,11 +910,11 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 			var lift := sin(PI * w)
 			# Back → front, leaving and arriving at the stance sweep rate, so the
 			# foot is already moving back under the body when it touches down.
-			var m := -2.0 * a / stance * (1.0 - stance)
+			var k := (1.0 - stance) / stance
 			var w2 := w * w
 			var w3 := w2 * w
-			thigh = -a * (2.0 * w3 - 3.0 * w2 + 1.0) + m * (w3 - 2.0 * w2 + w) \
-				+ a * (-2.0 * w3 + 3.0 * w2) + m * (w3 - w2)
+			thigh = th_b * (2.0 * w3 - 3.0 * w2 + 1.0) + rate_b * k * (w3 - 2.0 * w2 + w) \
+				+ th_f * (-2.0 * w3 + 3.0 * w2) + rate_f * k * (w3 - w2) + pitch
 			thigh += lift * (0.25 + 0.55 * run) * mv  # knee drive
 			knee = 0.15 + lift * (0.6 + 1.4 * run) * mv               # heel folds up
 			foot = 0.25 * lift - 0.2 * (1.0 - e) * mv                  # toes clear the ground
@@ -900,7 +963,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 			for sd in ["l", "r"]:
 				_stance_w[sd] = 0.5
 				_toe[sd] = 0.0
-	return bob * mv - _land_squash * 0.18
+	return bob - crouch - _land_squash * 0.18
 
 
 ## On the web. The rope arm is solved with two-bone IK so the hand sits on
@@ -951,23 +1014,61 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	q["shin_r"] = _rx(-knee * 0.6)
 	q["foot_l"] = _rx(0.35 * L + 0.1)
 	q["foot_r"] = _rx(0.3 * L + 0.05)
+	# Line still flying out, or out but slack: nothing is holding the body
+	# yet, so it keeps flying (the airborne poses) with only the web arm
+	# reaching up the line; the hang takes over as the line comes taut.
+	var free := 1.0 - clampf(L * 3.0, 0.0, 1.0)
+	if free > 0.01:
+		var qa := {}
+		for b in BONES:
+			qa[b] = Quaternion.IDENTITY
+		_pose_air(qa, s.velocity, speed, la, 0.0, twist)
+		for b in BONES:
+			if b == "upper_arm_r" or b == "forearm_r" or (b.ends_with("_l") and b.contains("arm") and _lgrip > 0.01):
+				continue
+			q[b] = (q[b] as Quaternion).slerp(qa[b], free * 0.85)
 	if attached:
-		# The swing has a rhythm: on the way down the body opens and the legs
-		# trail, through the bottom they whip under, and on the way up the
-		# knees drive forward and up into the release (a gymnast's kip).
+		# The swing has a rhythm, read from the body's real motion: on the way
+		# down the body opens and the legs trail long (one knee folded – the
+		# lead leg alternates web to web, so no two swings look the same);
+		# through the fast bottom of the arc the legs swing through into a
+		# loose pike; on the way up the knees drive forward and up into the
+		# release (a gymnast's kip) while the free hand reaches ahead for the
+		# next web. Turning, the legs swing out wide of the turn.
 		var vy := s.velocity.y
-		var down := clampf(-vy / 9.0, 0.0, 1.0) * clampf(L * 1.4, 0.0, 1.0)
-		var up := clampf(vy / 9.0, 0.0, 1.0) * clampf(L * 1.4, 0.0, 1.0)
+		var taut := clampf(L * 1.4, 0.0, 1.0)
+		var down := clampf(-vy / 9.0, 0.0, 1.0) * taut
+		var up := clampf(vy / 9.0, 0.0, 1.0) * taut
+		var fast := clampf((speed - 12.0) / 20.0, 0.0, 1.0)
+		var bottom := (1.0 - clampf(absf(vy) / 7.0, 0.0, 1.0)) * taut * (0.75 + 0.25 * fast)
+		var ld := _swing_lead
+		var tr := "r" if ld == "l" else "l"
+		var sg := {"l": -1.0, "r": 1.0}
 		_put(q, {
-			"thigh_l": _rx(-0.32) * _rz(-0.06), "thigh_r": _rx(-0.12) * _rz(0.05),
-			"shin_l": _rx(-0.45), "shin_r": _rx(-0.22), "foot_l": _rx(-0.45), "foot_r": _rx(-0.5),
+			"thigh_" + ld: _rx(-0.12) * _rz(0.06 * sg[ld]), "thigh_" + tr: _rx(-0.34 - 0.12 * fast) * _rz(0.04 * sg[tr]),
+			"shin_" + ld: _rx(-1.05 - 0.2 * fast), "shin_" + tr: _rx(-0.2), "foot_" + ld: _rx(-0.35), "foot_" + tr: _rx(-0.6),
 		}, down * 0.85)
 		_put(q, {
-			"thigh_l": _rx(1.05) * _rz(-0.08), "thigh_r": _rx(0.7) * _rz(0.06),
-			"shin_l": _rx(-1.05), "shin_r": _rx(-0.6), "foot_l": _rx(-0.2), "foot_r": _rx(-0.3),
+			"thigh_" + ld: _rx(0.75) * _rz(0.06 * sg[ld]), "thigh_" + tr: _rx(0.42) * _rz(0.05 * sg[tr]),
+			"shin_" + ld: _rx(-0.95), "shin_" + tr: _rx(-0.4), "foot_" + ld: _rx(-0.3), "foot_" + tr: _rx(-0.45),
+		}, bottom)
+		_put(q, {
+			"thigh_" + ld: _rx(1.2) * _rz(0.08 * sg[ld]), "thigh_" + tr: _rx(0.72) * _rz(0.06 * sg[tr]),
+			"shin_" + ld: _rx(-1.25), "shin_" + tr: _rx(-0.6), "foot_" + ld: _rx(-0.2), "foot_" + tr: _rx(-0.35),
 		}, up * 0.9)
-		q["spine"] = q["spine"] * _rx(0.14 * down - 0.16 * up)
-		q["head"] = q["head"] * _rx(0.1 * up)
+		# Centrifugal swing-out: the hips and legs are flung to the outside
+		# of a turn (twist follows the yaw rate).
+		for sd in ["l", "r"]:
+			q["thigh_" + sd] = _rz(-twist * 0.45) * q["thigh_" + sd]
+		q["hips"] = q["hips"] * _rz(-twist * 0.2)
+		q["spine"] = q["spine"] * _rx(0.16 * down - 0.1 * bottom - 0.18 * up)
+		q["head"] = q["head"] * _rx(0.18 * up - 0.06 * down)
+		if _lgrip < 0.5:
+			# Free hand: out wide for balance on the way down, reaching ahead
+			# and up toward the next anchor on the way up.
+			var reach_up := up * (1.0 - _lgrip * 2.0)
+			q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rx(2.1) * _rz(-0.45), reach_up * 0.75)
+			q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.45), reach_up * 0.75)
 
 
 ## Two-bone IK in the parent's frame (chest for arms, hips for legs). `dir`
@@ -1011,6 +1112,24 @@ func _plant_feet(dt: float) -> void:
 	var targets := {}
 	var normals := {}
 	var drop := -1.0
+	# (Rising out of a crouch counts: the last part of a hard landing / get-up.)
+	if not _standing or _hard_t > HARD_TIME * 0.4 or _getup_t > GETUP_TIME * 0.3:
+		_settle.clear()
+	elif _settle.is_empty() and _plant.size() == 2:
+		# Standing with a foot left out of place (after a landing, a stop or
+		# a turn on the spot): step it back under the hips, one foot at a time.
+		var worst := ""
+		var far := SETTLE_DIST
+		for sd in ["l", "r"]:
+			var fk0 := (bones["foot_" + sd] as Node3D).global_position
+			var lp0: Vector3 = _plant[sd][0]
+			var off := Vector2(lp0.x - fk0.x, lp0.z - fk0.z).length()
+			if off > far:
+				far = off
+				worst = sd
+		if worst != "":
+			_settle[worst] = [0.0, _plant[worst][0]]
+			_plant.erase(worst)
 	for sd in ["l", "r"]:
 		var foot := bones["foot_" + sd] as Node3D
 		var fk := foot.global_position
@@ -1019,7 +1138,20 @@ func _plant_feet(dt: float) -> void:
 		var hit := _ground_hit(space, fk)
 		var desired := fk
 		var n := Vector3.UP
-		if w >= 0.0 and _plant.has(sd):
+		if _settle.has(sd):
+			# Settle step: lift, carry and set the foot down at its rest spot.
+			var st: Array = _settle[sd]
+			st[0] = minf(float(st[0]) + dt / SETTLE_TIME, 1.0)
+			var e := smoothstep(0.0, 1.0, st[0])
+			var gy: float = (hit.position as Vector3).y + ANKLE_H if not hit.is_empty() else (st[1] as Vector3).y
+			var rest := Vector3(fk.x, gy, fk.z)
+			desired = (st[1] as Vector3).lerp(rest, e) + Vector3.UP * sin(PI * st[0]) * 0.07
+			_toe[sd] = sin(PI * st[0]) * 0.25
+			if st[0] >= 1.0:
+				_settle.erase(sd)
+				_plant[sd] = [rest, hit.normal if not hit.is_empty() else Vector3.UP]
+			w = -2.0  # neither planted nor reaching for the ground
+		elif w >= 0.0 and _plant.has(sd):
 			var lp: Vector3 = _plant[sd][0]
 			var horiz := Vector3(lp.x - fk.x, 0.0, lp.z - fk.z).length()
 			if horiz > 0.35 or lp.distance_to(hip) > LEG_LEN + 0.25:
@@ -1035,11 +1167,15 @@ func _plant_feet(dt: float) -> void:
 			var f := (_facing - n * _facing.dot(n)).normalized()
 			var toe: float = _toe[sd]
 			desired = _roll(lock, f, n, toe)
+			# Out of reach with the gait's heel roll: the hips sink (knees
+			# flex) rather than the foot rising onto tiptoe mid-stance; the
+			# heel only lifts further for what the hips haven't caught yet.
+			drop = maxf(drop, desired.distance_to(hip) - (LEG_LEN - 0.005))
 			while not _standing and toe < 1.1 and desired.distance_to(hip) > LEG_LEN - 0.01:
 				toe += 0.06
 				desired = _roll(lock, f, n, toe)
 			_toe[sd] = toe
-		else:
+		elif w > -2.0:
 			_plant.erase(sd)
 			if not hit.is_empty():
 				var gy: float = (hit.position as Vector3).y + ANKLE_H
@@ -1056,15 +1192,16 @@ func _plant_feet(dt: float) -> void:
 		_foot_mode[sd] = mode
 		var fo: Vector3 = _foot_off[sd] * exp(-14.0 * dt)
 		if _plant.has(sd):
-			fo.y *= exp(-24.0 * dt)  # a planted foot settles onto the ground quickly
+			# A planted foot settles onto the ground quickly and never hovers
+			# visibly while the rest of a re-plant jump eases out.
+			fo.y = clampf(fo.y * exp(-24.0 * dt), -0.02, 0.02)
 		_foot_off[sd] = fo
 		var tgt: Vector3 = desired + _foot_off[sd]
 		targets[sd] = tgt
 		normals[sd] = n
-		if _plant.has(sd):
-			drop = maxf(drop, desired.distance_to(hip) - (LEG_LEN - 0.005))
 	_hip_drop = lerpf(_hip_drop, clampf(_hip_drop + drop, 0.0, 0.3), 1.0 - exp(-20.0 * dt))
 	var hb := hips.global_basis.orthonormalized()
+	var wik := _contact
 	for sd in ["l", "r"]:
 		var hip := (bones["thigh_" + sd] as Node3D).global_position
 		var tgt: Vector3 = targets[sd]
@@ -1072,25 +1209,47 @@ func _plant_feet(dt: float) -> void:
 		var d := tgt - hip
 		var side := 0.12 if sd == "r" else -0.12
 		var ik := _two_bone(hb, d.normalized(), d.length(), Vector3(side, 0.0, -1.0), 0.45, 0.44, -1.0)
-		_set_bone("thigh_" + sd, (_rot["thigh_" + sd] as Quaternion).slerp(ik[0], _loco))
-		_set_bone("shin_" + sd, (_rot["shin_" + sd] as Quaternion).slerp(ik[1], _loco))
-		if _plant.has(sd) or _stance_w[sd] >= 0.0:
+		_set_bone("thigh_" + sd, (_rot["thigh_" + sd] as Quaternion).slerp(ik[0], wik))
+		_set_bone("shin_" + sd, (_rot["shin_" + sd] as Quaternion).slerp(ik[1], wik))
+		# The sole settles onto the ground over a few frames at touchdown
+		# (and peels off at lift-off) instead of snapping flat.
+		var on: bool = _plant.has(sd) or _stance_w[sd] >= 0.0
+		_flat[sd] = move_toward(_flat[sd], 1.0 if on else 0.0, dt * (16.0 if on else 10.0))
+		if _flat[sd] > 0.0:
 			# Sole on the ground plane, toes along the facing, heel rolled up.
 			var n: Vector3 = normals[sd]
 			var f := (_facing - n * _facing.dot(n)).normalized()
 			if f.length_squared() < 0.5:
 				continue
-			var want := Basis.looking_at(f, n) * Basis(Vector3.RIGHT, -_toe[sd])
+			var want := Basis.looking_at(f, n) * Basis(Vector3.RIGHT, _heel[sd] - _toe[sd])
 			var shin_b := (bones["shin_" + sd] as Node3D).global_basis.orthonormalized()
 			var local := (shin_b.inverse() * want).get_rotation_quaternion()
-			_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(local, _loco))
+			_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(local, wik * _flat[sd]))
+
+
+## Crouched poses (hard landing): both feet stay planted where they
+## touched down; `trail_toe` rolls the trailing foot onto its toes. While a
+## three-point landing is still folding down, the trailing foot slides back
+## with the dropping knee before it locks.
+func _plant_both(trail_toe: float) -> void:
+	_standing = true
+	for sd in ["l", "r"]:
+		_stance_w[sd] = 0.5
+		_toe[sd] = trail_toe if sd != _hard_lead else 0.0
+	if _hard_t > HARD_TIME * 0.8:
+		# Folding into a three-point landing: the trailing knee drops toward
+		# the ground, so its foot goes back behind the hips (onto its toes).
+		var tr := "r" if _hard_lead == "l" else "l"
+		var hip := (bones["thigh_" + tr] as Node3D).global_position
+		var back := hip - _facing * 0.4
+		_plant[tr] = [Vector3(back.x, player.global_position.y - 0.9 + ANKLE_H, back.z), Vector3.UP]
 
 
 ## Ankle position with the foot rolled `toe` rad (heel up) about its ball.
 static func _roll(ankle: Vector3, f: Vector3, n: Vector3, toe: float) -> Vector3:
 	if toe <= 0.0:
 		return ankle
-	return ankle + n * sin(toe) * BALL - f * (1.0 - cos(toe)) * BALL
+	return ankle + n * sin(toe) * BALL + f * (1.0 - cos(toe)) * BALL
 
 
 func _set_bone(b: String, qq: Quaternion) -> void:
@@ -1307,6 +1466,16 @@ func _pose_hard_land(q: Dictionary) -> float:
 		"upper_arm_" + tr: _rx(0.15) * _rz(0.2 * sg[tr]), "forearm_" + tr: _rx(0.1),
 		"upper_arm_" + ld: _rx(-1.1) * _rz(0.6 * sg[ld]), "forearm_" + ld: _rx(0.35),
 	}, k)
+	# The trailing hand really touches down: IK to the ground just ahead of
+	# and outside the shoulder, elbow soft and pointing back.
+	var sh := (bones["upper_arm_" + tr] as Node3D).global_position
+	var right := Vector3.UP.cross(_facing).normalized() * -1.0
+	var palm: Vector3 = Vector3(sh.x, player.global_position.y - 0.9 + 0.06, sh.z) + _facing * 0.12 + right * float(sg[tr]) * 0.08
+	var d: Vector3 = palm - sh
+	var ik := _two_bone((bones["chest"] as Node3D).global_basis.orthonormalized(), d.normalized(),
+		minf(d.length(), 0.53), Vector3(0.4 * sg[tr], 0.0, 0.9))
+	q["upper_arm_" + tr] = (q["upper_arm_" + tr] as Quaternion).slerp(ik[0], k)
+	q["forearm_" + tr] = (q["forearm_" + tr] as Quaternion).slerp(ik[1], k)
 	return 0.48 * k
 
 
@@ -1325,13 +1494,15 @@ func _pose_getup(q: Dictionary, k: float) -> void:
 		q["forearm_" + sd] = _rx(0.3 + 0.3 * low)
 
 
-func _drive_springs(q: Dictionary, dt: float, rope_arm: bool) -> void:
+func _drive_springs(q: Dictionary, dt: float, rope_arm: bool, grounded := true) -> void:
 	# Locomotion cycles run faster than the soft "inertia" springs can follow
 	# (a sprint is ~16 rad/s): attenuated, lagging limbs make feet skate. So on
 	# the ground limbs follow the cycle exactly (blended in by _loco, which
 	# ramps over ~0.17 s), while in the air they stay soft and carry momentum.
 	# The web arm is near-rigid so its hand stays on the line.
-	var h := dt * 0.5  # two substeps keeps stiff springs stable at 30 fps
+	# Leaving the ground hands the limbs straight to the springs (their
+	# velocity already matches the stride), so a take-off never pops.
+	var lw := _loco if grounded else 0.0
 	for b in BONES:
 		var grp := _group(b)
 		if rope_arm and (b == "upper_arm_r" or b == "forearm_r"):
@@ -1341,11 +1512,13 @@ func _drive_springs(q: Dictionary, dt: float, rope_arm: bool) -> void:
 		var n := 2 if k < 500.0 else 4
 		for i in n:
 			_spring(b, q[b], k, c, dt / n)
-		if _loco > 0.0 and (grp == "leg" or grp == "arm"):
+		if lw > 0.0 and (grp == "leg" or grp == "arm"):
 			var prev: Quaternion = _rot[b]
-			_rot[b] = prev.slerp(q[b], _loco)
-			# Keep the spring's velocity consistent with the motion it follows.
-			_angvel[b] = (_angvel[b] as Vector3).lerp(_ang_delta(prev, _rot[b]) / maxf(dt, 1e-4), _loco)
+			_rot[b] = prev.slerp(q[b], lw)
+			# Keep the spring's velocity consistent with the motion it follows
+			# (capped: a pose jump must not fling the limb once springs take over).
+			var follow := (_ang_delta(prev, _rot[b]) / maxf(dt, 1e-4)).limit_length(18.0)
+			_angvel[b] = (_angvel[b] as Vector3).lerp(follow, lw)
 		(bones[b] as Node3D).quaternion = _rot[b]
 
 
@@ -1418,10 +1591,41 @@ func _pose_from_ragdoll() -> void:
 		(bones[b] as Node3D).quaternion = Quaternion.IDENTITY
 	_aim_bone("head", basis, (p["head"] as Vector3) - (p["neck"] as Vector3), Vector3.UP)
 	for sd in ["l", "r"]:
-		var ub := _aim_bone("upper_arm_" + sd, basis, (p["el_" + sd] as Vector3) - (p["sh_" + sd] as Vector3), Vector3.DOWN)
-		_aim_bone("forearm_" + sd, ub, (p["wr_" + sd] as Vector3) - (p["el_" + sd] as Vector3), Vector3.DOWN)
-		var tb := _aim_bone("thigh_" + sd, basis, (p["kn_" + sd] as Vector3) - (p["hip_" + sd] as Vector3), Vector3.DOWN)
-		_aim_bone("shin_" + sd, tb, (p["an_" + sd] as Vector3) - (p["kn_" + sd] as Vector3), Vector3.DOWN)
+		_aim_limb("upper_arm_" + sd, "forearm_" + sd, basis, (p["el_" + sd] as Vector3) - (p["sh_" + sd] as Vector3),
+			(p["wr_" + sd] as Vector3) - (p["el_" + sd] as Vector3), 1.0)
+		_aim_limb("thigh_" + sd, "shin_" + sd, basis, (p["kn_" + sd] as Vector3) - (p["hip_" + sd] as Vector3),
+			(p["an_" + sd] as Vector3) - (p["kn_" + sd] as Vector3), -1.0)
+
+
+## Poses a two-bone limb from its segment directions (world) so the middle
+## joint stays a pure hinge: the upper bone's roll is chosen so the lower
+## bone bends in its own bending plane (elbows toward -Z, knees toward +Z,
+## like _two_bone) – a ragdolled knee never comes back twisted sideways.
+func _aim_limb(upper: String, lower: String, parent_basis: Basis, d_up: Vector3, d_low: Vector3, bend_dir: float) -> void:
+	if d_up.length_squared() < 1e-6 or d_low.length_squared() < 1e-6:
+		return
+	var inv := parent_basis.inverse()
+	var u := (inv * d_up).normalized()
+	var w := (inv * d_low).normalized()
+	# Near straight, the bend plane is ill-defined (it would flip frame to
+	# frame): keep the roll the limb already has, and only let the bend
+	# steer it once the joint is clearly bent.
+	var prev_z := Basis(_rot[upper] as Quaternion).z
+	prev_z = prev_z - u * prev_z.dot(u)
+	if prev_z.length_squared() < 1e-4:
+		prev_z = Vector3.BACK - u * u.z
+	var z := -bend_dir * (w - u * w.dot(u))
+	var bent := smoothstep(0.08, 0.3, z.length())  # sin of the bend angle
+	z = prev_z.normalized().slerp(z.normalized(), bent) if z.length_squared() > 1e-6 else prev_z.normalized()
+	var y := -u
+	var x := y.cross(z).normalized()
+	z = x.cross(y).normalized()
+	var uq := Basis(x, y, z).get_rotation_quaternion()
+	var lq := _rx(acos(clampf(u.dot(w), -1.0, 1.0)) * bend_dir)
+	for pair in [[upper, uq], [lower, lq]]:
+		_rot[pair[0]] = pair[1]
+		_angvel[pair[0]] = Vector3.ZERO
+		(bones[pair[0]] as Node3D).quaternion = pair[1]
 
 
 ## Rotates `b` so its rest axis points along world `dir`; returns its world basis.
