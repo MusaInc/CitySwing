@@ -829,6 +829,7 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		for c in n:
 			xf.append(Transform3D(basis, s0 + Vector3.UP * 0.02))
 			custom.append(Color(rng.randf_range(9.0, 15.0), rng.randf_range(0.0, length), length, 0.0))
+	_parked_cars(rect, rng, xf, custom)
 	if xf.is_empty():
 		return
 	var mm := MultiMesh.new()
@@ -918,6 +919,35 @@ func _add_walkers(root: Node3D, key: Vector2i) -> void:
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.extra_cull_margin = CHUNK
 	root.add_child(mmi)
+
+
+## Cars parked along both kerbs of the ordinary streets (not the avenues,
+## not near junctions), with gaps. Same MultiMesh as traffic: speed 0 and a
+## phase in the middle of a short "segment", the transform offset to match.
+func _parked_cars(rect: Rect2, rng: RandomNumberGenerator, xf: Array, custom: Array) -> void:
+	for axis in 2:
+		var mains: Array = layout.x_streets if axis == 0 else layout.z_streets
+		var cross: Array = layout.z_streets if axis == 0 else layout.x_streets
+		for st in mains:
+			if st[1] > 20.0:
+				continue
+			for k in cross.size() - 1:
+				var a: float = cross[k][0] + cross[k][1] * 0.5 + 12.0
+				var b: float = cross[k + 1][0] - cross[k + 1][1] * 0.5 - 12.0
+				for side in [-1.0, 1.0]:
+					var lateral: float = st[0] + side * (st[1] * 0.5 - 1.5)
+					var d := a
+					while d < b:
+						var pos := Vector3(lateral, 0.02, d) if axis == 0 else Vector3(d, 0.02, lateral)
+						if rect.has_point(Vector2(pos.x, pos.z)) and rng.randf() < 0.6:
+							# Parked facing with the traffic on that side.
+							var fwd := (Vector3.BACK if side > 0.0 else Vector3.FORWARD) if axis == 0 \
+								else (Vector3.LEFT if side > 0.0 else Vector3.RIGHT)
+							var basis := Basis.looking_at(fwd, Vector3.UP)
+							# Phase 5 m into a 10 m "segment": full size, shifted 5 m along -Z.
+							xf.append(Transform3D(basis, pos + basis.z * 5.0))
+							custom.append(Color(0.0, 5.0, 10.0, 0.0))
+						d += rng.randf_range(6.2, 7.5)
 
 
 static func _clip_segment(a: Vector3, b: Vector3, r: Rect2) -> Array:
