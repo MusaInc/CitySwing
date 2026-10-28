@@ -14,7 +14,7 @@ const CHUNK := CityLayout.CHUNK
 const MODEL_DIR := "res://assets/models/"
 const PROP_RANGES := {
 	"streetlight": 260.0, "tree": 420.0, "water_tower": 520.0, "ac_unit": 240.0, "antenna": 700.0, "crane": 1200.0,
-	"traffic_light": 220.0,
+	"traffic_light": 220.0, "roof_hut": 650.0,
 }
 const MARKS_RANGE := 320.0
 const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62, 0.08, 0.07), Color(0.12, 0.24, 0.45),
@@ -33,6 +33,11 @@ var ground_mat: ShaderMaterial
 var water_mat: ShaderMaterial
 var prop_meshes := {}
 var car_mesh: Mesh
+var walker_mesh: Mesh
+var _walk_paths: Array = []  # [from, to] pavement segments (directional)
+const WALKER_RANGE := 170.0
+const CLOTHES := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
+	Color(0.36, 0.42, 0.3), Color(0.75, 0.6, 0.35), Color(0.45, 0.45, 0.48), Color(0.62, 0.36, 0.5), Color(0.2, 0.45, 0.48)]
 
 var _by_chunk := {}
 var _props_by_chunk := {}
@@ -105,7 +110,7 @@ func spawn_point() -> Vector3:
 
 
 ## Clearance (m) to keep from each kind of rooftop prop when standing.
-const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0}
+const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0, "roof_hut": 5.5}
 const ROOF_EDGE_CLEARANCE := 4.5
 
 var _roof_spawns: Array = []
@@ -150,12 +155,30 @@ func random_rooftop(rng: RandomNumberGenerator, avoid := Vector3.INF) -> Diction
 		var c: Dictionary = all[rng.randi() % all.size()]
 		if not c.has("yaw"):
 			c["yaw"] = _best_heading(c["position"], c["height"])
+			if not is_nan(c["yaw"]) and not _web_in_reach(c["position"], c["yaw"]):
+				c["yaw"] = NAN  # nothing to web from a standstill here
 		if is_nan(c["yaw"]):
 			continue  # nowhere promising to swing from this roof
 		if avoid == Vector3.INF or c["position"].distance_to(avoid) > 150.0:
 			return c
 		fallback = c
 	return fallback if not fallback.is_empty() else {"position": spawn_point(), "yaw": 0.0, "height": 0.0}
+
+
+var _spawn_params: SwingParams
+
+
+## True if holding SWING on this roof, facing `yaw`, finds an anchor.
+func _web_in_reach(p: Vector3, yaw: float) -> bool:
+	if not is_inside_tree():
+		return true
+	if _spawn_params == null:
+		_spawn_params = load("res://config/swing_params.tres")
+	var dir := Vector3.FORWARD.rotated(Vector3.UP, yaw)
+	var t := GrappleTargeting.new()
+	t.update(get_world_3d().direct_space_state, p + Vector3.UP * 0.5, (dir + Vector3.UP * 0.2).normalized(),
+		Vector3.ZERO, _spawn_params, true, [])
+	return t.has_target
 
 
 func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
@@ -270,7 +293,7 @@ func _load_mesh(name: String) -> Mesh:
 
 func _load_props() -> void:
 	for k in ["streetlight", "tree", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
-			"harbour_dome", "beacon", "cathedral_top", "traffic_light"]:
+			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut"]:
 		var m := _load_mesh(k)
 		if m:
 			prop_meshes[k] = m
@@ -288,6 +311,19 @@ func _load_props() -> void:
 			sm.set_shader_parameter("use_instance_color", name == "paint")
 			sm.set_shader_parameter("emission", 2.0 if name.begins_with("lamp") else 0.0)
 			car_mesh.surface_set_material(i, sm)
+	var walker := _load_mesh("pedestrian")
+	if walker:
+		walker_mesh = walker.duplicate()
+		var wshader: Shader = load("res://src/world/shaders/pedestrian.gdshader")
+		for i in walker_mesh.get_surface_count():
+			var src := walker_mesh.surface_get_material(i)
+			var sm := ShaderMaterial.new()
+			sm.shader = wshader
+			if src is BaseMaterial3D:
+				sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
+			sm.set_shader_parameter("use_instance_color", src != null and String(src.resource_name) == "shirt")
+			walker_mesh.surface_set_material(i, sm)
+	_walk_paths = _pavement_paths()
 
 
 # ------------------------------------------------------------- collision
@@ -729,6 +765,7 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		root.add_child(gi)
 	_add_props(root, key)
 	_add_traffic(root, key)
+	_add_walkers(root, key)
 	_add_occluder(root, key)
 	add_child(root)
 	_loaded[key] = root
@@ -810,6 +847,75 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 	mmi.visibility_range_end = 520.0
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Cars travel up to a full segment along -Z; widen the culling box to match.
+	mmi.extra_cull_margin = CHUNK
+	root.add_child(mmi)
+
+
+## Two walking lines along every pavement (one each way), between the kerb
+## and the building line; round park edges too. Not on dock quays.
+func _pavement_paths() -> Array:
+	var out: Array = []
+	for blk in layout.blocks:
+		var r: Rect2 = blk
+		var basin := false
+		for w in layout.water:
+			if (w as Rect2).position.x > 0.0 and (w as Rect2).encloses(r.grow(-7.0)):
+				basin = true
+		if basin:
+			continue
+		for inset_dir in [[1.7, 1.0], [3.0, -1.0]]:
+			var i: float = inset_dir[0]
+			var fwd: bool = inset_dir[1] > 0.0
+			var c := [Vector3(r.position.x + i, 0.15, r.position.y + i), Vector3(r.end.x - i, 0.15, r.position.y + i),
+				Vector3(r.end.x - i, 0.15, r.end.y - i), Vector3(r.position.x + i, 0.15, r.end.y - i)]
+			for k in 4:
+				var a: Vector3 = c[k]
+				var b: Vector3 = c[(k + 1) % 4]
+				out.append([a, b] if fwd else [b, a])
+	return out
+
+
+func _add_walkers(root: Node3D, key: Vector2i) -> void:
+	if walker_mesh == null or traffic_density <= 0.0:
+		return
+	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key) ^ 0x5eed
+	var xf: Array = []
+	var custom: Array = []
+	for path in _walk_paths:
+		var seg := _clip_segment(path[0], path[1], rect)
+		if seg.is_empty():
+			continue
+		var s0: Vector3 = seg[0]
+		var s1: Vector3 = seg[1]
+		var length := s0.distance_to(s1)
+		if length < 6.0:
+			continue
+		var dir := (s1 - s0) / length
+		var basis := Basis.looking_at(dir, Vector3.UP)
+		var n := int(length / 9.0 * traffic_density + rng.randf())
+		for i in n:
+			var sc := rng.randf_range(0.9, 1.08)
+			xf.append(Transform3D(basis.scaled(Vector3.ONE * sc), Vector3(s0.x, 0.15, s0.z)))
+			custom.append(Color(rng.randf_range(1.1, 1.6), rng.randf_range(0.0, length), length, 0.0))
+	if xf.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.use_custom_data = true
+	mm.mesh = walker_mesh
+	mm.instance_count = xf.size()
+	for i in xf.size():
+		mm.set_instance_transform(i, xf[i])
+		mm.set_instance_custom_data(i, custom[i])
+		mm.set_instance_color(i, CLOTHES[rng.randi() % CLOTHES.size()])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Walkers"
+	mmi.multimesh = mm
+	mmi.visibility_range_end = WALKER_RANGE
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.extra_cull_margin = CHUNK
 	root.add_child(mmi)
 

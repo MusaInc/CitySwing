@@ -339,6 +339,19 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	var ry: float = top_t[5]
 	var tw: float = top_t[2] - top_t[0]
 	var td: float = top_t[3] - top_t[1]
+	# Stair / lift housing tucked into a corner (solid: you land on it). Own
+	# random stream, so adding it didn't reshuffle the rest of the city.
+	var hrng := RandomNumberGenerator.new()
+	hrng.seed = hash(Vector3i(int(rx * 10.0), int(rz * 10.0), int(ry))) ^ seed
+	if tw > 15.0 and td > 15.0 and hrng.randf() < 0.65:
+		var sx := 1.0 if hrng.randf() < 0.5 else -1.0
+		var sz := 1.0 if hrng.randf() < 0.5 else -1.0
+		var hx := rx + sx * (tw * 0.5 - 3.6)
+		var hz := rz + sz * (td * 0.5 - 4.0)
+		var yaw := 0.0 if sz < 0.0 else PI  # door faces into the roof
+		props.append(["roof_hut", Transform3D(Basis(Vector3.UP, yaw), Vector3(hx, ry, hz))])
+		buildings.append({"tiers": [[hx - 1.7, hz - 2.1, hx + 1.7, hz + 2.1, ry, ry + 3.1]], "style": Style.MODERN,
+			"color": Color.WHITE, "kind": "structure", "seed": 0.0})
 	if (style == Style.BRICK or style == Style.STONE or style == Style.SANDSTONE) and h < 80.0 and brng.randf() < 0.55:
 		props.append(["water_tower", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)),
 			Vector3(rx + brng.randf_range(-tw, tw) * 0.25, ry, rz + brng.randf_range(-td, td) * 0.25))])

@@ -357,6 +357,44 @@ def crane():
     export("crane.glb", [join("crane", p)])
 
 
+def roof_hut():
+    """Stair/lift housing on a flat roof: 3.4 x 4.2 x 3 m, door on +Y."""
+    reset()
+    conc = mat("hut_concrete", (0.62, 0.6, 0.57), 0.9)
+    trim = mat("hut_trim", (0.42, 0.42, 0.43), 0.7)
+    door = mat("hut_door", (0.25, 0.3, 0.33), 0.5, 0.4)
+    p = [box("hut", (3.4, 4.2, 3.0), (0, 0, 1.5), conc)]
+    p.append(box("cap", (3.7, 4.5, 0.18), (0, 0, 3.09), trim))
+    p.append(box("door", (1.0, 0.06, 2.1), (0.6, 2.12, 1.05), door))
+    p.append(box("vent", (0.6, 0.6, 0.5), (-0.9, -1.2, 3.4), trim))
+    export("roof_hut.glb", [join("roof_hut", p)])
+
+
+def pedestrian():
+    """Low-poly walker (~200 faces), facing +Y (Godot -Z). Material names
+    drive the GPU walk cycle: "pants" legs swing, "shirt" sleeves swing,
+    "shirt" also takes the per-instance colour."""
+    reset()
+    skin = mat("skin", (0.62, 0.45, 0.36), 0.7)
+    shirt = mat("shirt", (1.0, 1.0, 1.0), 0.8)
+    pants = mat("pants", (0.17, 0.19, 0.25), 0.85)
+    hair = mat("hair", (0.12, 0.09, 0.07), 0.9)
+    shoes = mat("shoes", (0.1, 0.1, 0.1), 0.6)
+    p = []
+    for sx in (-0.1, 0.1):
+        p.append(box("leg", (0.15, 0.17, 0.82), (sx, 0, 0.47), pants))
+        p.append(box("shoe", (0.13, 0.26, 0.08), (sx, 0.04, 0.04), shoes))
+    p.append(box("hips", (0.36, 0.2, 0.14), (0, 0, 0.88), pants))
+    p.append(box("torso", (0.4, 0.23, 0.56), (0, 0, 1.2), shirt))
+    for sx in (-0.255, 0.255):
+        p.append(box("arm", (0.11, 0.13, 0.56), (sx, 0, 1.17), shirt))
+        p.append(sphere("hand", 0.055, (sx, 0, 0.86), skin, 6, 4))
+    p.append(cyl("neck", 0.055, 0.1, (0, 0, 1.47), skin, 6))
+    p.append(sphere("head", 0.115, (0, 0.01, 1.65), skin, 8, 6, scale=(0.9, 1.0, 1.08)))
+    p.append(sphere("hair", 0.12, (0, -0.012, 1.69), hair, 8, 4, scale=(0.95, 1.0, 0.8)))
+    export("pedestrian.glb", [join("pedestrian", p)])
+
+
 def traffic_light():
     """Mast-arm signal: pole on the kerb, arm out over the road (+X), two heads."""
     reset()
@@ -615,6 +653,6 @@ def character():
 
 if __name__ == "__main__":
     for fn in (water_tower, ac_unit, antenna, streetlight, car, tree, clock_crown, harbour_dome, beacon,
-               cathedral_tower_top, viaduct, crane, traffic_light, character):
+               cathedral_tower_top, viaduct, crane, traffic_light, pedestrian, roof_hut):
         fn()
     print("KIT DONE")
