@@ -73,6 +73,7 @@ func _ready() -> void:
 	_build_landmarks()
 	_build_structures()
 	_build_outskirts()
+	_build_birds()
 	GrappleTargeting.anchor_lines = layout.anchor_lines
 	print("CityWorld: %d buildings, %d props, %d chunks, layout+collision %d ms" % [
 		layout.buildings.size(), layout.props.size(), _all_keys.size(), Time.get_ticks_msec() - t0])
@@ -433,6 +434,56 @@ func _build_structures() -> void:
 				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			root.add_child(mi)
 		add_child(root)
+
+
+## Pigeon flocks circling over parks, plazas and a few rooftops – a little
+## life in the sky. A tiny procedural bird; flight is all in the shader.
+func _build_birds() -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Body (thin diamond) and two wings, facing -Z, ~0.6 m span.
+	for tri in [[Vector3(0, 0, -0.16), Vector3(0.05, 0, 0.0), Vector3(0, 0, 0.18)],
+			[Vector3(0, 0, -0.16), Vector3(0, 0, 0.18), Vector3(-0.05, 0, 0.0)],
+			[Vector3(0.04, 0, -0.06), Vector3(0.32, 0.02, 0.02), Vector3(0.04, 0, 0.07)],
+			[Vector3(-0.04, 0, -0.06), Vector3(-0.04, 0, 0.07), Vector3(-0.32, 0.02, 0.02)]]:
+		for v in tri:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v)
+	var mesh := st.commit()
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://src/world/shaders/birds.gdshader")
+	mesh.surface_set_material(0, mat)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = layout.seed * 7
+	var homes: Array = []
+	for p in layout.parks:
+		homes.append(Vector3((p as Rect2).get_center().x, rng.randf_range(18.0, 34.0), (p as Rect2).get_center().y))
+	for i in 10:
+		var b: Dictionary = layout.buildings[rng.randi() % layout.buildings.size()]
+		if b["kind"] == "normal":
+			var t: Array = b["tiers"][-1]
+			homes.append(Vector3((t[0] + t[2]) * 0.5, t[5] + rng.randf_range(10.0, 22.0), (t[1] + t[3]) * 0.5))
+	for h in homes:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_custom_data = true
+		mm.mesh = mesh
+		var n := rng.randi_range(6, 12)
+		mm.instance_count = n
+		var dir := 1.0 if rng.randf() < 0.5 else -1.0
+		var base_r := rng.randf_range(10.0, 22.0)
+		for i in n:
+			var c := (h as Vector3) + Vector3(rng.randf_range(-2.0, 2.0), rng.randf_range(-2.5, 2.5), rng.randf_range(-2.0, 2.0))
+			mm.set_instance_transform(i, Transform3D(Basis(), c))
+			mm.set_instance_custom_data(i, Color(base_r + rng.randf_range(-3.0, 3.0), dir * rng.randf_range(0.45, 0.6),
+				i * 0.35 + rng.randf_range(0.0, 0.2), rng.randf_range(0.5, 1.6)))
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Birds"
+		mmi.multimesh = mm
+		mmi.extra_cull_margin = 30.0
+		mmi.visibility_range_end = 320.0
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mmi)
 
 
 ## Low-detail skyline beyond the playable grid (and a far river shore) so every
