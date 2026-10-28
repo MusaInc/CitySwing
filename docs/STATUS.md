@@ -1,6 +1,35 @@
-# Status: 2026-10-28 (motion pass, complete edges)
+# Status: 2026-10-28 (front end, street life)
 
-## Motion pass + map edges (latest)
+## Front end + realism pass (latest)
+
+- **Front end** (`src/ui/menus.gd`, `src/ui/menu_parts.gd`): tap-to-start
+  splash (CITY/SWING logo hanging off a web, breathing prompt, studio
+  credit) over the live attract swing; main menu down the left with the hero
+  framed on the right (camera `h_offset` on the title only): Free Swing
+  primary card, Training (NEW badge until done), Time Trial (medal count),
+  Endurance (best), Suits; progress chips; Suits/Stats/Settings buttons;
+  version. All other screens share one layout – back button + title, cards
+  with drawn vector icons, stat tiles, chips, slide-in transitions, UI click
+  + haptic. Settings grouped (Graphics / Controls / Audio / Device).
+  Capture any screen with `--menu=main|courses|suits|settings|stats|pause|results`.
+- Menus publish named button centres on the web debug bridge (`menu`,
+  `screen`); the browser test taps splash → main menu → Free Swing by name.
+- **Pedestrians**: two walking lines on every pavement (one each way),
+  GPU-driven like traffic with a vertex-shader walk cycle; ~316 tris each,
+  170 m range (whole-chunk batches), density follows the traffic setting.
+  Roughly 400–500 drawn near the camera (~150k tris) – check on device.
+- **Parked cars** along the kerbs of ordinary streets (same batch as traffic).
+- **Rooftop stair/lift housings** on most big flat roofs (solid, spawn
+  clearance; own random stream so the rest of the city didn't reshuffle).
+- **Pigeon flocks** circling over parks, plazas and a few rooftops.
+- **Spawns** now reject roofs where holding SWING from a standstill finds no
+  anchor (found while testing the housings).
+- `build_kit.py` no longer rebuilds the old kit character by default.
+- Tests: 73 native; browser WebKit 10/10, Chromium 18/18 on one of three
+  runs (the other two each failed one different touch/trick check – timing
+  at ~1 fps headless, not a repeatable failure).
+
+## Motion pass + map edges
 
 - **Run**: lean from the ankles that grows with speed (not a bend at the
   waist), pelvis turns with the swinging leg and the shoulders counter it,
