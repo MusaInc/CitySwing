@@ -52,6 +52,7 @@ const MOVE_SMOOTH := 0.09
 var s := SwingPhysics.State.new()
 var controls := SwingPhysics.Controls.new()
 var targeting := GrappleTargeting.new()
+var land_impact := 0.0  # vertical speed (m/s) at the last touchdown, for the animation
 ## Node providing the view basis for camera-relative input (the SwingCamera).
 var view: Node3D
 ## Optional autopilot (tests / attract mode): object with drive(player, dt) -> Dictionary.
@@ -381,6 +382,9 @@ func _resolve_contacts(dt: float) -> void:
 		on_street = floor_street
 		var land_speed := -get_real_velocity().y
 		var speed_in := maxf(land_speed, worst_into)
+		# The animation wants the true vertical impact (speed_in is softened
+		# for the stun rules).
+		land_impact = maxf(-pre_hit.y, speed_in)
 		landed.emit(speed_in, floor_street)
 		chain = 0
 		perfect_streak = 0

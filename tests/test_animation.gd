@@ -210,3 +210,27 @@ static func _side(a: Vector3, m: Vector3, e: Vector3, bend: Vector3) -> float:
 	var off := (m - a) - ax * (m - a).dot(ax)
 	var b := (bend - ax * bend.dot(ax)).normalized()
 	return off.dot(b)
+
+
+func test_high_drop_lands_in_a_forward_crouch(t) -> void:
+	# A straight drop from ~14 m: the hips sink, the chest pitches forward over
+	# the knees (never back), then the body rises to standing.
+	player.respawn(Vector3(0, 14, 30))
+	player.s.velocity = Vector3(2, 0, 0)
+	var lowest := INF
+	var chest_fwd := -INF
+	var landed := [false]
+	player.landed.connect(func(_s, _st): landed[0] = true)
+	for i in 60 * 3:
+		await get_tree().physics_frame
+		if landed[0]:
+			var hip_h := _pos("hips").y - player.global_position.y
+			lowest = minf(lowest, hip_h)
+			var ch: Node3D = rig.bones["chest"]
+			chest_fwd = maxf(chest_fwd, ch.global_basis.y.dot(Vector3.RIGHT))
+	var stand_h := _pos("hips").y - player.global_position.y
+	t.note("hips sank to %.2f m (standing %.2f), chest leaned forward up to %.2f" % [lowest, stand_h, chest_fwd])
+	t.check(landed[0], "landed")
+	t.check(stand_h - lowest > 0.3, "the hips drop into the landing")
+	t.check(chest_fwd > 0.4, "the chest pitches forward over the knees")
+	t.check(not player.stunned, "a 14 m drop is a landing, not a crash")

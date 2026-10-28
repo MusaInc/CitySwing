@@ -5,9 +5,9 @@ extends SceneTree
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
 ## Scenarios: idle run steps jump swing release wallrun crash land jumpclose
-##   tricks freefall dive knockout
+##   tricks freefall dive knockout drop
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "release", "wallrun", "crash", "land", "jumpclose", "drop"]
 
 var player: Player
 var rig: CharacterRig
@@ -228,6 +228,13 @@ func _sc_land() -> void:
 	_reset(Vector3(-20, 16, 20), Vector3(14, 0, 0))
 	_cam_off = Vector3(0, 0.5, 6.0)
 	await _film("land", 3.0, [0.6, 0.8, 0.95, 1.05, 1.15, 1.3, 1.5, 1.7, 2.0, 2.4, 2.9])
+
+
+func _sc_drop() -> void:
+	# Straight drop from ~14 m with a little drift: the three-point landing.
+	_reset(Vector3(-20, 14, 20), Vector3(2, 0, 0))
+	_cam_off = Vector3(-1.5, 0.4, 4.0)
+	await _film("drop", 3.2, [1.4, 1.6, 1.7, 1.8, 1.95, 2.1, 2.3, 2.5, 2.8, 3.1])
 
 
 func _sc_jumpclose() -> void:
