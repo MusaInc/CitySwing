@@ -88,3 +88,24 @@ maps to iOS haptics on supported iPhones. It can be turned off in Settings.
 - Older devices: the Mobile renderer runs on Metal through MoltenVK. The
   oldest iPhone that holds 30 fps is **unknown until tested**; start with your
   baseline phone and the benchmark above.
+
+## TestFlight without a Mac (GitHub Actions)
+
+`.github/workflows/testflight.yml` does steps 1–4 on a GitHub-hosted Mac
+(macos-15, Xcode 16): installs Godot 4.5.1 + templates, exports the Xcode
+project, archives with automatic signing through an App Store Connect API key
+and uploads the build to TestFlight. Build number = the workflow run number.
+It only runs when started by hand (Actions → TestFlight → Run workflow).
+
+One-time setup:
+1. App Store Connect → My Apps → + → New App, bundle ID
+   `com.musastudios.cityswing` (the API can't create app records).
+2. An App Store Connect API key with the App Manager (or Admin) role
+   (Users and Access → Integrations → App Store Connect API).
+3. Push this repo to a **private** GitHub repo and add the secrets
+   `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`
+   (e.g. `gh secret set ASC_KEY_P8 < AuthKey_XXXX.p8`).
+4. Run the workflow; after processing, add yourself as an internal tester
+   in TestFlight and install from the TestFlight app on the iPhone.
+`ITSAppUsesNonExemptEncryption` is already `false` in the exported Info.plist,
+so no export-compliance question per build.

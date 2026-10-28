@@ -1,0 +1,106 @@
+# Builds City Swing for iPhone on a GitHub-hosted Mac and uploads it to
+# TestFlight. Run it from the Actions tab (Run workflow) – it never runs on
+# its own. See docs/IOS_BUILD.md ("TestFlight without a Mac").
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   APPLE_TEAM_ID         10-character Apple Developer team ID
+#   ASC_KEY_ID            App Store Connect API key ID (role: App Manager or Admin)
+#   ASC_ISSUER_ID         its issuer ID
+#   ASC_KEY_P8            the .p8 private key file contents
+# The app record (bundle ID com.musastudios.cityswing) must exist in App
+# Store Connect first: My Apps → + → New App.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version (CFBundleShortVersionString)"
+        default: "0.1.0"
+
+env:
+  GODOT_VERSION: "4.5.1"
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot and export templates
+        run: |
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q godot.zip
+          dest="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dest"
+          unzip -q templates.tpz -d tpl
+          mv tpl/templates/* "$dest/"
+          echo "GODOT=$PWD/Godot.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+
+      - name: Export the Xcode project
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ inputs.version }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          sed -i '' "s/^application\/app_store_team_id=.*/application\/app_store_team_id=\"$TEAM\"/" export_presets.cfg
+          sed -i '' "s/^application\/short_version=.*/application\/short_version=\"$VERSION\"/" export_presets.cfg
+          sed -i '' "s/^application\/version=.*/application\/version=\"$BUILD\"/" export_presets.cfg
+          mkdir -p build/ios
+          "$GODOT" --headless --import >/dev/null 2>&1 || true
+          "$GODOT" --headless --export-release "iOS" build/ios/CitySwing.ipa
+          test -d build/ios/CitySwing.xcodeproj
+
+      - name: App Store Connect API key
+        env:
+          P8: ${{ secrets.ASC_KEY_P8 }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$P8" > "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
+          chmod 600 "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
+
+      - name: Archive (automatic signing via the API key)
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -project build/ios/CitySwing.xcodeproj -scheme CitySwing \
+            -configuration Release -destination "generic/platform=iOS" \
+            -archivePath build/CitySwing.xcarchive archive \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER" | tail -40
+
+      - name: Upload to TestFlight
+        env:
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath build/CitySwing.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/upload \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER" | tail -40
+          echo "Uploaded build ${{ github.run_number }} – it appears in App Store Connect → TestFlight after processing (5–30 min)."
+
+      - name: Remove the key
+        if: always()
+        run: rm -rf "$HOME/private_keys"
