@@ -5,7 +5,7 @@ extends Node3D
 ## Command-line user args (after `--`), used by tools and automated captures:
 ##   --world=prototype|city   --mode=free|endurance|trial:<course>
 ##   --bot=expert|novice   --shot=<png> --shot-at=<s,s,...>   --quality=0|1|2
-##   --perf   --touch   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
+##   --perf   --touch   --look=clean|comic|toon|painted   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
 
 enum State { TITLE, PLAYING, PAUSED, RESULTS }
 
@@ -38,6 +38,8 @@ func _ready() -> void:
 		Settings.quality = int(args["quality"])
 	if args.has("perf"):
 		Settings.show_perf = true
+	if args.has("look"):
+		Settings.look = args["look"]
 	Settings.apply()
 	if args.has("seed"):
 		_spawn_rng.seed = int(args["seed"])  # reproducible spawns for captures/tests

@@ -27,6 +27,10 @@ func _ready() -> void:
 	mat.albedo_color = WHITE
 	_mat = mat
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Transparent + top priority: drawn after the LookFilter pass, so the web
+	# stays a clean bright line instead of getting inked over.
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.render_priority = 127
 	material_override = mat
 	extra_cull_margin = 200.0
 

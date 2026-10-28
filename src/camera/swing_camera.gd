@@ -33,6 +33,7 @@ extends Node3D
 
 var target: Player
 var cam: Camera3D
+var look: LookFilter
 var yaw := 0.0
 var pitch := deg_to_rad(-12.0)
 ## Manual look offset (radians); decays back to zero after recenter_delay.
@@ -75,6 +76,9 @@ func _ready() -> void:
 	cam.far = 2400.0
 	add_child(cam)
 	cam.make_current()
+	look = LookFilter.new()
+	look.name = "Look"
+	cam.add_child(look)
 
 
 func set_target(p: Player) -> void:
@@ -260,6 +264,7 @@ func _process(dt: float) -> void:
 	_punch = move_toward(_punch, 0.0, dt * 2.5)
 	var fov_goal := lerpf(base_fov, max_fov, t * t * (3.0 - 2.0 * t)) + _fov_kick
 	cam.fov = lerpf(cam.fov, fov_goal, 1.0 - exp(-(3.0 + 9.0 * _punch) * dt))
+	look.set_speed(clampf((spd - 22.0) / 30.0, 0.0, 1.0) + _punch * 0.5, dt)
 
 
 func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:

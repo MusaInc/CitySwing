@@ -138,6 +138,19 @@ void fragment() {
 		vec3 refl = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
 		float rnd = hash12(cell + seed * 113.0);
 		vec3 tint = style == 6.0 ? vec3(0.12, 0.16, 0.2) : (style == 2.0 ? vec3(0.2, 0.32, 0.38) : vec3(0.1, 0.11, 0.12));
+		// Curtain-wall towers pick a glass colour per building (teal, bronze,
+		// green, blue) so the skyline isn't one sky-blue mass; reflections are
+		// seen through that tint like real coated glass.
+		float pick = fract(seed * 7.31);
+		if (style == 2.0) {
+			tint = pick < 0.3 ? vec3(0.16, 0.34, 0.36) : (pick < 0.55 ? vec3(0.4, 0.27, 0.15)
+				: (pick < 0.75 ? vec3(0.17, 0.33, 0.24) : vec3(0.18, 0.27, 0.42)));
+		} else if (style == 6.0) {
+			tint = pick < 0.5 ? vec3(0.1, 0.14, 0.2) : vec3(0.2, 0.14, 0.09);
+		}
+		if (style == 2.0 || style == 6.0) {
+			refl *= mix(vec3(1.0), clamp(tint * 2.6, 0.0, 1.3), 0.55);
+		}
 		vec3 interior = tint * (0.6 + 0.6 * rnd);
 		float lit = step(1.0 - lit_fraction, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
 		vec3 gcol = mix(interior, refl, 0.25 + 0.6 * fres);

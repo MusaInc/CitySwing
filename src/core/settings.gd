@@ -32,6 +32,8 @@ var invert_y := false
 var aim_mode := "assist"
 var music_volume := 0.6
 var sfx_volume := 1.0
+## Post-process style, a LookFilter.STYLES key.
+var look := "comic"
 var tuning_overrides := {}  # SwingParams property -> value, from the in-game tuning panel
 
 
@@ -41,6 +43,7 @@ func _ready() -> void:
 		quality = cfg.get_value("gfx", "quality", quality)
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
+		look = cfg.get_value("gfx", "look", look)
 		haptics = cfg.get_value("input", "haptics", haptics)
 		look_sensitivity = cfg.get_value("input", "look_sensitivity", look_sensitivity)
 		invert_y = cfg.get_value("input", "invert_y", invert_y)
@@ -61,7 +64,13 @@ func apply() -> void:
 	var vp := get_viewport()
 	if vp:
 		vp.scaling_3d_scale = p["render_scale"]
-		vp.msaa_3d = p["msaa"]
+		# Stylised looks read the depth buffer, which MSAA leaves unresolved on
+		# the Mobile/Compatibility renderers: swap MSAA for FXAA (it smooths the
+		# ink lines too).
+		var stylised := look != "clean" and RenderingServer.get_current_rendering_method() != "gl_compatibility"
+		vp.msaa_3d = Viewport.MSAA_DISABLED if stylised else p["msaa"]
+		if RenderingServer.get_current_rendering_method() != "gl_compatibility":  # no FXAA there
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if stylised else Viewport.SCREEN_SPACE_AA_DISABLED
 	changed.emit()
 
 
@@ -70,6 +79,7 @@ func save() -> void:
 	cfg.set_value("gfx", "quality", quality)
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
+	cfg.set_value("gfx", "look", look)
 	cfg.set_value("input", "haptics", haptics)
 	cfg.set_value("input", "look_sensitivity", look_sensitivity)
 	cfg.set_value("input", "invert_y", invert_y)
