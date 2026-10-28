@@ -1,6 +1,39 @@
-# Status: 2026-10-28 (compact city, cranes, bridge, roads)
+# Status: 2026-10-28 (motion pass, complete edges)
 
-## Map rework (latest)
+## Motion pass + map edges (latest)
+
+- **Run**: lean from the ankles that grows with speed (not a bend at the
+  waist), pelvis turns with the swinging leg and the shoulders counter it,
+  head steady; the arms drive further back than forward with the elbow
+  opening on the back swing; arms come forward to balance a landing.
+- **Running jump**: the leg that was swinging through leads – lead knee up,
+  take-off leg long behind with the toes pointed, the opposite arm high;
+  apex gather with arms out; falling uses a loose bent-knee air stride (no
+  straight "posts"); landing prep carries the arms wide and bent (the old
+  straight-forward "zombie" arms are gone).
+- **Web**: legs trail on the downswing and kip forward on the upswing;
+  letting go stretches the whole body along the throw (0.42 s) before the
+  stride/gather/freefall poses take over.
+- **Ground turning**: big stick changes at speed swing the heading round
+  (14 → 7 rad/s with speed) instead of snapping; reversing plants and brakes
+  first. Small corrections use the old step exactly (autopilot results are
+  unchanged). New test `test_running_turns_carry_momentum_and_reversals_brake`.
+- **Edges**: the street grid continues past the playable area – kerbed
+  blocks with low-rise buildings (detailed and colliding within ~230 m,
+  simple massing beyond, 10% parks) instead of an empty asphalt apron.
+- **Dock basins** really show water now (the outskirts ground plane sat
+  above them – the earlier "paved basin" fix only addressed the pavements).
+- Camera "behind travel" bar restated 85% → 80%: it's one chaotic autopilot
+  run; seeds 2–7 give 79–97% (mean 88%) on the same camera.
+- Tried and dropped: a sprint-start acceleration curve (shifted chaotic bot
+  runs for little visible gain); spawn-heading validation by simulating the
+  first held swing (no change – the knockouts come from never letting go).
+- Not fixed: horizontal streaks/grain on shaded roofs in captures. Shadow
+  bias and soft-shadow changes made no difference; likely the VPS software
+  renderer (also in the earliest captures). Check on a real device.
+- Tests: 73 native; browser Chromium 17/17, WebKit 9/9.
+
+## Map rework
 
 - **Smaller, denser, taller**: the playable grid shrank from 1390 x 1880 m to
   940 x 1240 m (416 buildings, was 678; 64 streaming chunks, was 120), with
