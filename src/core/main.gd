@@ -145,6 +145,13 @@ func _ready() -> void:
 			"tuning": menus.show_tuning()
 			"pause": menus.show_pause()
 			"suits": menus.show_suits()
+			"main":
+				menus._splash_done = true
+				menus.show_title()
+			"stats": menus.show_stats()
+			"results": menus.show_results({"mode": "trial", "time": 71.4, "course": "Canyon Sprint", "par": 84.4,
+				"best": 71.4, "new_best": true, "medal": Progress.Medal.SILVER, "swings": 24, "chain": 17,
+				"top_speed": 41.0, "unlocks": ["Violet"]})
 	if args.has("nohud"):
 		ui.visible = false
 	if OS.has_feature("web"):
@@ -181,11 +188,14 @@ func to_title() -> void:
 	hud.visible = false
 	touch.visible = false
 	_attract(SwingBot.Style.EXPERT)
+	# Frame the hero in the right half: the menus sit on the left.
+	camera.cam.h_offset = -1.3
 	menus.show_title()
 
 
 func start_mode(kind: String, arg: String) -> void:
 	get_tree().paused = false
+	camera.cam.h_offset = 0.0
 	_end_mode()
 	_last_mode = [kind, arg]
 	player.bot = null
@@ -379,7 +389,8 @@ func _publish_web_state(dt: float) -> void:
 		"grounded": player.is_on_floor(),
 		"cam_yaw": camera.yaw, "player_y": player.global_position.y,
 		"target_ready": player.targeting.has_target, "armed": player._armed_touch != -1,
-		"rig": rig.debug_state(), "web": _web_aim_state(cam)}
+		"rig": rig.debug_state(), "web": _web_aim_state(cam),
+		"screen": menus.screen_name, "menu": menus.button_points()}
 	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
 
 

@@ -35,7 +35,15 @@ const at = (fx, fy) => [rect.x + fx * rect.w, rect.y + fy * rect.h];
 const shot = name => page.screenshot({ path: `${out}/${engine}_${name}.png` });
 check(rect.w >= 700 && rect.h >= 300 && rect.w > rect.h, `landscape canvas ${rect.w}x${rect.h}`);
 await shot("1_title");
-await page.touchscreen.tap(...at(0.5, 0.59));  // "Free Swing" (Training sits above it on a fresh save)
+// Splash: tap anywhere, then the main menu's Free Swing card (by its
+// published position – layout-independent).
+await page.touchscreen.tap(...at(0.5, 0.5));
+s = await waitFor(v => v?.screen === "title" && v?.menu?.free, 20000);
+check(s?.screen === "title", "tap to start opens the main menu");
+await page.waitForTimeout(600);  // cards slide in
+s = await state();
+await shot("1b_main_menu");
+await page.touchscreen.tap(...at(...s.menu.free));
 s = await waitFor(v => v?.state === "playing", 30000);
 check(s?.state === "playing", "Free Swing starts with an iPhone touch");
 await page.waitForTimeout(2500);
