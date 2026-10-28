@@ -408,35 +408,72 @@ func _build_outskirts() -> void:
 	var col_body := StaticBody3D.new()
 	col_body.name = "OutskirtsCol"
 	col_body.collision_layer = 1 | (1 << 1)
-	var x0 := CityLayout.MIN_X
-	var x1 := CityLayout.MAX_X
-	var z0 := CityLayout.MIN_Z
-	var z1 := CityLayout.MAX_Z
-	var styles := [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE]
-	var x := x0
-	while x < x1 + 900.0:
-		var z := z0 - 900.0
-		while z < z1 + 900.0:
-			var inside := x < x1 + 30.0 and z > z0 - 30.0 and z < z1 + 30.0
-			if not inside:
-				var w := rng.randf_range(22.0, 50.0)
-				var d := rng.randf_range(22.0, 50.0)
-				var far := maxf(maxf(x - x1, z0 - z), z - z1)
-				var h := rng.randf_range(10.0, 34.0) if rng.randf() > 0.12 else rng.randf_range(45.0, 95.0 - far * 0.05)
-				var st: int = styles[rng.randi() % styles.size()]
+	var styles := [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE,
+		CityLayout.Style.BRICK]
+	var near_m := BuildingMesher.new()  # detailed, close to the playable grid
+	var blocks_m := BuildingMesher.new()  # pavements, kerbs and lawns of the outer blocks
+	# The street grid carries on past the playable area: blocks with kerbs and
+	# pavements, filled with lower, older buildings that thin out with
+	# distance – so every edge reads as more city, not an empty apron.
+	var xr_in := _block_ranges(layout.x_streets)
+	var zr_in := _block_ranges(layout.z_streets)
+	var last_x: Array = layout.x_streets[-1]
+	var xr_out := _extend_ranges(last_x[0] + last_x[1] * 0.5, 1.0, 760.0, rng)
+	var first_z: Array = layout.z_streets[0]
+	var last_z: Array = layout.z_streets[-1]
+	var zr_out := _extend_ranges(first_z[0] - first_z[1] * 0.5, -1.0, 760.0, rng) \
+		+ _extend_ranges(last_z[0] + last_z[1] * 0.5, 1.0, 760.0, rng)
+	var grid := Rect2(CityLayout.MIN_X, CityLayout.MIN_Z, CityLayout.MAX_X - CityLayout.MIN_X, CityLayout.MAX_Z - CityLayout.MIN_Z)
+	for xr in xr_in + xr_out:
+		for zr in zr_in + zr_out:
+			if xr in xr_in and zr in zr_in:
+				continue  # the playable city
+			var blk := Rect2(xr[0], zr[0], xr[1] - xr[0], zr[1] - zr[0])
+			var c := blk.get_center()
+			var far := maxf(maxf(c.x - grid.end.x, grid.position.y - c.y), c.y - grid.end.y)
+			var near := far < 230.0
+			var brng := RandomNumberGenerator.new()
+			brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ layout.seed
+			var park := brng.randf() < 0.1
+			blocks_m.top(blk.position.x, blk.position.y, blk.end.x, blk.end.y, 0.15,
+				Color(0.32, 0.45, 0.24) if park else Color(0.58, 0.57, 0.55), BuildingMesher.KIND_ROOF, 0, 0)
+			blocks_m.walls(blk.position.x, blk.position.y, blk.end.x, blk.end.y, 0.0, 0.15, Color(0.7, 0.69, 0.66),
+				BuildingMesher.KIND_TRIM, 0, 0)
+			if park:
+				continue
+			var lots: Array = []
+			var inner := blk.grow(-3.5)
+			var fx := brng.randf_range(0.35, 0.65)
+			var fz := brng.randf_range(0.35, 0.65)
+			for i in 2:
+				for j in 2:
+					var lx0 := inner.position.x + (0.0 if i == 0 else inner.size.x * fx)
+					var lx1 := inner.position.x + (inner.size.x * fx if i == 0 else inner.size.x)
+					var lz0 := inner.position.y + (0.0 if j == 0 else inner.size.y * fz)
+					var lz1 := inner.position.y + (inner.size.y * fz if j == 0 else inner.size.y)
+					lots.append(Rect2(lx0, lz0, lx1 - lx0, lz1 - lz0).grow(-1.2))
+			if brng.randf() < 0.35:
+				lots = [inner.grow(-1.2)]  # one big building (warehouse, offices)
+			for r in lots:
+				if r.size.x < 8.0 or r.size.y < 8.0 or brng.randf() < 0.08:
+					continue
+				var tall := brng.randf() < maxf(0.18 - far * 0.0003, 0.03)
+				var h := brng.randf_range(42.0, 80.0) if tall else brng.randf_range(10.0, 30.0)
+				var st: int = styles[brng.randi() % styles.size()]
 				var cols: Array = CityLayout.STYLE_COLORS[st]
-				var b := {"tiers": [[x, z, x + w, z + d, 0.0, h]], "style": st, "color": cols[rng.randi() % cols.size()],
-					"kind": "normal", "seed": rng.randf()}
-				m.add_building(b, false)
-				if far < 260.0:
+				var bd := {"tiers": [[r.position.x, r.position.y, r.end.x, r.end.y, 0.0, h]], "style": st,
+					"color": (cols[brng.randi() % cols.size()] as Color).lightened(brng.randf_range(-0.05, 0.05)),
+					"kind": "normal", "seed": brng.randf()}
+				if near:
+					near_m.add_building(bd, true)
 					var shape := CollisionShape3D.new()
 					var box := BoxShape3D.new()
-					box.size = Vector3(w, h, d)
+					box.size = Vector3(r.size.x, h + 0.6, r.size.y)
 					shape.shape = box
-					shape.position = Vector3(x + w * 0.5, h * 0.5, z + d * 0.5)
+					shape.position = Vector3(r.get_center().x, (h + 0.6) * 0.5, r.get_center().y)
 					col_body.add_child(shape)
-			z += rng.randf_range(60.0, 90.0)
-		x += rng.randf_range(60.0, 90.0)
+				else:
+					m.add_building(bd, false)
 	# Far shore across the river (where the bridge lands): a quay road, then
 	# terraces and a few towers. Near the bridge they collide, so it's a place
 	# to land, not a painted backdrop.
@@ -477,8 +514,18 @@ func _build_outskirts() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	var g := BuildingMesher.new()
-	g.top(CityLayout.RIVER_EDGE, CityLayout.MIN_Z - 1000.0, CityLayout.MAX_X + 1000.0, CityLayout.MAX_Z + 1000.0, -0.02,
-		Color(0.22, 0.23, 0.24), BuildingMesher.KIND_ROOF, 0, 0)
+	# Under everything, minus the dock basins (their water sits below street level).
+	var rects: Array = [Rect2(CityLayout.RIVER_EDGE, CityLayout.MIN_Z - 1000.0,
+		CityLayout.MAX_X + 1000.0 - CityLayout.RIVER_EDGE, CityLayout.MAX_Z - CityLayout.MIN_Z + 2000.0)]
+	for w in layout.water:
+		if (w as Rect2).position.x < 0.0:
+			continue
+		var next: Array = []
+		for r in rects:
+			next.append_array(CityLayout._subtract(r, w))
+		rects = next
+	for r in rects:
+		g.top(r.position.x, r.position.y, r.end.x, r.end.y, -0.02, Color(0.22, 0.23, 0.24), BuildingMesher.KIND_ROOF, 0, 0)
 	var gmesh := ArrayMesh.new()
 	gmesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, g.arrays())
 	var gi := MeshInstance3D.new()
@@ -487,7 +534,41 @@ func _build_outskirts() -> void:
 	gi.material_override = ground_mat
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(gi)
+	var bi := MeshInstance3D.new()
+	bi.name = "OutskirtsBlocks"
+	bi.mesh = _mesh_from(blocks_m.arrays())
+	bi.material_override = ground_mat
+	bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(bi)
+	if not near_m.is_empty():
+		var ni := MeshInstance3D.new()
+		ni.name = "OutskirtsNear"
+		ni.mesh = _mesh_from(near_m.arrays())
+		ni.material_override = building_mat
+		add_child(ni)
 	add_child(col_body)
+
+
+## [start, end] of each block between consecutive streets ([centre, width] list).
+static func _block_ranges(streets: Array) -> Array:
+	var out: Array = []
+	for i in streets.size() - 1:
+		out.append([streets[i][0] + streets[i][1] * 0.5, streets[i + 1][0] - streets[i + 1][1] * 0.5])
+	return out
+
+
+## Blocks continuing outward from `edge` (a street's outer kerb) in direction
+## `sgn`, with 16 m streets between, out to `reach` metres.
+static func _extend_ranges(edge: float, sgn: float, reach: float, rng: RandomNumberGenerator) -> Array:
+	var out: Array = []
+	var d := 0.0
+	while d < reach:
+		var w := rng.randf_range(60.0, 92.0)
+		var a := edge + sgn * d
+		var b := edge + sgn * (d + w)
+		out.append([minf(a, b), maxf(a, b)])
+		d += w + 16.0
+	return out
 
 
 # ------------------------------------------------------------- streaming

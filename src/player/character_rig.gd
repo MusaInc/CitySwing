@@ -114,6 +114,10 @@ var _getup_t := 0.0
 var _air_t := 0.0
 var _was_grounded := true
 var _loco := 0.0           # 0..1 how much ground locomotion drives the limbs
+var _lead := "l"           # leg that was driving forward at take-off (it leads the jump)
+var _jump_t := 0.0         # time since leaving the ground on a jump (not a web)
+var _release_t := 0.0      # launch stretch after letting go of a web (s left)
+const RELEASE_TIME := 0.42
 ## Foot planting (see _plant_feet).
 const ANKLE_H := 0.05      # ankle pivot above the sole
 const LEG_LEN := 0.89      # thigh + shin
@@ -345,8 +349,12 @@ func _on_trick() -> void:
 	start_trick()
 
 
-func _on_released(_v: Vector3) -> void:
+func _on_released(v: Vector3) -> void:
 	_perfect_pending = true  # perfect_release (if any) arrives this tick
+	if v.y > -2.0 and v.length() > 8.0:
+		# Thrown out of the arc: stretch long, then the stride/gather follows.
+		_release_t = RELEASE_TIME
+		_jump_t = 0.0
 
 
 ## A perfect release earns a flourish when there is air to do it in.
@@ -558,14 +566,17 @@ func _update_animated(dt: float) -> void:
 	var wall_run := _wall_time > 0.0 and v.y > 1.5 and not on_rope
 	_wall_time = maxf(_wall_time - dt, 0.0)
 	_takeoff_t = maxf(_takeoff_t - dt, 0.0)
+	_release_t = maxf(_release_t - dt, 0.0)
 	_getup_t = maxf(_getup_t - dt, 0.0)
 	if grounded and not _was_grounded:
 		_air_t = 0.0
 	if not grounded and _was_grounded and v.y > 6.0 and not on_rope:
 		_takeoff_t = 0.3  # push-off: legs extend, arms drive up
+		_jump_t = 0.0
 	_was_grounded = grounded
 	if not grounded:
 		_air_t += dt
+		_jump_t += dt
 	var air := not grounded and not on_rope
 	_loco = move_toward(_loco, 1.0 if grounded and _getup_t <= 0.0 else 0.0, dt * 6.0)
 	for sd in ["l", "r"]:
@@ -592,7 +603,9 @@ func _update_animated(dt: float) -> void:
 	if grounded:
 		# Lean into acceleration (sprint start / braking) and into turns.
 		var fa := clampf(la_w.dot(_facing) * 0.006, -0.15, 0.16)
-		var run_lean := 0.1 * clampf(hs / 11.0, 0.0, 1.0)
+		# Runners lean from the ankles, more as they speed up (a straight line
+		# ankle–hip–shoulder, not a bend at the waist).
+		var run_lean := 0.05 + 0.13 * clampf((hs - 2.0) / 9.0, 0.0, 1.0) if hs > 1.0 else 0.0
 		var bank := clampf(-_yaw_rate * hs * 0.025, -0.35, 0.35)
 		up = (Vector3.UP + _facing * (fa + run_lean) + right_w * bank).normalized()
 	elif wall_run:
@@ -702,14 +715,36 @@ func _update_animated(dt: float) -> void:
 		_pose_rope(q, dt, body, la, twist, speed)
 	else:
 		_pose_air(q, v, speed, la, dive, twist)
+	if _release_t > 0.0 and air and _trick == "":
+		# Release: the whole body extends along the throw – arms reaching
+		# overhead, chest open, legs long and together, toes pointed – then
+		# lets the rising stride and the apex gather take over.
+		var r := smoothstep(0.0, 1.0, _release_t / RELEASE_TIME)
+		_put(q, {
+			"spine": _rx(-0.22), "chest": _rx(-0.16), "neck": _rx(-0.08), "head": _rx(-0.22),
+			"upper_arm_r": _rx(2.75) * _rz(0.22), "upper_arm_l": _rx(2.55) * _rz(-0.32),
+			"forearm_r": _rx(0.2), "forearm_l": _rx(0.35),
+			"thigh_l": _rx(-0.18) * _rz(-0.03), "thigh_r": _rx(-0.06) * _rz(0.03),
+			"shin_l": _rx(-0.2), "shin_r": _rx(-0.35), "foot_l": _rx(-0.65), "foot_r": _rx(-0.6),
+		}, r)
 	if _takeoff_t > 0.0 and air:
-		# Push-off: hips and knees extend through the jump, arms drive upward.
-		var k := _takeoff_t / 0.3
-		for sd in ["l", "r"]:
-			q["thigh_" + sd] = q["thigh_" + sd].slerp(_rx(-0.15 if sd == "l" else 0.25), k)
-			q["shin_" + sd] = q["shin_" + sd].slerp(_rx(-0.1), k)
-			q["foot_" + sd] = q["foot_" + sd].slerp(_rx(-0.5), k)
-			q["upper_arm_" + sd] = q["upper_arm_" + sd].slerp(_rx(1.3) * _rz(0.2 if sd == "r" else -0.2), k)
+		# Push-off: the lead knee drives up, the take-off leg extends behind
+		# with the toes pointed, the opposite arm punches up – a running
+		# jump, not a hop. Blends out over 0.3 s into the airborne poses.
+		var k := smoothstep(0.0, 1.0, _takeoff_t / 0.3)
+		var lead := _lead
+		var trail := "r" if lead == "l" else "l"
+		var sgn := {"l": -1.0, "r": 1.0}
+		_put(q, {
+			"spine": _rx(-0.06), "chest": _rx(-0.08), "head": _rx(-0.12),
+			"thigh_" + lead: _rx(1.3) * _rz(0.04 * sgn[lead]), "shin_" + lead: _rx(-1.35),
+			"foot_" + lead: _rx(0.1),
+			"thigh_" + trail: _rx(-0.42) * _rz(0.03 * sgn[trail]), "shin_" + trail: _rx(-0.3),
+			"foot_" + trail: _rx(-0.65),
+			# Opposite arm to the lead knee goes high, the other drives back.
+			"upper_arm_" + trail: _rx(2.1) * _rz(0.25 * sgn[trail]), "forearm_" + trail: _rx(0.75),
+			"upper_arm_" + lead: _rx(-0.55) * _rz(0.3 * sgn[lead]), "forearm_" + lead: _rx(0.95),
+		}, k)
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
@@ -753,10 +788,13 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	var lean := 0.16 * run + _land_squash * 0.45 - brake * 0.25
 	var ph := _run_phase
 	var sw := sin(ph)
-	q["spine"] = _rx(lean) * _ry(-sw * 0.12 * mv)
-	q["chest"] = _ry(-sw * 0.22 * mv) * _rx(0.06 * run)
-	q["neck"] = _ry(sw * 0.1 * mv)
-	q["head"] = _rx(-lean * 0.7 + 0.04)
+	# Pelvis turns with the swinging leg, shoulders counter it, the head
+	# stays steady and level (it counters the whole-body lean too).
+	q["hips"] = _ry(sw * 0.1 * mv)
+	q["spine"] = _rx(lean) * _ry(-sw * 0.1 * mv)
+	q["chest"] = _ry(-sw * 0.2 * mv) * _rx(0.06 * run)
+	q["neck"] = _ry(sw * 0.12 * mv)
+	q["head"] = _rx(-lean * 0.7 - 0.12 * run + 0.04)
 	var bob := 0.0
 	for i in 2:
 		var sd := "l" if i == 0 else "r"
@@ -778,6 +816,8 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 			var e := smoothstep(0.0, 1.0, w)
 			_toe[sd] = 0.0
 			_swing_w[sd] = w * mv
+			if w > 0.15 and w < 0.85:
+				_lead = sd  # the knee coming through leads if we jump now
 			var lift := sin(PI * w)
 			# Back → front, leaving and arriving at the stance sweep rate, so the
 			# foot is already moving back under the body when it touches down.
@@ -795,9 +835,16 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		# Arms swing against the legs from the shoulder; the elbow holds near
 		# 90° through the stride (closing a little on the forward swing), so
 		# the hands travel hip → chin rather than flailing up to the face.
-		var asw := -sw * (1.0 if i == 0 else -1.0) * (0.22 + 0.5 * run) * mv - 0.1 * run
-		q["upper_arm_" + sd] = _rx(asw) * _rz((0.14 + 0.06 * run) * (1.0 if sd == "r" else -1.0))
-		q["forearm_" + sd] = _rx(0.3 + 1.05 * run + 0.15 * mv + asw * 0.18)
+		# Driven from the shoulder, further back than forward at speed; the
+		# elbow opens a little on the back swing and closes coming through.
+		var asw := -sw * (1.0 if i == 0 else -1.0) * (0.25 + 0.62 * run) * mv - 0.18 * run
+		q["upper_arm_" + sd] = _rx(asw) * _rz((0.12 + 0.05 * run) * (1.0 if sd == "r" else -1.0))
+		q["forearm_" + sd] = _rx(0.3 + 1.0 * run + 0.15 * mv + asw * 0.35)
+		if _land_squash > 0.01:
+			# Landing: arms come forward to balance the folding hips.
+			var ls := clampf(_land_squash * 1.6, 0.0, 1.0)
+			q["upper_arm_" + sd] = q["upper_arm_" + sd].slerp(_rx(0.85) * _rz(0.4 * (1.0 if sd == "r" else -1.0)), ls)
+			q["forearm_" + sd] = q["forearm_" + sd].slerp(_rx(0.7), ls)
 	_standing = false
 	if mv < 0.3:
 		# Idle: slow breathing, weight shifting from leg to leg, a glance about.
@@ -873,6 +920,23 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	q["shin_r"] = _rx(-knee * 0.6)
 	q["foot_l"] = _rx(0.35 * L + 0.1)
 	q["foot_r"] = _rx(0.3 * L + 0.05)
+	if attached:
+		# The swing has a rhythm: on the way down the body opens and the legs
+		# trail, through the bottom they whip under, and on the way up the
+		# knees drive forward and up into the release (a gymnast's kip).
+		var vy := s.velocity.y
+		var down := clampf(-vy / 9.0, 0.0, 1.0) * clampf(L * 1.4, 0.0, 1.0)
+		var up := clampf(vy / 9.0, 0.0, 1.0) * clampf(L * 1.4, 0.0, 1.0)
+		_put(q, {
+			"thigh_l": _rx(-0.32) * _rz(-0.06), "thigh_r": _rx(-0.12) * _rz(0.05),
+			"shin_l": _rx(-0.45), "shin_r": _rx(-0.22), "foot_l": _rx(-0.45), "foot_r": _rx(-0.5),
+		}, down * 0.85)
+		_put(q, {
+			"thigh_l": _rx(1.05) * _rz(-0.08), "thigh_r": _rx(0.7) * _rz(0.06),
+			"shin_l": _rx(-1.05), "shin_r": _rx(-0.6), "foot_l": _rx(-0.2), "foot_r": _rx(-0.3),
+		}, up * 0.9)
+		q["spine"] = q["spine"] * _rx(-0.14 * down + 0.16 * up)
+		q["head"] = q["head"] * _rx(-0.1 * up)
 
 
 ## Two-bone IK in the parent's frame (chest for arms, hips for legs). `dir`
@@ -1025,33 +1089,42 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 	var near := clampf(1.0 - _ground_h / 7.0, 0.0, 1.0) * falling if _ground_h < INF else 0.0
 	var react := clampf(la.z * 0.015, -0.3, 0.3)
 	var drift := sin(_time * 2.1)  # a little life
-	# Apex / base.
-	var pose := {
-		"spine": _rx(0.06) * _ry(twist * 0.3), "chest": _rx(-0.04), "neck": _rx(0.0), "head": _rx(-0.05),
-		"upper_arm_l": _rz(-0.9 - drift * 0.05) * _ry(0.35) * _rx(0.6 + react),
-		"upper_arm_r": _rz(0.85 + drift * 0.05) * _ry(-0.35) * _rx(0.5 + react),
-		"forearm_l": _rx(1.05), "forearm_r": _rx(0.9),
-		"thigh_l": _rx(0.75) * _rz(-0.08), "thigh_r": _rx(0.35) * _rz(0.08),
-		"shin_l": _rx(-1.15), "shin_r": _rx(-0.85), "foot_l": _rx(-0.25), "foot_r": _rx(-0.3),
-	}
-	_put(q, pose, 1.0)
-	# Launch.
+	var cyc := sin(_time * 3.4)   # slow airborne leg cycle
+	var ld := _lead
+	var tr := "r" if ld == "l" else "l"
+	var sg := {"l": -1.0, "r": 1.0}
+	# Apex / base: knees gathered under, the lead one higher, arms out to the
+	# sides with soft elbows – a balanced athletic float.
 	_put(q, {
-		"spine": _rx(-0.12) * _ry(twist * 0.3), "chest": _rx(-0.1), "head": _rx(-0.2),
-		"upper_arm_l": _rz(-0.55) * _rx(-0.5), "upper_arm_r": _rz(0.5) * _rx(-0.6),
-		"forearm_l": _rx(0.75), "forearm_r": _rx(0.6),
-		"thigh_l": _rx(0.85) * _rz(-0.05), "thigh_r": _rx(-0.25) * _rz(0.05),
-		"shin_l": _rx(-1.0), "shin_r": _rx(-0.45), "foot_l": _rx(-0.35), "foot_r": _rx(-0.55),
-	}, rising)
-	# Falling: arms up and out, legs reaching down a little apart.
+		"spine": _rx(0.1) * _ry(twist * 0.3), "chest": _rx(0.0), "neck": _rx(0.0), "head": _rx(-0.08),
+		"upper_arm_" + ld: _rz(1.2 * sg[ld] + drift * 0.04) * _ry(-0.3 * sg[ld]) * _rx(0.15 + react),
+		"upper_arm_" + tr: _rz(1.1 * sg[tr] - drift * 0.04) * _ry(-0.3 * sg[tr]) * _rx(0.3 + react),
+		"forearm_" + ld: _rx(0.85), "forearm_" + tr: _rx(0.95),
+		"thigh_" + ld: _rx(1.05) * _rz(0.06 * sg[ld]), "thigh_" + tr: _rx(0.6) * _rz(0.08 * sg[tr]),
+		"shin_" + ld: _rx(-1.45), "shin_" + tr: _rx(-1.25), "foot_" + ld: _rx(-0.2), "foot_" + tr: _rx(-0.35),
+	}, 1.0)
+	# Rising: still in the stride of the take-off – lead knee up, trailing
+	# leg long behind with the toes pointed, chest up, arms carried high.
+	_put(q, {
+		"spine": _rx(-0.06) * _ry(twist * 0.3), "chest": _rx(-0.08), "head": _rx(-0.15),
+		"upper_arm_" + tr: _rx(2.45) * _rz(0.3 * sg[tr]), "forearm_" + tr: _rx(0.45),
+		"upper_arm_" + ld: _rx(-0.45) * _rz(0.45 * sg[ld]), "forearm_" + ld: _rx(0.85),
+		"thigh_" + ld: _rx(1.15) * _rz(0.04 * sg[ld]), "thigh_" + tr: _rx(-0.3) * _rz(0.04 * sg[tr]),
+		"shin_" + ld: _rx(-1.3), "shin_" + tr: _rx(-0.55), "foot_" + ld: _rx(-0.1), "foot_" + tr: _rx(-0.6),
+	}, rising * clampf(1.2 - _jump_t * 0.8, 0.0, 1.0) if _jump_t < 2.0 else rising * 0.4)
+	# Falling: legs open and reach down (one a little ahead), arms rise up
+	# and out for balance with the elbows bent – never a T-pose.
 	_put(q, {
 		"spine": _rx(0.04), "chest": _rx(0.0), "head": _rx(0.15),
-		# Elbows bent, hands rising forward-up (balance, not a T-pose).
-		"upper_arm_l": _rz(-1.3 - drift * 0.08) * _ry(0.6) * _rx(0.55),
-		"upper_arm_r": _rz(1.25 + drift * 0.08) * _ry(-0.6) * _rx(0.45),
-		"forearm_l": _rx(1.15), "forearm_r": _rx(1.0),
-		"thigh_l": _rx(0.3) * _rz(-0.14), "thigh_r": _rx(0.02) * _rz(0.14),
-		"shin_l": _rx(-0.55), "shin_r": _rx(-0.7), "foot_l": _rx(-0.2), "foot_r": _rx(-0.25),
+		"upper_arm_" + ld: _rz(1.35 * sg[ld] + drift * 0.08 * sg[ld]) * _ry(-0.55 * sg[ld]) * _rx(0.2),
+		"upper_arm_" + tr: _rz(1.3 * sg[tr] - drift * 0.08 * sg[tr]) * _ry(-0.55 * sg[tr]) * _rx(0.1),
+		"forearm_" + ld: _rx(1.1), "forearm_" + tr: _rx(1.0),
+		# Legs keep moving: a slow, loose cycle with bent knees (a runner's
+		# stride in the air), never two straight posts hanging down.
+		"thigh_" + ld: _rx(0.75 + cyc * 0.35) * _rz(0.1 * sg[ld]),
+		"thigh_" + tr: _rx(0.3 - cyc * 0.35) * _rz(0.12 * sg[tr]),
+		"shin_" + ld: _rx(-1.15 - maxf(cyc, 0.0) * 0.35), "shin_" + tr: _rx(-0.85 - maxf(-cyc, 0.0) * 0.35),
+		"foot_" + ld: _rx(-0.2), "foot_" + tr: _rx(-0.35),
 	}, falling * (1.0 - sky))
 	# Freefall arch.
 	_put(q, {
@@ -1063,13 +1136,14 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"thigh_l": _rx(-0.2) * _rz(-0.2), "thigh_r": _rx(-0.2) * _rz(0.2),
 		"shin_l": _rx(-1.05), "shin_r": _rx(-0.95), "foot_l": _rx(-0.5), "foot_r": _rx(-0.5),
 	}, sky)
-	# Landing prep.
+	# Landing prep: feet together under the hips and flat, knees soft and
+	# ready to take the load, arms out wide and bent, eyes on the spot.
 	_put(q, {
-		"spine": _rx(0.14), "chest": _rx(0.05), "head": _rx(0.2),
-		"upper_arm_l": _rz(-0.75) * _rx(0.75), "upper_arm_r": _rz(0.75) * _rx(0.7),
-		"forearm_l": _rx(0.6), "forearm_r": _rx(0.6),
-		"thigh_l": _rx(0.6) * _rz(-0.1), "thigh_r": _rx(0.4) * _rz(0.1),
-		"shin_l": _rx(-0.8), "shin_r": _rx(-0.6), "foot_l": _rx(0.1), "foot_r": _rx(0.05),
+		"spine": _rx(0.18), "chest": _rx(0.06), "head": _rx(0.25),
+		"upper_arm_l": _rz(-1.0) * _rx(0.3), "upper_arm_r": _rz(1.0) * _rx(0.25),
+		"forearm_l": _rx(1.0), "forearm_r": _rx(1.0),
+		"thigh_l": _rx(0.55) * _rz(-0.08), "thigh_r": _rx(0.45) * _rz(0.08),
+		"shin_l": _rx(-0.75), "shin_r": _rx(-0.65), "foot_l": _rx(0.2), "foot_r": _rx(0.2),
 	}, near)
 	# Dive: streamlined, arms together overhead, toes pointed.
 	_put(q, {
