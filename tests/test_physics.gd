@@ -321,3 +321,32 @@ func test_auto_tighten_keeps_the_arc_off_the_street(t) -> void:
 		lowest = minf(lowest, s.position.y)
 	t.note("lowest point %.1f m (clearance %.0f m)" % [lowest, p.swing_ground_clearance])
 	t.check(lowest > 2.0, "the line winches in before the body reaches the street")
+
+
+func test_running_turns_carry_momentum_and_reversals_brake(t) -> void:
+	# A sprinter can't snap 90° or reverse on the spot: the heading swings
+	# round over a few frames at full speed, and a reversal brakes first.
+	var p := _params()
+	var c := SwingPhysics.Controls.new()
+	var v := Vector3(0, 0, -p.run_speed)
+	c.move = Vector3.RIGHT
+	var turned_at := -1.0
+	for i in 60:
+		v = SwingPhysics._ground_move(v, c, p, DT)
+		if turned_at < 0.0 and Vector3(v.x, 0, v.z).normalized().dot(Vector3.RIGHT) > 0.97:
+			turned_at = (i + 1) * DT
+	var after_3 := Vector3(0, 0, -p.run_speed)
+	for i in 3:
+		after_3 = SwingPhysics._ground_move(after_3, c, p, DT)
+	t.note("90° turn at %.0f m/s: lined up after %.2f s, %.0f° after 3 frames" % [
+		p.run_speed, turned_at, rad_to_deg(Vector3.FORWARD.angle_to(Vector3(after_3.x, 0, after_3.z)))])
+	t.check(turned_at > 0.15 and turned_at < 0.4, "a 90° turn at sprint takes a moment, not a frame")
+	t.check(Vector3(v.x, 0, v.z).length() > p.run_speed * 0.95, "and keeps the speed")
+	v = Vector3(0, 0, -p.run_speed)
+	c.move = Vector3.BACK
+	for i in 6:
+		v = SwingPhysics._ground_move(v, c, p, DT)
+	t.check(v.z < -2.0, "reversing brakes first (still moving forward after 0.1 s: %.1f m/s)" % -v.z)
+	for i in 60:
+		v = SwingPhysics._ground_move(v, c, p, DT)
+	t.check(v.z > p.run_speed * 0.9, "then runs the other way")

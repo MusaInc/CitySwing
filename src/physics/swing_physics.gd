@@ -200,7 +200,24 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 		var dir := vh.normalized().slerp(m.normalized(), clampf(4.0 * h, 0.0, 1.0))
 		vh = dir * new_speed
 	elif m.length_squared() > 0.01:
-		vh = vh.move_toward(m * p.run_speed, p.run_accel * h)
+		var want := m.normalized()
+		var want_speed := p.run_speed * m.length()
+		if speed < 0.5:
+			vh = vh.move_toward(m * p.run_speed, p.run_accel * h)
+		elif (vh / speed).dot(want) < -0.25:
+			# Reversing: plant and brake first (the body leans back), then go.
+			vh = vh.move_toward(Vector3.ZERO, p.run_accel * 1.3 * h)
+		else:
+			# Turns keep momentum: the heading swings round at a rate that
+			# drops with speed, instead of the velocity cutting across.
+			var dir := vh / speed
+			var ang := dir.signed_angle_to(want, Vector3.UP)
+			var turn := lerpf(14.0, 7.0, clampf(speed / p.run_speed, 0.0, 1.0)) * h
+			if absf(ang) <= turn:
+				vh = vh.move_toward(m * p.run_speed, p.run_accel * h)
+			else:
+				dir = dir.rotated(Vector3.UP, signf(ang) * turn)
+				vh = dir * move_toward(speed, want_speed, p.run_accel * h)
 	else:
 		vh = vh.move_toward(Vector3.ZERO, (p.ground_friction + speed * 2.0) * h)
 	return Vector3(vh.x, minf(v.y, 0.0), vh.z)
