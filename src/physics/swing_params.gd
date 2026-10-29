@@ -68,6 +68,11 @@ extends Resource
 @export var swing_steer_accel: float = 4.5
 ## Extra fraction of swing_steer_accel when pushing along the current direction of travel.
 @export_range(0.0, 2.0) var swing_pump_bonus: float = 0.35
+## Human steering assist (the bots don't use it): how fast full sideways
+## stick turns the direction of travel, keeping speed – deg/s on a web / in
+## free flight.
+@export var swing_turn_rate: float = 55.0
+@export var air_turn_rate: float = 85.0
 ## Horizontal steering acceleration while free-flying, m/s².
 @export var air_steer_accel: float = 5.0
 ## Air steering can't push horizontal speed in the input direction above this.

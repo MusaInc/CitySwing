@@ -25,6 +25,7 @@ extends Node3D
 @export var follow_smooth := 0.12
 @export var aim_smooth := 0.08
 @export var yaw_follow_rate := 2.6        # 1/s, exponential approach to the travel heading
+@export var steer_follow_rate := 5.5      # 1/s, the same while the player steers in the air
 @export var max_yaw_speed := deg_to_rad(120.0)
 @export var reversal_hold := 1.0          # s a >110° heading change must persist before following
 @export var recenter_delay := 0.8
@@ -165,7 +166,12 @@ func _process(dt: float) -> void:
 		if absf(diff) <= deg_to_rad(110.0) or _reverse_time > reversal_hold:
 			_heading = wrapf(_heading + diff * (1.0 - exp(-4.0 * dt)), -PI, PI)
 	var ydiff := wrapf(_heading - yaw, -PI, PI)
-	var step := ydiff * (1.0 - exp(-yaw_follow_rate * dt))
+	# Steering a turn: keep up with it, so the view shows where you're going
+	# (at the assisted turn rate the normal follow trails ~30° behind).
+	var follow := yaw_follow_rate
+	if target.controls.turn_assist and not grounded and target.controls.move.length() > 0.3:
+		follow = steer_follow_rate
+	var step := ydiff * (1.0 - exp(-follow * dt))
 	yaw = wrapf(yaw + clampf(step, -max_yaw_speed * dt, max_yaw_speed * dt), -PI, PI)
 
 	# --- pitch: fixed, gently tilted down in dives --------------------------

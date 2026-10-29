@@ -31,6 +31,9 @@ class Controls:
 	var jump := false
 	## Game-layer gravity multiplier (apex hang time). Model tests leave it at 1.
 	var gravity_scale := 1.0
+	## Human steering: sideways stick also turns the velocity (air/swing_turn_rate).
+	## The autopilot and the model tests leave it off.
+	var turn_assist := false
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -171,6 +174,8 @@ static func _swing_steer(s: State, v: Vector3, c: Controls, p: SwingParams, h: f
 	if ml < 0.0001:
 		return v
 	var dir := m / ml
+	if c.turn_assist:
+		v = _turn(v, c.move, p.swing_turn_rate, h)
 	var accel := p.swing_steer_accel
 	if v.length_squared() > 0.01:
 		accel *= 1.0 + p.swing_pump_bonus * maxf(0.0, dir.dot(v.normalized()))
@@ -182,12 +187,35 @@ static func _air_steer(v: Vector3, c: Controls, p: SwingParams, h: float) -> Vec
 	var ml := m.length()
 	if ml < 0.0001:
 		return v
+	if c.turn_assist:
+		v = _turn(v, m, p.air_turn_rate, h)
 	var dir := m / ml
 	var along := Vector3(v.x, 0.0, v.z).dot(dir)
 	if along >= p.air_steer_speed_limit:
 		return v
 	var dv := minf(p.air_steer_accel * minf(ml, 1.0) * h, p.air_steer_speed_limit - along)
 	return v + dir * dv
+
+
+## Rotates the horizontal velocity toward the stick, keeping its speed: the
+## sideways part of the stick sets the rate (deg/s at full deflection), and
+## it never turns past the stick's direction. Pulling back doesn't turn.
+static func _turn(v: Vector3, move: Vector3, rate_deg: float, h: float) -> Vector3:
+	var vh := Vector3(v.x, 0.0, v.z)
+	var spd := vh.length()
+	var m := Vector3(move.x, 0.0, move.z)
+	if spd < 4.0 or m.length_squared() < 0.0001:
+		return v
+	var want := atan2(-m.x, -m.z)
+	var have := atan2(-vh.x, -vh.z)
+	var diff := wrapf(want - have, -PI, PI)
+	if absf(diff) > deg_to_rad(150.0):
+		return v  # stick held backward: that's braking, not a turn
+	var side := absf(sin(diff)) if absf(diff) < PI * 0.5 else 1.0
+	var step := deg_to_rad(rate_deg) * minf(m.length(), 1.0) * side * h
+	var ang := clampf(diff, -step, step)
+	vh = vh.rotated(Vector3.UP, ang)
+	return Vector3(vh.x, v.y, vh.z)
 
 
 static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:

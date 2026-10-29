@@ -350,3 +350,31 @@ func test_running_turns_carry_momentum_and_reversals_brake(t) -> void:
 	for i in 60:
 		v = SwingPhysics._ground_move(v, c, p, DT)
 	t.check(v.z > p.run_speed * 0.9, "then runs the other way")
+
+
+func test_human_steering_turns_a_corner_in_the_air(t) -> void:
+	# Full sideways stick at 25 m/s: the assist turns the travel (keeping
+	# speed) fast enough to take a street corner; without it (the bots) the
+	# raw model is unchanged and barely turns.
+	var p := _params()
+	var times := []
+	for assist in [true, false]:
+		var s := SwingPhysics.State.new()
+		s.position = Vector3(0, 500, 0)
+		s.velocity = Vector3(0, 0, -25)
+		var c := SwingPhysics.Controls.new()
+		c.turn_assist = assist
+		c.move = Vector3.LEFT
+		var at := -1.0
+		for i in 240:
+			SwingPhysics.step(s, c, p, DT)
+			# 75°: the stick is camera-relative in play, so the turn doesn't ease
+			# off like it does toward this fixed direction (tools/steer_test.gd).
+			if at < 0.0 and Vector3.FORWARD.angle_to(Vector3(s.velocity.x, 0, s.velocity.z)) > deg_to_rad(75.0):
+				at = (i + 1) * DT
+		times.append(at)
+		if assist:
+			t.check(Vector3(s.velocity.x, 0, s.velocity.z).length() > 22.0, "the assisted turn keeps its speed")
+	t.note("75° in the air at 25 m/s: assisted %.2f s, raw %s" % [times[0], "never" if times[1] < 0 else "%.2f s" % times[1]])
+	t.check(times[0] > 0.0 and times[0] < 1.6, "assisted: a corner in well under 2 s")
+	t.check(times[1] < 0.0 or times[1] > 3.0, "raw model (bots): unchanged, slow")
