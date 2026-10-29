@@ -507,6 +507,9 @@ func _selftest() -> void:
 # ------------------------------------------------------------- captures
 func _overview_camera() -> void:
 	var v := String(args["cam"]).split_floats(",")
+	if v.size() < 6:
+		push_warning("--cam=x,y,z,look_x,look_y,look_z")
+		return
 	camera.target = null
 	camera.global_position = Vector3(v[0], v[1], v[2])
 	camera.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)

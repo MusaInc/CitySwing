@@ -96,7 +96,7 @@ func set_target(p: Player) -> void:
 	# Perfect release: a quick widening punch that sells the burst of speed.
 	p.perfect_release.connect(func(_n): _fov_kick = minf(_fov_kick + 7.0, 10.0); _punch = 1.0)
 	p.landed.connect(func(spd: float, _street: bool): _bump_v -= clampf(spd * 0.09, 0.0, 2.6))
-	p.attached.connect(func(_a: Vector3): _tug_v += clampf(target.speed() * 0.04, 0.4, 1.6))
+	p.attached.connect(func(_a: Vector3): _tug_v += clampf(p.speed() * 0.04, 0.4, 1.6))
 
 
 ## A jolt (knockouts): decaying, low-frequency shake plus a FOV punch-in.

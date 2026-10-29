@@ -262,21 +262,24 @@ func _split(r: Rect2, out: Array, brng: RandomNumberGenerator, min_size: float, 
 
 
 func _height_for(dist: String, c: Vector2, brng: RandomNumberGenerator) -> float:
+	# Same random draws as before (the plan doesn't reshuffle); only the
+	# scale grew: a supertall core near 300 m, a real midtown skyline, and
+	# low districts that are mid-rise rather than terraces.
 	match dist:
 		"cbd":
 			var d := c.distance_to(CBD_CENTER)
-			var peak := 70.0 + 165.0 * exp(-pow(d / 250.0, 2.0))
+			var peak := 90.0 + 215.0 * exp(-pow(d / 260.0, 2.0))
 			if brng.randf() < 0.1:
-				return brng.randf_range(24.0, 40.0)  # technical low spots
+				return brng.randf_range(30.0, 50.0)  # technical low spots
 			return peak * brng.randf_range(0.72, 1.22)
 		"midtown":
-			return brng.randf_range(38.0, 95.0) if brng.randf() > 0.3 else brng.randf_range(105.0, 160.0)
+			return brng.randf_range(50.0, 125.0) if brng.randf() > 0.3 else brng.randf_range(135.0, 210.0)
 		"waterfront":
-			return brng.randf_range(34.0, 70.0)
+			return brng.randf_range(42.0, 88.0)
 		"docks":
-			return brng.randf_range(16.0, 26.0) if brng.randf() < 0.75 else brng.randf_range(45.0, 85.0)
+			return brng.randf_range(18.0, 30.0) if brng.randf() < 0.75 else brng.randf_range(60.0, 110.0)
 		_:
-			return brng.randf_range(14.0, 32.0) if brng.randf() < 0.85 else brng.randf_range(48.0, 72.0)
+			return brng.randf_range(18.0, 40.0) if brng.randf() < 0.85 else brng.randf_range(62.0, 95.0)
 
 
 func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void:
@@ -355,7 +358,7 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	if (style == Style.BRICK or style == Style.STONE or style == Style.SANDSTONE) and h < 80.0 and brng.randf() < 0.55:
 		props.append(["water_tower", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)),
 			Vector3(rx + brng.randf_range(-tw, tw) * 0.25, ry, rz + brng.randf_range(-td, td) * 0.25))])
-	if h > 175.0 and tw > 16.0 and td > 16.0:
+	if h > 235.0 and tw > 16.0 and td > 16.0:
 		# Supertall crown: a slim spire, the highest anchor in the city.
 		var sp := brng.randf_range(2.5, 3.5)
 		_add(_building([[rx - sp, rz - sp, rx + sp, rz + sp, ry, ry + brng.randf_range(28.0, 48.0)]], style,
@@ -445,7 +448,7 @@ func _construction() -> void:
 		var brng := RandomNumberGenerator.new()
 		brng.seed = hash(Vector2i(int(lot.position.x), int(lot.position.y))) ^ seed
 		var c := lot.get_center()
-		var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 30.0, 95.0)
+		var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 34.0, 120.0)
 		var f := lot.grow(-4.0)
 		var floors: Array = []
 		var y := 4.2

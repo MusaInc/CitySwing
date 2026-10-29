@@ -139,7 +139,7 @@ func rooftop_spawns() -> Array:
 			continue
 		var t: Array = b["tiers"][-1]
 		var h: float = t[5]
-		if h < 45.0 or h > 115.0 or t[2] - t[0] < 18.0 or t[3] - t[1] < 18.0:
+		if h < 50.0 or h > 150.0 or t[2] - t[0] < 18.0 or t[3] - t[1] < 18.0:
 			continue
 		var spot := _clear_spot(t, roof_props)
 		if spot.is_empty():

@@ -118,7 +118,8 @@ def build():
     gear = M("gear", (0.18, 0.2, 0.22), 0.4, 0.7)
     glow = M("gear_glow", (0.2, 0.95, 0.95), 0.3, 0.0, emit=(0.1, 0.9, 0.95))
     lens = M("lens", (0.2, 0.9, 0.95), 0.1, 0.0, emit=(0.05, 0.6, 0.7))
-    scarf = M("scarf", (0.95, 0.75, 0.2), 0.8)
+    emblem = M("emblem", (0.96, 0.74, 0.22), 0.5)
+    ink = M("ink", (0.07, 0.07, 0.09), 0.6)
 
     # ================================================================ body
     src = []  # painted source shapes; merged into one skin below
@@ -129,54 +130,75 @@ def build():
         ((0, 0, 0.99), 0.168, 0.108, -0.005), ((0, 0, 1.03), 0.158, 0.1)]), pants))
     for sx in (-1, 1):  # glutes
         src.append(K.paint(K.sphere("glute", 0.088, (sx * 0.068, -0.055, 0.91), None, 14, 10, (1.0, 0.85, 1.0)), pants))
-    # Torso (jacket): V-taper from a narrow waist to broad lats and chest.
+    # Torso (suit): athletic V – narrow waist, broad lats and chest, square
+    # shoulders carried out to the deltoids (no sloping "hoodie" shoulders).
     src.append(K.paint(tube("torso", [
-        ((0, 0, 0.97), 0.17, 0.118), ((0, 0, 1.02), 0.162, 0.115), ((0, 0, 1.09), 0.155, 0.112, 0.004),
-        ((0, 0, 1.17), 0.165, 0.118, 0.01), ((0, 0, 1.25), 0.18, 0.126, 0.016), ((0, 0, 1.33), 0.192, 0.132, 0.02),
-        ((0, 0, 1.40), 0.194, 0.128, 0.016), ((0, 0, 1.46), 0.178, 0.112, 0.004), ((0, 0, 1.51), 0.135, 0.09),
-        ((0, 0, 1.54), 0.08, 0.07)], segs=24), jacket))
-    for sx in (-1, 1):  # pecs and lats give the chest its shape under the jacket
-        src.append(K.paint(K.sphere("pec", 0.085, (sx * 0.075, 0.08, 1.36), None, 14, 10, (1.0, 0.6, 0.8)), jacket))
-        src.append(K.paint(K.sphere("lat", 0.09, (sx * 0.12, -0.03, 1.3), None, 14, 10, (0.6, 0.8, 1.3)), jacket))
-        # Trapezius slope from neck to shoulder.
-        src.append(K.paint(tube("trap", [((sx * 0.03, -0.01, 1.53), 0.04, 0.05), ((sx * 0.13, -0.01, 1.505), 0.045, 0.055),
-                                         ((sx * 0.2, 0.0, 1.49), 0.05, 0.055)], segs=14), jacket))
-        src.append(K.paint(K.sphere("deltoid", 0.06, J["upper_arm_" + ("l" if sx < 0 else "r")] + Vector((sx * 0.006, 0, -0.012)),
-                                    None, 14, 10, (0.95, 1.05, 1.05)), jacket))
-    # Hood bunched at the back of the neck.
-    src.append(K.paint(tube("hood", [((0, -0.055, 1.49), 0.1, 0.05), ((0, -0.075, 1.55), 0.11, 0.055),
-                                     ((0, -0.07, 1.6), 0.085, 0.045)], segs=18), jacket_dk))
+        ((0, 0, 0.97), 0.168, 0.118), ((0, 0, 1.02), 0.158, 0.113), ((0, 0, 1.09), 0.155, 0.112, 0.004),
+        ((0, 0, 1.17), 0.17, 0.12, 0.01), ((0, 0, 1.25), 0.19, 0.13, 0.017), ((0, 0, 1.33), 0.204, 0.137, 0.021),
+        ((0, 0, 1.40), 0.208, 0.134, 0.017), ((0, 0, 1.46), 0.2, 0.12, 0.006), ((0, 0, 1.505), 0.168, 0.1),
+        ((0, 0, 1.54), 0.1, 0.08)], segs=24), jacket))
+    for sx in (-1, 1):  # pecs and lats give the chest its shape under the suit
+        src.append(K.paint(K.sphere("pec", 0.095, (sx * 0.078, 0.08, 1.36), None, 14, 10, (1.0, 0.62, 0.8)), jacket))
+        src.append(K.paint(K.sphere("lat", 0.1, (sx * 0.125, -0.03, 1.3), None, 14, 10, (0.6, 0.8, 1.3)), jacket))
+        # Trapezius slope from neck to shoulder (fuller, so the neck sits in it).
+        src.append(K.paint(tube("trap", [((sx * 0.03, -0.012, 1.535), 0.05, 0.058), ((sx * 0.13, -0.01, 1.515), 0.055, 0.062),
+                                         ((sx * 0.2, 0.0, 1.5), 0.058, 0.06)], segs=14), jacket))
+        src.append(K.paint(K.sphere("deltoid", 0.078, J["upper_arm_" + ("l" if sx < 0 else "r")] + Vector((sx * 0.012, 0, 0.0)),
+                                    None, 14, 10, (0.95, 1.05, 1.0)), jacket))
+        # Dark side panels down the flanks and under the arms.
+        src.append(K.paint(tube("side_panel", [((sx * 0.16, -0.01, 0.99), 0.03, 0.05), ((sx * 0.168, -0.01, 1.17), 0.034, 0.06),
+                                               ((sx * 0.2, -0.01, 1.35), 0.034, 0.06), ((sx * 0.2, -0.01, 1.43), 0.03, 0.05)],
+                                    segs=10), jacket_dk))
+    # High suit collar: hides most of the neck, the head sits on the shoulders.
+    src.append(K.paint(tube("collar", [((0, 0.0, 1.5), 0.098, 0.094), ((0, 0.004, 1.55), 0.09, 0.086),
+                                       ((0, 0.008, 1.6), 0.083, 0.08), ((0, 0.01, 1.615), 0.08, 0.077)], segs=18), jacket_dk))
     # Neck.
-    src.append(K.paint(tube("neck", [((0, 0.0, 1.52), 0.066, 0.064), ((0, 0.008, 1.59), 0.058, 0.06),
-                                     ((0, 0.012, 1.65), 0.055, 0.058)], segs=16), skin))
-    # Zip line, hem band and harness straps (thin; they become colour on the skin).
-    src.append(K.paint(tube("zip", [((0, 0.118, 1.0), 0.01, 0.006), ((0, 0.14, 1.25), 0.01, 0.006),
-                                    ((0, 0.135, 1.44), 0.01, 0.006), ((0, 0.08, 1.53), 0.01, 0.006)], segs=6), tee))
-    src.append(K.paint(tube("hem", [((0, 0, 0.965), 0.173, 0.121), ((0, 0, 0.99), 0.172, 0.12)], segs=24, cap=False), jacket_dk))
+    src.append(K.paint(tube("neck", [((0, 0.0, 1.52), 0.074, 0.07), ((0, 0.008, 1.59), 0.064, 0.064),
+                                     ((0, 0.012, 1.65), 0.058, 0.06)], segs=16), skin))
+    # Chest emblem (gold disc with an ink swing-arc; it becomes colour on the skin).
+    emb = K.cyl("emblem", 0.048, 0.02, (0, 0, 0), emblem, 22)
+    emb.rotation_euler = (math.pi / 2 + 0.1, 0, 0)
+    emb.location = (0, 0.158, 1.37)
+    src.append(emb)
+    arc = K.box("emblem_arc", (0.075, 0.03, 0.013), (0, 0.162, 1.37), ink)
+    arc.rotation_euler = (0.1, 0.6, 0)
+    src.append(arc)
+    # Belt with a metal buckle.
+    src.append(K.paint(tube("belt", [((0, 0, 0.962), 0.176, 0.124), ((0, 0, 0.995), 0.176, 0.123)], segs=24, cap=False), strap))
+    src.append(K.box("buckle", (0.055, 0.02, 0.034), (0, 0.124, 0.978), metal, bevel=0.006))
 
     # Arms (jacket sleeves) in the A-pose.
     for side, sx in (("l", -1), ("r", 1)):
         a, e, w = J["upper_arm_" + side], J["forearm_" + side], J["hand_" + side]
         src.append(K.paint(tube("upper_arm", [
-            (along(a, e, -0.05), 0.058, 0.06), (along(a, e, 0.2), 0.058, 0.062), (along(a, e, 0.55), 0.052, 0.056),
-            (along(a, e, 0.85), 0.046, 0.048), (along(a, e, 1.0), 0.045, 0.046)], segs=16), jacket))
+            (along(a, e, -0.05), 0.066, 0.068), (along(a, e, 0.2), 0.066, 0.07), (along(a, e, 0.55), 0.06, 0.064),
+            (along(a, e, 0.85), 0.052, 0.054), (along(a, e, 1.0), 0.05, 0.051)], segs=16), jacket))
         src.append(K.paint(tube("sleeve_stripe", [(along(a, e, 0.05) + Vector((sx * 0.052, 0, 0)), 0.006, 0.014),
                                                   (along(a, e, 0.9) + Vector((sx * 0.044, 0, 0)), 0.006, 0.012)], segs=6), jacket_dk))
         src.append(K.paint(tube("forearm", [
-            (along(e, w, -0.04), 0.045, 0.046), (along(e, w, 0.2), 0.05, 0.048), (along(e, w, 0.6), 0.042, 0.04),
-            (along(e, w, 0.88), 0.037, 0.035), (along(e, w, 1.02), 0.036, 0.034)], segs=16), jacket))
-        src.append(K.paint(tube("cuff", [(along(e, w, 0.82), 0.041, 0.039), (along(e, w, 1.03), 0.04, 0.038)], segs=16), jacket_dk))
+            (along(e, w, -0.04), 0.05, 0.051), (along(e, w, 0.2), 0.056, 0.053), (along(e, w, 0.6), 0.047, 0.044),
+            (along(e, w, 0.88), 0.04, 0.038), (along(e, w, 1.02), 0.039, 0.037)], segs=16), jacket))
+        src.append(K.paint(tube("cuff", [(along(e, w, 0.8), 0.045, 0.043), (along(e, w, 1.03), 0.044, 0.041)], segs=16), glove))
+        # Elbow pad on the back of the elbow.
+        src.append(K.paint(K.sphere("elbow_pad", 0.042, e + Vector((0, -0.034, 0)), None, 12, 8, (1.0, 0.6, 1.15)), jacket_dk))
 
     # Legs (trousers) with real thigh/calf shape.
     for side, sx in (("l", -1), ("r", 1)):
         h, k, f = J["thigh_" + side], J["shin_" + side], J["foot_" + side]
         src.append(K.paint(tube("thigh", [
-            (along(h, k, -0.08), 0.098, 0.104), (along(h, k, 0.15), 0.1, 0.104, 0.006), (along(h, k, 0.45), 0.09, 0.093, 0.01),
-            (along(h, k, 0.8), 0.072, 0.074, 0.005), (along(h, k, 1.0), 0.064, 0.066)], segs=18), pants))
-        src.append(K.paint(K.sphere("knee", 0.062, k + Vector((0, 0.012, 0)), None, 14, 10), pants))
+            (along(h, k, -0.08), 0.104, 0.11), (along(h, k, 0.15), 0.108, 0.112, 0.008), (along(h, k, 0.45), 0.097, 0.1, 0.012),
+            (along(h, k, 0.8), 0.077, 0.079, 0.005), (along(h, k, 1.0), 0.067, 0.069)], segs=18), pants))
+        src.append(K.paint(K.sphere("knee", 0.065, k + Vector((0, 0.012, 0)), None, 14, 10), pants))
+        # Knee pad: armoured cap over the front of the knee.
+        src.append(K.paint(K.sphere("knee_pad", 0.058, k + Vector((0, 0.048, 0.01)), None, 14, 10, (1.0, 0.55, 1.2)), jacket_dk))
+        # Suit stripe down the outside of the leg.
+        src.append(K.paint(tube("leg_stripe", [(along(h, k, 0.0) + Vector((sx * 0.1, 0, 0)), 0.01, 0.018),
+                                               (along(h, k, 0.5) + Vector((sx * 0.092, 0, 0)), 0.01, 0.018),
+                                               (along(k, f, 0.0) + Vector((sx * 0.06, 0, 0)), 0.01, 0.016),
+                                               (along(k, f, 0.8) + Vector((sx * 0.052, 0, 0)), 0.01, 0.014)], segs=6), jacket))
         src.append(K.paint(tube("shin", [
-            (along(k, f, 0.0), 0.062, 0.064), (along(k, f, 0.25), 0.068, 0.074, -0.012), (along(k, f, 0.55), 0.058, 0.06, -0.006),
-            (along(k, f, 0.85), 0.054, 0.056), (along(k, f, 0.98), 0.058, 0.06)], segs=18), pants))
+            (along(k, f, 0.0), 0.065, 0.067), (along(k, f, 0.25), 0.073, 0.08, -0.014), (along(k, f, 0.55), 0.062, 0.064, -0.007),
+            (along(k, f, 0.85), 0.055, 0.057), (along(k, f, 0.98), 0.058, 0.06)], segs=18), pants))
         src.append(K.paint(tube("ankle_cuff", [(along(k, f, 0.84), 0.06, 0.062), (along(k, f, 0.99), 0.061, 0.063)], segs=16), pants_dk))
         src.append(K.paint(K.box("cargo", (0.03, 0.09, 0.11), along(h, k, 0.42) + Vector((sx * 0.085, 0, 0)), None, bevel=0.015), pants_dk))
 
@@ -195,6 +217,30 @@ def build():
     rm.use_smooth_shade = True
     bpy.context.view_layer.objects.active = body
     bpy.ops.object.modifier_apply(modifier="remesh")
+    # Thin painted details can leave tiny disconnected shells after the
+    # remesh; they'd float off the body once skinned, so drop them.
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    seen, drop = set(), []
+    for v in bm.verts:
+        if v in seen:
+            continue
+        comp, stack = [], [v]
+        seen.add(v)
+        while stack:
+            x = stack.pop()
+            comp.append(x)
+            for e in x.link_edges:
+                o = e.other_vert(x)
+                if o not in seen:
+                    seen.add(o)
+                    stack.append(o)
+        if len(comp) < 400:
+            drop += comp
+    bmesh.ops.delete(bm, geom=drop, context="VERTS")
+    bm.to_mesh(body.data)
+    bm.free()
+    print("BODY dropped shell verts", len(drop))
     sm = body.modifiers.new("smooth", "CORRECTIVE_SMOOTH")
     sm.iterations = 4
     sm.use_only_smooth = True
@@ -349,25 +395,25 @@ def build():
 
     for side, sx in (("l", -1), ("r", 1)):
         hand0 = Vector((0, 0, 0))
-        palm = K.smooth(K.paint(tube("palm", [(Vector((0, 0, 0.005)), 0.03, 0.02), (Vector((0, 0.002, -0.04)), 0.04, 0.018),
-                                              (Vector((0, 0.004, -0.078)), 0.042, 0.015)], segs=12), glove), 1)
+        palm = K.smooth(K.paint(tube("palm", [(Vector((0, 0, 0.005)), 0.034, 0.024), (Vector((0, 0.002, -0.04)), 0.045, 0.022),
+                                              (Vector((0, 0.004, -0.078)), 0.047, 0.018)], segs=12), glove), 1)
         open_ = [palm]
         for i in range(4):
-            x = (i - 1.5) * 0.019
-            open_ += finger(x, 0.078 - abs(i - 1.2) * 0.01, 0.22, 0.0088, glove, 0.004, (i - 1.5) * 0.025)
-        th = K.smooth(K.paint(tube("thumb_o", [(Vector((sx * -0.03, 0.012, -0.02)), 0.011, 0.01),
-                                             (Vector((sx * -0.048, 0.03, -0.055)), 0.01, 0.009),
-                                             (Vector((sx * -0.052, 0.04, -0.082)), 0.009, 0.008)], segs=8), glove), 1)
+            x = (i - 1.5) * 0.021
+            open_ += finger(x, 0.08 - abs(i - 1.2) * 0.01, 0.3, 0.0115, glove, 0.004, (i - 1.5) * 0.012)
+        th = K.smooth(K.paint(tube("thumb_o", [(Vector((sx * -0.034, 0.012, -0.02)), 0.014, 0.013),
+                                             (Vector((sx * -0.053, 0.03, -0.055)), 0.0125, 0.0115),
+                                             (Vector((sx * -0.057, 0.04, -0.082)), 0.011, 0.01)], segs=8), glove), 1)
         open_.append(th)
         part("hand_" + side, open_, hand0)
-        fist = [K.smooth(K.paint(tube("fistpalm", [(Vector((0, 0, 0.005)), 0.03, 0.02), (Vector((0, 0.004, -0.045)), 0.041, 0.022),
-                                                    (Vector((0, 0.01, -0.08)), 0.042, 0.024)], segs=12), glove), 1)]
+        fist = [K.smooth(K.paint(tube("fistpalm", [(Vector((0, 0, 0.005)), 0.034, 0.024), (Vector((0, 0.004, -0.045)), 0.046, 0.026),
+                                                    (Vector((0, 0.01, -0.08)), 0.047, 0.028)], segs=12), glove), 1)]
         for i in range(4):
-            x = (i - 1.5) * 0.019
-            fist += finger(x, 0.072, 1.25, 0.0098, glove, 0.01)
-        fist.append(K.smooth(K.paint(tube("thumb_g", [(Vector((sx * -0.03, 0.015, -0.025)), 0.011, 0.01),
-                                                       (Vector((sx * -0.02, 0.04, -0.06)), 0.01, 0.009),
-                                                       (Vector((sx * -0.005, 0.05, -0.075)), 0.009, 0.008)], segs=8), glove), 1))
+            x = (i - 1.5) * 0.0215
+            fist += finger(x, 0.074, 1.25, 0.012, glove, 0.01)
+        fist.append(K.smooth(K.paint(tube("thumb_g", [(Vector((sx * -0.034, 0.015, -0.025)), 0.014, 0.013),
+                                                       (Vector((sx * -0.023, 0.042, -0.06)), 0.0125, 0.0115),
+                                                       (Vector((sx * -0.006, 0.053, -0.075)), 0.011, 0.01)], segs=8), glove), 1))
         part("hand_%s_grip" % side, fist, hand0)
 
     # ---- sneakers (rest frame of the foot pivot at the ankle; toes +Y)
