@@ -1,6 +1,27 @@
-# Status: 2026-10-29 (brand, menus, cars, title-screen pilot)
+# Status: 2026-10-29 (steering, world detail, release polish, 8 courses)
 
-## Brand, front end, cars, showcase pilot (latest)
+## Steering, world, polish, courses (latest, 0.3.0)
+
+- **Steering** (user: "hard to steer"): human sideways stick turns the
+  travel direction at 85°/s in the air, 55°/s on a web, keeping speed –
+  a 90° corner in ~1.1 s instead of never (`tools/steer_test.gd`). Only
+  for human input (`Controls.turn_assist`); bots/courses use the raw model.
+- **Camera** (user: "camera"): yaw follows at 5.5/s while steering (was a
+  ~30° lag at the new turn rate).
+- **Buildings**: roof parapets, ledges every four floors on masonry, shop
+  awnings (detailed LOD; ~26k → 37k tris per detailed chunk).
+- **Release polish**: 60 fps default (old saves migrate), tuning panel /
+  performance overlay / saved tuning only in debug builds, menu-driven scene
+  changes and title shot changes fade through Night Ink.
+- **Courses**: 3 → 8 (Uptown Express, Spire Run, Switchback, Riverside,
+  Grand Tour). `make_courses.gd -- <ids>` records only those and merges.
+  The expert touches the street on the new ones, so pars (recorded × 1.1)
+  are generous.
+- `test_motion_quality` ledge_dive ankle limit failed once, then passed
+  twice: intermittent.
+- Tests: 86 native pass. Not yet checked on a device.
+
+## Brand, front end, cars, showcase pilot
 
 - **Brand system** (docs/BRAND.md): new app icon (hero mid-swing across a gold
   sun over a dusk skyline), roundel mark, stacked + horizontal wordmark,

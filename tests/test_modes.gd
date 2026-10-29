@@ -117,6 +117,26 @@ func test_course_beacon_flyable(t) -> void:
 	await _run_course(t, "beacon", 120.0)
 
 
+func test_course_uptown_flyable(t) -> void:
+	await _run_course(t, "uptown", 160.0)
+
+
+func test_course_spires_flyable(t) -> void:
+	await _run_course(t, "spires", 120.0)
+
+
+func test_course_switchback_flyable(t) -> void:
+	await _run_course(t, "switchback", 180.0)
+
+
+func test_course_riverside_flyable(t) -> void:
+	await _run_course(t, "riverside", 100.0)
+
+
+func test_course_grand_tour_flyable(t) -> void:
+	await _run_course(t, "grand_tour", 220.0)
+
+
 func test_endurance_ends_on_street(t) -> void:
 	var p := _player()
 	p.global_position = Vector3(400, 3, 0)

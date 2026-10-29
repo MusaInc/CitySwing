@@ -1,6 +1,7 @@
 extends SceneTree
 ## Records Time Trial courses from real physics (see CourseBuilder).
-##   godot --headless --fixed-fps 60 -s res://tools/make_courses.gd
+##   godot --headless --fixed-fps 60 -s res://tools/make_courses.gd [-- id id ...]
+## With ids, only those are (re)recorded and merged into the existing file.
 ## Writes config/courses.json. Re-run whenever physics or the city layout change
 ## (tests/test_modes.gd fails when the recorded courses stop being flyable).
 
@@ -12,8 +13,11 @@ func _initialize() -> void:
 
 
 func _go() -> void:
-	var out := {}
+	var only := OS.get_cmdline_user_args()
+	var out: Dictionary = CourseBuilder._load_all() if not only.is_empty() else {}
 	for id in CourseBuilder.COURSES:
+		if not only.is_empty() and not id in only:
+			continue
 		# A fresh world per course: replays (tests) build theirs the same way,
 		# and Jolt is only deterministic for identical world histories.
 		var world := CityWorld.new()

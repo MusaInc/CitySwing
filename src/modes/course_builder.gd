@@ -16,6 +16,11 @@ const COURSES := {
 	"canyon": {"name": "Canyon Sprint", "desc": "Straight down the main avenue. Find your rhythm."},
 	"waterfront": {"name": "Three Graces", "desc": "Cut across midtown and down to the clock towers by the river."},
 	"beacon": {"name": "Beacon Loop", "desc": "A lap of the plaza round the radio beacon. Tight corners."},
+	"uptown": {"name": "Uptown Express", "desc": "The long avenue north. Nothing but speed."},
+	"spires": {"name": "Spire Run", "desc": "Under the tallest towers in the city, then up through the district."},
+	"switchback": {"name": "Switchback", "desc": "Left, right, left. Tight midtown corners – steer hard."},
+	"riverside": {"name": "Riverside", "desc": "Down the river avenue, past the clock towers."},
+	"grand_tour": {"name": "Grand Tour", "desc": "A lap of the great avenues round the skyscraper district."},
 }
 
 
@@ -83,6 +88,39 @@ static func route(id: String, layout: CityLayout) -> Dictionary:
 			for c in corners:
 				wps.append(c)
 			wps.append(corners[0])
+		"uptown":
+			var x := _avenue_x(layout, 715.0)
+			for z in [520.0, 400.0, 280.0, 160.0, 40.0, -80.0, -200.0, -320.0, -440.0, -540.0]:
+				wps.append(Vector3(x, 0, z))
+		"spires":
+			var z := _avenue_z(layout, -226.0)
+			for x in [300.0, 400.0, 500.0, 600.0, 700.0, 812.0]:
+				wps.append(Vector3(x, 0, z))
+			var x1 := _street_x(layout, 812.0)
+			wps.append(Vector3(x1, 0, -130.0))
+			wps.append(Vector3(x1, 0, _avenue_z(layout, -51.0)))
+			wps.append(Vector3(_street_x(layout, 620.0), 0, _avenue_z(layout, -51.0)))
+		"switchback":
+			var a := _street_x(layout, 504.0)
+			var b := _street_x(layout, 620.0)
+			var zs := [369.0, 171.0, -51.0, -226.0, -424.0]
+			for i in zs.size():
+				var z := _avenue_z(layout, zs[i])
+				var xs := [a, b] if i % 2 == 0 else [b, a]
+				wps.append(Vector3(xs[0], 0, z))
+				wps.append(Vector3(xs[1], 0, z))
+		"riverside":
+			var x := _avenue_x(layout, 83.0)
+			for z in [-520.0, -400.0, -280.0, -160.0, -40.0, 80.0, 200.0, 300.0]:
+				wps.append(Vector3(x, 0, z))
+		"grand_tour":
+			var xe := _avenue_x(layout, 715.0)
+			var xw := _avenue_x(layout, 386.0)
+			var zs := _avenue_z(layout, 58.0)
+			var zn := _avenue_z(layout, -520.0)
+			for c in [Vector3(xe, 0, zs), Vector3(xe, 0, 0.5 * (zs + zn)), Vector3(xe, 0, zn), Vector3(xw, 0, zn),
+					Vector3(xw, 0, 0.5 * (zs + zn)), Vector3(xw, 0, zs), Vector3(xe, 0, zs)]:
+				wps.append(c)
 	var start := start_roof(layout, wps[0], wps[1])
 	return {"start": start, "waypoints": wps}
 
@@ -92,6 +130,16 @@ static func _avenue_x(layout: CityLayout, near: float) -> float:
 	var bd := INF
 	for s in layout.x_streets:
 		if s[1] > 20.0 and absf(s[0] - near) < bd:
+			bd = absf(s[0] - near)
+			best = s[0]
+	return best
+
+
+static func _street_x(layout: CityLayout, near: float) -> float:
+	var best := near
+	var bd := INF
+	for s in layout.x_streets:
+		if absf(s[0] - near) < bd:
 			bd = absf(s[0] - near)
 			best = s[0]
 	return best
