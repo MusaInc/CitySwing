@@ -67,6 +67,29 @@ jobs:
           printf '%s' "$P8" > "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
           chmod 600 "$HOME/private_keys/AuthKey_${KEY_ID}.p8"
 
+      - name: Check the App Store Connect app record
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.request, jwt
+          key = open(os.path.expanduser(f"~/private_keys/AuthKey_{os.environ['KEY_ID']}.p8")).read()
+          now = int(time.time())
+          token = jwt.encode({"iss": os.environ["ISSUER"], "iat": now, "exp": now + 600, "aud": "appstoreconnect-v1"},
+                             key, algorithm="ES256", headers={"kid": os.environ["KEY_ID"], "typ": "JWT"})
+          req = urllib.request.Request("https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.musastudios.cityswing",
+                                       headers={"Authorization": f"Bearer {token}"})
+          try:
+              apps = json.load(urllib.request.urlopen(req))["data"]
+          except urllib.error.HTTPError as e:
+              sys.exit(f"App Store Connect API refused the key: HTTP {e.code} {e.read().decode()[:300]}")
+          if not apps:
+              sys.exit("No App Store Connect app for com.musastudios.cityswing – create it: My Apps → + → New App.")
+          print("App record:", apps[0]["id"], apps[0]["attributes"]["name"])
+          PY
+
       - name: Archive (automatic signing via the API key)
         env:
           TEAM: ${{ secrets.APPLE_TEAM_ID }}
