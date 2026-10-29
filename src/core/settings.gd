@@ -23,7 +23,8 @@ const PRESETS := {
 }
 
 var quality: int = Quality.MEDIUM
-var fps_60 := false
+var fps_60 := true  # swinging needs it; Settings can drop to 30 for battery
+const VERSION := 2  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
@@ -51,6 +52,10 @@ func _ready() -> void:
 		music_volume = cfg.get_value("audio", "music", music_volume)
 		sfx_volume = cfg.get_value("audio", "sfx", sfx_volume)
 		tuning_overrides = cfg.get_value("tuning", "overrides", {})
+		if cfg.get_value("meta", "version", 1) < 2:
+			fps_60 = true  # 0.1.x saved the old 30 fps default
+		if not OS.is_debug_build():
+			tuning_overrides = {}  # the tuning panel is a developer tool
 	apply()
 
 
@@ -87,6 +92,7 @@ func save() -> void:
 	cfg.set_value("audio", "music", music_volume)
 	cfg.set_value("audio", "sfx", sfx_volume)
 	cfg.set_value("tuning", "overrides", tuning_overrides)
+	cfg.set_value("meta", "version", VERSION)
 	cfg.save(PATH)
 	apply()
 

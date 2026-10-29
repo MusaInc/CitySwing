@@ -353,7 +353,7 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_row("Quality", q))
 	var look := OptionButton.new()
 	var looks := ["comic", "toon", "painted", "clean"]
-	for n in ["Comic  ·  ink lines, halftone", "Toon  ·  soft cel shading", "Painted  ·  brushy (heavier)", "Clean  ·  no filter"]:
+	for n in ["Comic  ·  ink lines, flat colour", "Toon  ·  soft cel shading", "Painted  ·  brushy (heavier)", "Clean  ·  no filter"]:
 		look.add_item(n)
 	look.selected = maxi(looks.find(Settings.look), 0)
 	look.item_selected.connect(func(i):
@@ -363,7 +363,8 @@ func show_settings(back: Callable) -> void:
 	_reg("look", look)
 	box.add_child(_row("Look", look))
 	box.add_child(_row("60 FPS", _check(Settings.fps_60, func(v): Settings.fps_60 = v; Settings.save())))
-	box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))
+	if OS.is_debug_build():
+		box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))
 	box.add_child(_label("Draw-distance changes apply on next launch.", 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 	box.add_child(_section("Controls"))
 	var aim := OptionButton.new()
@@ -402,7 +403,8 @@ func show_pause(free_swing := false) -> void:
 		box.add_child(_reg("restart", _card("Restart", "From the start line", "restart", func(): restart.emit())))
 	var row := HBoxContainer.new()
 	row.add_child(_reg("settings", _icon_button("gear", "Settings", func(): show_settings(show_pause.bind(free_swing)))))
-	row.add_child(_reg("tuning", _icon_button("tune", "Tuning", show_tuning)))
+	if OS.is_debug_build():  # developer tool: not in TestFlight/App Store builds
+		row.add_child(_reg("tuning", _icon_button("tune", "Tuning", show_tuning)))
 	row.add_child(_reg("quit", _icon_button("home", "Title", func(): quit_to_title.emit())))
 	box.add_child(row)
 	b.grab_focus.call_deferred()

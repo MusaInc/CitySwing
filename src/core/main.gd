@@ -87,6 +87,16 @@ func _ready() -> void:
 
 	ui = CanvasLayer.new()
 	add_child(ui)
+	var top := CanvasLayer.new()
+	top.layer = 100
+	add_child(top)
+	_curtain = ColorRect.new()
+	_curtain.color = UiStyle.INK
+	_curtain.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_curtain.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_curtain.modulate.a = 0.0
+	_curtain.process_mode = Node.PROCESS_MODE_ALWAYS
+	top.add_child(_curtain)
 	hud = Hud.new()
 	ui.add_child(hud)
 	hud.player = player
@@ -113,10 +123,11 @@ func _ready() -> void:
 	menus = Menus.new()
 	ui.add_child(menus)
 	menus.params = player.params
-	menus.start_mode.connect(start_mode)
+	# Scene changes from the menus dip through Night Ink (no teleport cuts).
+	menus.start_mode.connect(func(k, a): _dip(start_mode.bind(k, a)))
 	menus.resume.connect(unpause)
-	menus.restart.connect(func(): start_mode(_last_mode[0], _last_mode[1]))
-	menus.quit_to_title.connect(to_title)
+	menus.restart.connect(func(): _dip(func(): start_mode(_last_mode[0], _last_mode[1])))
+	menus.quit_to_title.connect(func(): _dip(to_title))
 	menus.end_session.connect(func():
 		if mode is FreeSwingMode:
 			get_tree().paused = false
@@ -314,6 +325,28 @@ func _attract(style: int, showcase := false) -> void:
 	player.bot = bot
 
 
+var _curtain: ColorRect
+var _dipping := false
+
+
+## Fade to Night Ink, run `change` while the screen is covered, fade back.
+## Works while paused (pause → Title). Taps during the dip are ignored.
+func _dip(change: Callable, out_s := 0.16, in_s := 0.32) -> void:
+	if _dipping:
+		return
+	_dipping = true
+	_curtain.mouse_filter = Control.MOUSE_FILTER_STOP
+	var tw := _curtain.create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(_curtain, "modulate:a", 1.0, out_s)
+	tw.tween_callback(change)
+	tw.tween_interval(0.06)  # let the new view's first frames settle
+	tw.tween_property(_curtain, "modulate:a", 0.0, in_s).set_trans(Tween.TRANS_SINE)
+	tw.tween_callback(func():
+		_dipping = false
+		_curtain.mouse_filter = Control.MOUSE_FILTER_IGNORE)
+
+
 ## Straight into a swing down one of the tour's avenues (a camera cut).
 func _showcase_shot(pilot: ShowcasePilot) -> void:
 	var e := pilot.entry(_spawn_rng)
@@ -325,8 +358,8 @@ func _showcase_shot(pilot: ShowcasePilot) -> void:
 func _physics_process(dt: float) -> void:
 	if state == State.TITLE and player.bot is ShowcasePilot:
 		var pilot := player.bot as ShowcasePilot
-		if pilot.needs_cut(player, dt):
-			_showcase_shot(pilot)
+		if pilot.needs_cut(player, dt) and not _dipping:
+			_dip(_showcase_shot.bind(pilot), 0.12, 0.28)
 
 
 func _apply_settings() -> void:
@@ -480,6 +513,8 @@ func _overview_camera() -> void:
 	camera.cam.fov = float(args.get("fov", "60"))
 	camera.cam.far = 4000.0
 	player.input_enabled = false
+	if world.has_method("set_viewer"):
+		world.set_viewer(camera)  # stream detail around the lens, not the hero
 	if world.has_method("build_all_near"):
 		world.view_distance = 2000.0
 		world.build_all_near(Vector3(v[3], 0, v[5]), 1600.0)

@@ -18,6 +18,11 @@ const CRANE_YELLOW := Color(0.93, 0.68, 0.12)
 const STEEL := Color(0.22, 0.23, 0.25)
 const CONCRETE := Color(0.6, 0.59, 0.56)
 const BRIDGE_RED := Color(0.66, 0.17, 0.12)
+## Shop awnings at street level (brand-friendly, slightly muted).
+const AWNING_COLORS := [Color(0.72, 0.16, 0.14), Color(0.13, 0.36, 0.3), Color(0.15, 0.22, 0.42),
+	Color(0.85, 0.62, 0.18), Color(0.86, 0.82, 0.72), Color(0.42, 0.18, 0.36)]
+const LEDGE_EVERY := 14.4   # m: a stone ledge every four floors on masonry facades
+const PARAPET := 0.45      # m: roof-edge lip (low, so feet don't clip much)
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -225,11 +230,84 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 			walls(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
 			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim, KIND_TRIM, style, seed)
 			top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, KIND_ROOF, style, seed)
+			if b["kind"] != "bridge":
+				_parapet(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, trim)
+				if not glassy:
+					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed)
 			# Ground-floor plinth band on the base tier.
 			if i == 0 and y0 == 0.0 and not glassy and b["kind"] != "bridge":
 				walls(x0 - 0.15, z0 - 0.15, x1 + 0.15, z1 + 0.15, 0.0, 0.9, col.darkened(0.3), KIND_TRIM, style, seed)
+				if int(style) in [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.SANDSTONE,
+						CityLayout.Style.DECO]:
+					_awnings(x0, z0, x1, z1, seed)
 		else:
 			top(x0, z0, x1, z1, y1, roof, KIND_ROOF, style, seed)
+
+
+## Low lip round a roof edge: outer and inner faces plus a top ring.
+func _parapet(x0: float, z0: float, x1: float, z1: float, y: float, col: Color) -> void:
+	var t := 0.3
+	var y1 := y + PARAPET
+	walls(x0, z0, x1, z1, y, y1, col, KIND_TRIM, 0, 0)
+	_inner_walls(Rect2(x0 + t, z0 + t, x1 - x0 - t * 2.0, z1 - z0 - t * 2.0), y, y1, col.darkened(0.15), KIND_TRIM)
+	top(x0, z0, x1, z0 + t, y1, col, KIND_TRIM, 0, 0)
+	top(x0, z1 - t, x1, z1, y1, col, KIND_TRIM, 0, 0)
+	top(x0, z0 + t, x0 + t, z1 - t, y1, col, KIND_TRIM, 0, 0)
+	top(x1 - t, z0 + t, x1, z1 - t, y1, col, KIND_TRIM, 0, 0)
+
+
+## Projecting stone courses every few floors (relief the shader can't fake).
+func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color, style: float,
+		seed: float) -> void:
+	var y := (floorf(y0 / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
+	while y < y1 - 4.0:
+		var o := 0.28
+		walls(x0 - o, z0 - o, x1 + o, z1 + o, y, y + 0.32, col, KIND_TRIM, style, seed)
+		bottom(x0 - o, z0 - o, x1 + o, z1 + o, y, col.darkened(0.25), KIND_TRIM, style, seed)
+		top(x0 - o, z0 - o, x1 + o, z1 + o, y + 0.32, col.lightened(0.1), KIND_TRIM, style, seed)
+		y += LEDGE_EVERY
+
+
+## Shop awnings along the ground floor: canopy + front valance, in runs
+## with gaps, colours per shop. Visual only (no collision).
+func _awnings(x0: float, z0: float, x1: float, z1: float, seed: float) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(seed * 1000003.0) ^ 0xa3
+	var out := 1.3
+	var y := 3.25
+	for side in 4:
+		var along_x := side % 2 == 0
+		var a := x0 if along_x else z0
+		var b := x1 if along_x else z1
+		var d := a + 1.5
+		while d + 4.0 < b - 1.5:
+			var w := rng.randf_range(3.5, 6.0)
+			if rng.randf() < 0.55 and d + w < b - 1.5:
+				var col: Color = AWNING_COLORS[rng.randi() % AWNING_COLORS.size()]
+				var e := d + w
+				var drop := col.darkened(0.15)
+				match side:
+					0: _awning(Vector3(d, y, z0), Vector3(e, y, z0), Vector3.FORWARD * out, col, drop)
+					1: _awning(Vector3(x1, y, d), Vector3(x1, y, e), Vector3.RIGHT * out, col, drop)
+					2: _awning(Vector3(e, y, z1), Vector3(d, y, z1), Vector3.BACK * out, col, drop)
+					3: _awning(Vector3(x0, y, e), Vector3(x0, y, d), Vector3.LEFT * out, col, drop)
+			d += w + rng.randf_range(0.6, 2.5)
+
+
+## One awning from wall points a→b (a on the left looking out), sticking out
+## by `out`: canopy top and underside, a front valance. 6 triangles.
+func _awning(a: Vector3, b: Vector3, out: Vector3, col: Color, drop: Color) -> void:
+	var n := out.normalized()
+	var up := Vector3.UP * 0.18
+	var fa := a + out
+	var fb := b + out
+	# (Clockwise from the visible side, like top(): a → fa → fb → b from above.)
+	quad(a + up, fa + up, fb + up, b + up, Vector3.UP, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
+		col, KIND_TRIM, 0, 0)
+	quad(a, b, fb, fa, Vector3.DOWN, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
+		col.darkened(0.3), KIND_TRIM, 0, 0)
+	quad(fa + up, fa + Vector3.DOWN * 0.38, fb + Vector3.DOWN * 0.38, fb + up, n, Vector2.ZERO, Vector2.ZERO,
+		Vector2.ZERO, Vector2.ZERO, drop, KIND_TRIM, 0, 0)
 
 
 static func tiers_top(b: Dictionary) -> float:
@@ -528,7 +606,7 @@ func _mark_across(axis: int, c: float, length: float, at: float, width: float, c
 		top(at - width * 0.5, c - length * 0.5, at + width * 0.5, c + length * 0.5, y, col, KIND_TRIM, 0, 0)
 
 
-func _inner_walls(r: Rect2, y0: float, y1: float, col: Color) -> void:
+func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL) -> void:
 	# Walls facing inward (towards the basin centre).
 	var x0 := r.position.x
 	var z0 := r.position.y
@@ -541,4 +619,4 @@ func _inner_walls(r: Rect2, y0: float, y1: float, col: Color) -> void:
 		var b: Vector2 = corners[(k + 1) % 4]
 		var w := a.distance_to(b)
 		quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
-			Vector2(0, y1), Vector2(w, y1), Vector2(w, y0), Vector2(0, y0), col, KIND_WALL, 3, 0.5)
+			Vector2(0, y1), Vector2(w, y1), Vector2(w, y0), Vector2(0, y0), col, kind, 3, 0.5)
