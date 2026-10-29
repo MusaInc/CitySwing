@@ -32,7 +32,10 @@ const rect = await page.evaluate(() => {
   return { x: b.x, y: b.y, w: b.width, h: b.height };
 });
 const at = (fx, fy) => [rect.x + fx * rect.w, rect.y + fy * rect.h];
-const shot = name => page.screenshot({ path: `${out}/${engine}_${name}.png` });
+// Screenshots are evidence, not checks: software-rendered Chromium can take
+// longer than Playwright's 30 s default to produce one frame.
+const shot = name => page.screenshot({ path: `${out}/${engine}_${name}.png`, timeout: 120000 })
+  .catch(e => logs.push(`[shot] ${name}: ${e.message.split("\n")[0]}`));
 check(rect.w >= 700 && rect.h >= 300 && rect.w > rect.h, `landscape canvas ${rect.w}x${rect.h}`);
 await shot("1_title");
 // Splash: tap anywhere, then the main menu's Free Swing card (by its

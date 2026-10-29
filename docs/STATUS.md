@@ -1,6 +1,37 @@
-# Status: 2026-10-29 (steering, world detail, release polish, 8 courses)
+# Status: 2026-10-29 (taller city, hero suit, bug pass)
 
-## Steering, world, polish, courses (latest, 0.3.0)
+## Taller city, hero suit, bug pass (latest)
+
+- **Bigger buildings**: the skyline is scaled up using the same random
+  draws, so the plan didn't reshuffle: tallest 252 → 326 m, towers over
+  100 m 62 → 83, midtown 50–210 m, low districts mid-rise (18–40 m with
+  62–95 m outliers). Spires only above 235 m; construction frames up to
+  120 m. Rooftop spawns take 50–150 m roofs (was 45–115). Tris per detailed
+  chunk unchanged (~36k). Courses re-recorded.
+- **Character**: hero suit instead of a hoodie – square shoulders and
+  bigger deltoids/traps, fuller arms and legs, high collar (shorter bare
+  neck), gold sun emblem on the chest (brand mark), belt + buckle, dark
+  side panels, suit-coloured knee/elbow pads and leg stripes (they follow
+  the chosen suit colour), chunkier gloves. Same skeleton and joints, so
+  animation, IK and the motion audit are unchanged. Tiny shells left by
+  the voxel remesh are now removed (one floated beside the right hand).
+- **Bugs fixed**: camera attach tug read the camera's target (null in
+  `--cam` overview → script error every web); `--cam` without six numbers
+  crashed; main-menu Endurance card overflowed its edge at iPhone width;
+  Quality names said "30 fps" next to an "on" 60 FPS toggle; toggles drew
+  as blank gold bars (now On/Off with the switch); browser test died on
+  slow Chromium screenshots (screenshots are now evidence, not checks).
+- **Camera test** averages four starts (seeds 2–5: 69/86/89/82%, mean 82%)
+  instead of one chaotic run; allows one cut-in per 30 s run – the taller
+  city has 2–7 m gaps between towers where the lens can only cut in.
+  Mean behind-travel is lower than on the old map (~91%) because the bot
+  spends more time in tall canyons; not yet tuned.
+- Swept every mode headless (title, free/novice/expert, training, trial,
+  endurance, benchmark, menus) for 60 s each: no script errors.
+- Tests: 86 native pass; browser WebKit 10/10, Chromium 18/18 (local
+  build). Not yet checked on a device.
+
+## Steering, world, polish, courses (0.3.0)
 
 - **Steering** (user: "hard to steer"): human sideways stick turns the
   travel direction at 85°/s in the air, 55°/s on a web, keeping speed –

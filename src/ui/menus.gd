@@ -194,8 +194,8 @@ func _show_main() -> void:
 		show_courses, "%d/%d" % [mc[0], CourseBuilder.COURSES.size()], false, "medal")
 	_reg("trial", trial)
 	var best_e: float = SaveData.data["best_endurance_m"]
-	var endu := _card("Endurance", "Don't touch the street", "endurance",
-		func(): start_mode.emit("endurance", ""), ("best %d m" % int(best_e)) if best_e > 0.0 else "")
+	var endu := _card("Endurance", "Stay airborne", "endurance",
+		func(): start_mode.emit("endurance", ""), ("%d m" % int(best_e)) if best_e > 0.0 else "")
 	_reg("endurance", endu)
 	var train := _card("Training", "Learn to swing  ·  start here" if not trained else "Swing, release, steer, wall-kick",
 		"training", func(): start_mode.emit("training", ""), "NEW" if not trained else "", false,
@@ -343,7 +343,7 @@ func show_settings(back: Callable) -> void:
 	var box := _page("settings", "SETTINGS", back, 700)
 	box.add_child(_section("Graphics"))
 	var q := OptionButton.new()
-	for n in ["Low  ·  30 fps, 70% scale", "Medium  ·  30 fps", "High  ·  60 fps"]:
+	for n in ["Low  ·  lighter, 70% scale", "Medium  ·  balanced", "High  ·  sharpest, always 60 fps"]:
 		q.add_item(n)
 	q.selected = Settings.quality
 	q.item_selected.connect(func(i):
@@ -811,8 +811,14 @@ func _check(value: bool, cb: Callable) -> CheckButton:
 	var c := CheckButton.new()
 	c.button_pressed = value
 	c.custom_minimum_size = Vector2(0, 56)
+	# On/off reads from the switch and its label, not a gold-filled bar
+	# (the shared "pressed" style is for buttons being held).
+	c.text = "On" if value else "Off"
+	for st in ["pressed", "hover_pressed"]:
+		c.add_theme_stylebox_override(st, _theme.get_stylebox("normal" if st == "pressed" else "hover", "Button"))
 	c.toggled.connect(func(v):
 		_tap()
+		c.text = "On" if v else "Off"
 		cb.call(v))
 	return c
 
