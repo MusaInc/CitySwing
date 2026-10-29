@@ -129,6 +129,11 @@ void fragment() {
 			float band = step(fract(uv.y / 3.6), 0.09);
 			tex *= 1.0 - 0.12 * band;
 		}
+		// Weathering: faint rain streaks under each window column on masonry.
+		if (style != 2.0 && style != 6.0 && v_kind != KIND_GLASS) {
+			float col_n = hash12(vec2(floor(uv.x / 1.5), seed * 29.0));
+			tex *= 1.0 - 0.07 * col_n * detail * smoothstep(0.0, 1.0, fract(uv.y / 14.4));
+		}
 		vec3 wall = base * tex;
 
 		// Glass: sky reflection by view-reflected normal + interior + rare lit rooms.
@@ -152,8 +157,12 @@ void fragment() {
 			refl *= mix(vec3(1.0), clamp(tint * 2.6, 0.0, 1.3), 0.55);
 		}
 		vec3 interior = tint * (0.6 + 0.6 * rnd);
+		// Blinds half-drawn in some windows (offices and flats, not shops).
+		float blind_h = step(0.72, hash12(cell * 2.7 + seed * 17.0)) * (shop ? 0.0 : 1.0);
+		float in_blind = blind_h * step(1.0 - hash12(cell + 5.1) * 0.6, fract(uv.y / (style == 1.0 ? 3.0 : 3.6)) + 0.3);
 		float lit = step(1.0 - lit_fraction, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
 		vec3 gcol = mix(interior, refl, 0.25 + 0.6 * fres);
+		gcol = mix(gcol, vec3(0.86, 0.82, 0.74) * (0.75 + 0.25 * rnd), in_blind * 0.75 * detail);
 		gcol += interior_warm * lit * lit_strength * 0.35;
 		emit = interior_warm * lit * lit_strength * glass * 0.5;
 		// Window reveal: slightly darker frame around each opening.
@@ -162,9 +171,31 @@ void fragment() {
 		rough = mix(0.88, 0.08, glass);
 		metal = mix(0.0, 0.2, glass);
 		if (shop) {
+			// Shopfront: stall riser, central door, mullions, lit interior and
+			// a signage fascia coloured per shop.
+			float bay_x = fract(uv.x / 6.0) * 6.0;
+			float sid = hash12(vec2(floor(uv.x / 6.0), seed * 41.0));
+			vec3 sign_col = sid < 0.2 ? vec3(0.62, 0.14, 0.12) : (sid < 0.4 ? vec3(0.12, 0.3, 0.26)
+				: (sid < 0.6 ? vec3(0.13, 0.18, 0.34) : (sid < 0.75 ? vec3(0.8, 0.6, 0.2) : base * 0.42)));
+			float riser = step(uv.y, 0.6) * glass;
+			float door = step(abs(bay_x - 3.0), 0.55) * step(uv.y, 2.5) * step(0.25, uv.y);
+			float mull = step(abs(abs(bay_x - 3.0) - 1.75), 0.05) * step(uv.y, 3.6);
+			float transom = step(abs(uv.y - 2.65), 0.05);
+			vec3 shop_in = mix(vec3(0.1, 0.09, 0.08), interior_warm * 0.55, 0.35 + 0.4 * sid);
+			albedo = mix(albedo, mix(shop_in, refl, 0.22 + 0.5 * fres), glass * (1.0 - riser));
+			albedo = mix(albedo, base * 0.5, max(riser, max(mull, transom) * glass) * detail);
+			albedo = mix(albedo, vec3(0.08, 0.07, 0.07), door * 0.85 * detail);
+			emit += interior_warm * glass * (1.0 - door) * (1.0 - riser) * 0.12 * (0.5 + sid) * detail;
 			float fascia = step(3.7, uv.y) * step(uv.y, 4.5);
-			albedo = mix(albedo, base * 0.45, fascia);
+			albedo = mix(albedo, sign_col, fascia);
+			// Lettering blocks on the fascia.
+			float letters = step(0.35, hash12(vec2(floor(uv.x / 0.45), sid * 77.0))) * step(abs(bay_x - 3.0), 1.9)
+				* step(abs(uv.y - 4.1), 0.16);
+			albedo = mix(albedo, vec3(0.95, 0.92, 0.84), letters * fascia * detail * step(0.25, sid));
 		}
+		// Contact shading: walls darken toward the street (light blocked by
+		// the canyon), so buildings sit on the ground instead of floating.
+		albedo *= mix(0.7, 1.0, smoothstep(0.0, 10.0, uv.y));
 	}
 	ALBEDO = albedo;
 	ROUGHNESS = rough;

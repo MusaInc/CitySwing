@@ -312,8 +312,59 @@ def knockout():
     write("knockout.wav", norm(slam + crunch + ring, 0.95))
 
 
+def footsteps():
+    """Three surfaces x 3 variations each: a short heel/toe tap. Concrete is
+    a dry click + low knock, gravel (roofs) a crunchy noise burst, grass a soft
+    brushed thud. Variations differ in pitch and noise seed."""
+    for surf in ("concrete", "gravel", "grass"):
+        for i in range(3):
+            d = 0.16
+            n = int(d * SR)
+            pitch = 1.0 + (i - 1) * 0.08
+            knock = np.sin(2 * np.pi * 110 * pitch * t(d)) * env(n, 0.001, 0.05)
+            if surf == "concrete":
+                x = knock * 0.8 + bandpass(noise(d), 1800 * pitch, 6000) * env(n, 0.0005, 0.025) * 0.7
+            elif surf == "gravel":
+                grit = bandpass(noise(d), 1200, 7000) * env(n, 0.002, 0.09)
+                grit *= 0.6 + 0.4 * (rng.random(n) > 0.7)
+                x = knock * 0.5 + grit * 0.9
+            else:
+                x = knock * 0.6 + lp_fast(noise(d), 1400 * pitch) * env(n, 0.004, 0.07) * 0.8
+            write(f"step_{surf}_{i}.wav", norm(x, 0.55))
+
+
+def bump():
+    # Body against a wall: a short padded thump, not the knockout slam.
+    d = 0.3
+    n = int(d * SR)
+    f = np.linspace(120, 70, n)
+    x = np.sin(2 * np.pi * np.cumsum(f) / SR) * env(n, 0.001, 0.12) + lp_fast(noise(d), 700) * env(n, 0.001, 0.06) * 0.6
+    write("bump.wav", norm(x, 0.7))
+
+
+def horn():
+    # A distant car horn: two detuned square-ish tones, band-limited, short.
+    d = 0.55
+    n = int(d * SR)
+    tone = np.sign(np.sin(2 * np.pi * 415 * t(d))) + np.sign(np.sin(2 * np.pi * 520 * t(d)))
+    x = lp_fast(tone, 1800) * env(n, 0.02, 0.5, 0.6, 2.0)
+    write("horn.wav", norm(x, 0.5))
+
+
+def traffic_loop():
+    # Distant traffic: low rumble with slow swells as cars pass, tyre hiss.
+    d = 12.0
+    n = int(d * SR)
+    rumble = lp_fast(noise(d), 160) * 1.4
+    swell = 0.6 + 0.4 * np.sin(2 * np.pi * t(d) / 3.0) * np.sin(2 * np.pi * t(d) / 4.0)
+    hiss = bandpass(noise(d), 600, 2400) * 0.25
+    x = (rumble + hiss) * swell
+    write("traffic_loop.wav", norm(loopify(x, 1.0), 0.6))
+
+
 ALL = (wind_loop, rope_tension_loop, city_ambience, music_loop, grapple_fire, grapple_attach, grapple_miss,
-       release, rope_snap, landing, roll, impact, splash, checkpoint, finish, fail, ui_click, wall_kick, knockout)
+       release, rope_snap, landing, roll, impact, splash, checkpoint, finish, fail, ui_click, wall_kick, knockout,
+       footsteps, bump, horn, traffic_loop)
 
 if __name__ == "__main__":
     # gen_audio.py <outdir> [name ...]: only the named generators (default all).

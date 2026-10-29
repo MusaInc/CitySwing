@@ -5,9 +5,15 @@ extends Node
 ## All sounds are synthesised by tools/audio/gen_audio.py.
 
 const DIR := "res://assets/audio/"
-const LOOPS := ["wind_loop", "rope_tension_loop", "city_ambience", "music_loop"]
+const LOOPS := ["wind_loop", "rope_tension_loop", "city_ambience", "music_loop", "traffic_loop"]
 const SHOTS := ["knockout", "grapple_fire", "grapple_attach", "grapple_miss", "release_whoosh", "rope_snap", "land", "roll",
-	"impact", "splash", "checkpoint", "finish", "fail", "ui_click", "wall_kick"]
+	"impact", "splash", "checkpoint", "finish", "fail", "ui_click", "wall_kick", "bump", "horn",
+	"step_concrete_0", "step_concrete_1", "step_concrete_2", "step_gravel_0", "step_gravel_1", "step_gravel_2",
+	"step_grass_0", "step_grass_1", "step_grass_2"]
+
+var _step_dist := 0.0
+var _step_i := 0
+var _horn_in := 9.0
 
 var player: Player
 var _loops := {}
@@ -39,7 +45,7 @@ func _ready() -> void:
 		var s := _load(name)
 		if s:
 			_shots[name] = s
-	for i in 8:
+	for i in 12:
 		var p := AudioStreamPlayer.new()
 		p.bus = "SFX"
 		add_child(p)
@@ -87,6 +93,9 @@ func attach_player(p: Player) -> void:
 		play("impact", linear_to_db(clampf(spd / 30.0, 0.3, 1.0)))
 		Settings.haptic(int(clampf(spd * 3.0, 40.0, 120.0)), 1.0))
 	p.launched.connect(func(): play("wall_kick", -4.0, 1.2))
+	p.bumped.connect(func(spd: float, _n: Vector3):
+		play("bump", linear_to_db(clampf(spd / 10.0, 0.25, 0.9)), randf_range(0.9, 1.1))
+		Settings.haptic(int(clampf(spd * 2.5, 8.0, 30.0)), 0.35))
 	p.wall_kicked.connect(func():
 		play("wall_kick", -2.0)
 		Settings.haptic(25, 0.6))
@@ -133,6 +142,42 @@ func _process(dt: float) -> void:
 		# The street hum fades as you climb above the rooftops.
 		var height := clampf(player.global_position.y / 120.0, 0.0, 1.0)
 		amb.volume_db = lerpf(amb.volume_db, linear_to_db(0.55 - 0.35 * height), k)
+	var traffic: AudioStreamPlayer = _loops.get("traffic_loop")
+	if traffic:
+		# Street-level traffic: loud on the pavement, gone above the rooftops.
+		var low := 1.0 - clampf(player.global_position.y / 60.0, 0.0, 1.0)
+		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4, 0.002)), k)
+	_horn_in -= dt
+	if _horn_in <= 0.0:
+		_horn_in = randf_range(8.0, 24.0)
+		if player.global_position.y < 50.0:
+			play("horn", linear_to_db(0.12 + 0.18 * (1.0 - player.global_position.y / 50.0)), randf_range(0.9, 1.12))
+	_footsteps(dt)
 	var music: AudioStreamPlayer = _loops.get("music_loop")
 	if music:
 		music.volume_db = lerpf(music.volume_db, -9.0, 1.0 - exp(-0.5 * dt))
+
+
+## One step per stride while running on the ground; the sound follows the
+## surface: grass in parks, gravel on roofs, concrete on the street.
+func _footsteps(dt: float) -> void:
+	if not player.is_on_floor() or player.s.attached or player.stunned:
+		_step_dist = 0.0
+		return
+	var v := player.s.velocity
+	var vh := Vector2(v.x, v.z).length()
+	if vh < 0.8:
+		_step_dist = 0.0
+		return
+	_step_dist += vh * dt
+	var stride := 0.65 + 0.07 * vh
+	if _step_dist < stride:
+		return
+	_step_dist -= stride
+	var pos := player.global_position
+	var surf := "gravel" if pos.y > 3.0 else "concrete"
+	var world := get_parent().get_node_or_null("World") if get_parent() else null
+	if surf == "concrete" and world and world.get("layout") and world.layout._in_park(pos):
+		surf = "grass"
+	_step_i = (_step_i + 1 + randi() % 2) % 3
+	play("step_%s_%d" % [surf, _step_i], linear_to_db(clampf(0.25 + vh / 14.0, 0.25, 0.75)), randf_range(0.94, 1.06))

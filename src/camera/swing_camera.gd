@@ -20,7 +20,7 @@ extends Node3D
 ##    gentle bank (max 4°) leans into sustained turns at speed.
 
 @export var base_fov := 70.0
-@export var max_fov := 90.0
+@export var max_fov := 84.0  # restrained: wide enough to sell speed, no fish-eye
 @export var fov_speed_full := 50.0
 @export var follow_smooth := 0.12
 @export var aim_smooth := 0.08
@@ -33,6 +33,8 @@ extends Node3D
 @export var collision_margin := 0.35
 
 var target: Player
+var _sweep: PhysicsShapeQueryParameters3D
+var _point: PhysicsPointQueryParameters3D
 var cam: Camera3D
 var look: LookFilter
 var yaw := 0.0
@@ -196,7 +198,7 @@ func _process(dt: float) -> void:
 		look_pitch = lerpf(look_pitch, 0.0, k)
 
 	# --- distance / framing ---------------------------------------------------
-	var want_dist := lerpf(5.4, 8.0, t) if not grounded else lerpf(4.8, 5.8, clampf(vh.length() / 11.0, 0.0, 1.0))
+	var want_dist := lerpf(5.4, 8.0, t) if not grounded else lerpf(4.8, 6.2, clampf(vh.length() / 11.0, 0.0, 1.0))
 	var lift_goal := 0.0
 	if target.s.attached and target.s.taut:
 		# Long lines swing big arcs: frame more of them.
@@ -205,7 +207,10 @@ func _process(dt: float) -> void:
 		lift_goal = clampf(rope * 0.04, 0.0, 1.4)
 	_lift = lerpf(_lift, lift_goal, 1.0 - exp(-2.5 * dt))
 	_dist = lerpf(_dist, want_dist * distance_scale, 1.0 - exp(-2.0 * dt))
-	_height = lerpf(_height, (1.4 if grounded else 1.6) * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
+	# Running: the lens rises a little with pace so the hero sits lower in frame
+	# and more of the street ahead shows.
+	var run_h := 1.4 + 0.25 * clampf(vh.length() / 11.0, 0.0, 1.0)
+	_height = lerpf(_height, (run_h if grounded else 1.6) * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
 	var ahead := (vh * 0.12).limit_length(minf(3.5, _dist * 0.35))
 	# In flight, lean the framing a little toward the web you'd get next.
 	var bias_goal := Vector3.ZERO
@@ -291,14 +296,19 @@ func _process(dt: float) -> void:
 
 func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 	var space := get_world_3d().direct_space_state
-	var shape := SphereShape3D.new()
-	shape.radius = collision_margin
-	var q := PhysicsShapeQueryParameters3D.new()
-	q.shape = shape
+	# Query objects are reused every frame (no per-frame allocations).
+	if _sweep == null:
+		var shape := SphereShape3D.new()
+		shape.radius = collision_margin
+		_sweep = PhysicsShapeQueryParameters3D.new()
+		_sweep.shape = shape
+		_sweep.collision_mask = 1 | (1 << 1)
+		_point = PhysicsPointQueryParameters3D.new()
+		_point.collision_mask = 1 | (1 << 1)
+	_sweep.exclude = [target.get_rid()]
+	var q := _sweep
 	q.transform = Transform3D(Basis(), from)
 	q.motion = to - from
-	q.collision_mask = 1 | (1 << 1)
-	q.exclude = [target.get_rid()]
 	var res := space.cast_motion(q)
 	var full := (to - from).length()
 	if full < 0.001:
@@ -311,9 +321,8 @@ func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 	var dir := (to - from).normalized()
 	if allowed < _col_dist:
 		_col_dist = lerpf(_col_dist, allowed, 1.0 - exp(-10.0 * dt))
-		var pq := PhysicsPointQueryParameters3D.new()
+		var pq := _point
 		pq.position = from + dir * minf(_col_dist, full)
-		pq.collision_mask = 1 | (1 << 1)
 		if not space.intersect_point(pq).is_empty() and _push_out(space, pq.position, from) == Vector3.INF:
 			_col_dist = allowed  # can't slide along the face: cut in
 	else:
@@ -329,8 +338,7 @@ func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 ## `p` moved just outside the box it is in, through a side facing `fallback_from`
 ## (the focus); INF if that isn't possible (not a box, or round a corner).
 func _push_out(space: PhysicsDirectSpaceState3D, p: Vector3, fallback_from: Vector3) -> Vector3:
-	var pq := PhysicsPointQueryParameters3D.new()
-	pq.collision_mask = 1 | (1 << 1)
+	var pq := _point
 	for attempt in 3:
 		pq.position = p
 		var hits := space.intersect_point(pq, 1)

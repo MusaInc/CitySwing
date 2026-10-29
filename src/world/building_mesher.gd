@@ -544,68 +544,6 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		walls(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33), KIND_TRIM, 0, 0)
 
 
-## Road markings for one chunk (own mesh, short visibility range): centre
-## lines (dashed on streets, double solid on avenues), zebra crossings and
-## stop lines at every junction. Nothing is painted inside a junction.
-func add_road_marks(layout: CityLayout, chunk_rect: Rect2) -> void:
-	var white := Color(0.9, 0.9, 0.86)
-	var yellow := Color(0.92, 0.76, 0.25)
-	for axis in 2:
-		var mains: Array = layout.x_streets if axis == 0 else layout.z_streets
-		var cross: Array = layout.z_streets if axis == 0 else layout.x_streets
-		for st in mains:
-			var c: float = st[0]
-			var w: float = st[1]
-			for k in cross.size() - 1:
-				var a: float = cross[k][0] + cross[k][1] * 0.5
-				var b: float = cross[k + 1][0] - cross[k + 1][1] * 0.5
-				var mid := (a + b) * 0.5
-				var probe := Vector2(c, mid) if axis == 0 else Vector2(mid, c)
-				if not chunk_rect.has_point(probe):
-					continue
-				if w > 20.0:
-					for o: float in [-0.22, 0.22]:
-						_mark(axis, c + o, a + 4.6, b - 4.6, 0.14, yellow)
-				else:
-					var d := a + 5.0
-					while d < b - 5.0:
-						_mark(axis, c, d, minf(d + 3.0, b - 5.0), 0.14, white)
-						d += 8.0
-				# Zebra crossings at both ends, stop line on the approach lane.
-				for e in [[a, 1.0], [b, -1.0]]:
-					var edge: float = e[0]
-					var sgn: float = e[1]
-					var s0 := edge + sgn * 1.0
-					var s1 := edge + sgn * 4.0
-					var x := c - w * 0.5 + 1.2
-					while x < c + w * 0.5 - 1.4:
-						_mark(axis, x + 0.3, minf(s0, s1), maxf(s0, s1), 0.6, white)
-						x += 1.2
-					var sl := edge + sgn * 4.8
-					# Traffic towards this end: x-streets run -Z on +x, z-streets -X on -z.
-					var lane_c := c + w * 0.25 * sgn * (1.0 if axis == 0 else -1.0)
-					_mark_across(axis, lane_c, w * 0.5 - 0.6, sl, 0.45, white)
-
-
-## A strip painted along the street direction (axis 0: along Z at x = c).
-func _mark(axis: int, c: float, from: float, to: float, width: float, col: Color) -> void:
-	var y := 0.04
-	var h := width * 0.5
-	if axis == 0:
-		top(c - h, from, c + h, to, y, col, KIND_TRIM, 0, 0)
-	else:
-		top(from, c - h, to, c + h, y, col, KIND_TRIM, 0, 0)
-
-
-## A strip painted across the street at `at` along it, centred on `c`.
-func _mark_across(axis: int, c: float, length: float, at: float, width: float, col: Color) -> void:
-	var y := 0.04
-	if axis == 0:
-		top(c - length * 0.5, at - width * 0.5, c + length * 0.5, at + width * 0.5, y, col, KIND_TRIM, 0, 0)
-	else:
-		top(at - width * 0.5, c - length * 0.5, at + width * 0.5, c + length * 0.5, y, col, KIND_TRIM, 0, 0)
-
-
 func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL) -> void:
 	# Walls facing inward (towards the basin centre).
 	var x0 := r.position.x

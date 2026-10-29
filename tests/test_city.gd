@@ -94,6 +94,94 @@ func test_world_builds_collision_and_streams(t) -> void:
 	await get_tree().process_frame
 
 
+func test_street_maps_match_the_street_plan(t) -> void:
+	# ground.gdshader draws lane paint, crossings and kerbs from these strips:
+	# decode them the way the shader does and compare with the plan.
+	var w := CityWorld.new()
+	add_child(w)
+	await get_tree().process_frame
+	var bad := 0
+	var probes := 0
+	for axis in 2:
+		var tex: ImageTexture = w.ground_mat.get_shader_parameter("street_x" if axis == 0 else "street_z")
+		var img := tex.get_image()
+		var m: Vector2 = CityWorld.STREET_MAP_X if axis == 0 else CityWorld.STREET_MAP_Z
+		for st in (w.layout.x_streets if axis == 0 else w.layout.z_streets):
+			for off in [-0.4, 0.0, 0.37, float(st[1]) * 0.5 - 0.3]:
+				var p: float = st[0] + off
+				var i := int(floor(p - m.x))
+				var c := img.get_pixel(i, 0)
+				var dx := c.r + p - (m.x + i + 0.5)
+				probes += 1
+				if absf(dx - off) > 0.01 or absf(c.g - st[1] * 0.5) > 0.01 or (c.b > 0.5) != (st[1] > 20.0):
+					bad += 1
+	t.note("%d street-map probes" % probes)
+	t.check(bad == 0, "%d street-map texels disagree with the plan" % bad)
+	w.queue_free()
+	await get_tree().process_frame
+
+
+func test_street_furniture_stays_on_the_pavement(t) -> void:
+	var w := CityWorld.new()
+	add_child(w)
+	await get_tree().process_frame
+	var l := w.layout
+	var foot: Array = []
+	for b in l.buildings:
+		if b["kind"] == "normal":
+			var tt: Array = b["tiers"][0]
+			foot.append(Rect2(tt[0], tt[1], tt[2] - tt[0], tt[3] - tt[1]).grow(-0.4))
+	var n := 0
+	var in_building := 0
+	var off_block := 0
+	var kinds := {}
+	for key in w._furniture_by_chunk:
+		for it in w._furniture_by_chunk[key]:
+			n += 1
+			kinds[it[0]] = kinds.get(it[0], 0) + 1
+			var o: Vector3 = (it[1] as Transform3D).origin
+			var p := Vector2(o.x, o.z)
+			if not l.blocks.any(func(r): return (r as Rect2).has_point(p)):
+				off_block += 1
+			if foot.any(func(r): return (r as Rect2).has_point(p)):
+				in_building += 1
+	t.note("%d furniture items %s" % [n, kinds])
+	t.check(n > 1000 and kinds.size() == CityWorld.FURNITURE.size(), "every kind of street furniture is placed")
+	t.check(off_block == 0, "%d items out on the road" % off_block)
+	t.check(in_building == 0, "%d items inside a building" % in_building)
+	var arr = w._furniture_arrays(w._furniture_by_chunk.keys()[0])
+	t.check(arr != null and (arr[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0, "a chunk's furniture merges into one mesh")
+	w.queue_free()
+	await get_tree().process_frame
+
+
+func test_traffic_lod_and_tight_culling(t) -> void:
+	var w := CityWorld.new()
+	add_child(w)
+	await get_tree().process_frame
+	w.build_all_near(Vector3(386, 0, -200), 250.0)
+	var near := 0
+	var far := 0
+	var loose := 0
+	for c in w.get_children():
+		for mmi in c.find_children("Traffic_*", "MultiMeshInstance3D", true, false):
+			var mm: MultiMesh = mmi.multimesh
+			if mm.custom_aabb.size.x > CityWorld.CHUNK + 1.0 or mm.custom_aabb.size.x < 1.0:
+				loose += 1
+			if mmi.name.ends_with("_far"):
+				far += 1
+				var tris := 0
+				for s in mm.mesh.get_surface_count():
+					tris += (mm.mesh.surface_get_arrays(s)[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+				t.check(tris <= 24, "far car stand-in is %d triangles" % tris)
+			else:
+				near += 1
+	t.check(near > 0 and far == near, "every car group has a far LOD (%d near, %d far)" % [near, far])
+	t.check(loose == 0, "%d traffic groups without a chunk-sized culling box" % loose)
+	w.queue_free()
+	await get_tree().process_frame
+
+
 func test_expert_swings_through_generated_city(t) -> void:
 	# Several rooftop starts; judged on the median (swinging is chaotic).
 	var w := CityWorld.new()

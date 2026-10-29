@@ -27,15 +27,18 @@ func _ready() -> void:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.75
-	env.ambient_light_sky_contribution = 0.85
+	env.ambient_light_energy = 0.8
+	# Part sky, part warm street bounce: shaded canyons read as warm stone and
+	# coloured glass, not one blue-grey wash.
+	env.ambient_light_color = Color(0.78, 0.7, 0.62)
+	env.ambient_light_sky_contribution = 0.6
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.05
 	env.tonemap_white = 6.0
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	env.fog_light_color = Color(0.7, 0.74, 0.84)
+	env.fog_light_color = Color(0.8, 0.78, 0.8)
 	env.fog_light_energy = 1.0
 	env.fog_sun_scatter = 0.18
 	env.fog_density = 0.00048
@@ -49,17 +52,18 @@ func _ready() -> void:
 	env.glow_hdr_threshold = 1.1
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.15
-	env.adjustment_contrast = 1.06
+	env.adjustment_contrast = 1.08
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
-	# Low in the west-south-west, behind the river: rim light on the waterfront.
-	sun.rotation_degrees = Vector3(-24.0, -112.0, 0.0)
-	sun.light_color = Color(1.0, 0.84, 0.66)
-	sun.light_energy = 1.7
+	# West-south-west, behind the river: still a warm late-afternoon sun, but
+	# high enough (36°) that it reaches down into the avenues.
+	sun.rotation_degrees = Vector3(-36.0, -112.0, 0.0)
+	sun.light_color = Color(1.0, 0.88, 0.74)
+	sun.light_energy = 1.8
 	sun.light_angular_distance = 0.6
 	sun.shadow_enabled = preset.get("shadows", true)
 	sun.shadow_bias = 0.04

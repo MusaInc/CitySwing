@@ -15,7 +15,8 @@ const STYLES := {
 const TUNING := {
 	# Clean comic: crisp ink and flat cel tones, no halftone grain, gentle grade.
 	"comic": {"line_px": 1.15, "bands": 3.0, "band_soft": 0.1, "saturation": 1.3, "halftone": 0.0,
-		"color_edge": 0.38, "exposure": 1.14, "lift": 0.02, "split_tone": 0.3, "vignette": 0.14},
+		"color_edge": 0.38, "exposure": 1.06, "lift": 0.015, "split_tone": 0.22, "vignette": 0.12,
+		"shadow_tint": Color(0.7, 0.62, 0.84)},
 	"toon": {"line_px": 1.0, "bands": 4.0, "band_soft": 0.12, "saturation": 1.5, "halftone": 0.0,
 		"color_edge": 0.4, "exposure": 1.12, "lift": 0.04, "split_tone": 0.35,
 		"shadow_tint": Color(0.66, 0.5, 0.86), "vignette": 0.18},

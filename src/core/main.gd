@@ -536,6 +536,15 @@ func _capture_series(path: String, times: Array[float]) -> void:
 		var out := path if times.size() == 1 else path.get_basename() + "_%d.png" % i
 		img.save_png(out)
 		print("SCREENSHOT ", out)
+		if args.has("stats"):
+			var ri := func(k): return RenderingServer.get_rendering_info(k)
+			print("RENDER_STATS ", JSON.stringify({"shot": out.get_file(),
+				"draw_calls": ri.call(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+				"prims": ri.call(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
+				"objects": ri.call(RenderingServer.RENDERING_INFO_TOTAL_OBJECTS_IN_FRAME),
+				"video_mb": snappedf(ri.call(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0, 0.1),
+				"tex_mb": snappedf(ri.call(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0, 0.1),
+				"nodes": get_tree().get_node_count(), "static_mb": snappedf(OS.get_static_memory_usage() / 1048576.0, 0.1)}))
 	get_tree().quit()
 
 

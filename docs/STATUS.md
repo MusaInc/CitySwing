@@ -1,6 +1,56 @@
-# Status: 2026-10-29 (taller city, hero suit, bug pass)
+# Status: 2026-10-29 (visual + performance polish, 0.4.0)
 
-## Taller city, hero suit, bug pass (latest)
+## Visual, city life and performance polish (latest)
+
+Measured on the VPS (Xvfb, Mobile renderer, llvmpipe): render counts are
+device-independent, frame times are not – **no iPhone/iPad numbers yet**
+(use Settings → Benchmark on a device).
+
+- **Performance** (High, autopilot free swing, 6 frames, seed 3): triangles
+  per frame 1.20M → 0.45M (−63%), draw calls ~250 → ~193 (−23%). Fixed views
+  (`tools/render_stats.sh`): High street 1.41M → 0.42M, Low street 0.84M →
+  0.22M. Causes fixed: car/walker MultiMeshes had a 200 m culling margin
+  (frustum culling barely worked) → exact chunk `custom_aabb`; cars were
+  1 650 triangles out to 520 m → full model to 260 m, a 24-triangle stand-in
+  to 520 m; road paint was 16.5k triangles per chunk of quads → drawn by the
+  ground shader (no geometry); building shadows use the plain massing mesh;
+  camera wall checks reuse their query objects (no per-frame allocations);
+  MultiMesh data is written as one packed buffer. Main-thread chunk
+  instantiate 1.7 → ~2.2 ms (`tools/chunk_cost.gd`; worker generation 3 → 4.5 ms).
+  VRAM 68 → 77 MB on High.
+- **Ground**: a baked street map (two 1-texel-per-metre strips,
+  `CityWorld._bake_street_maps`) lets `ground.gdshader` draw lane paint,
+  zebra crossings and stop lines, tyre tracks, gutters, drains, manholes and
+  patch repairs; kerb stones, flagstones by the road, concrete slabs / brick
+  paving in courtyards; mowing stripes and a gravel path round park lawns.
+- **Facades**: shopfronts with stall risers, doors, mullions, lit interiors
+  and coloured fascias with lettering; blinds in some windows; rain streaks
+  on masonry; contact shading toward the street.
+- **Lighting**: sun raised 24° → 36° so it reaches the avenues, warmer
+  ambient and fog (the old frames were one blue-grey wash), Comic look's
+  violet shadow tint softened.
+- **Street life**: new pedestrians (proportioned body, per-walker skin,
+  trousers and hair from palettes, knee fold), who sidestep and turn to look
+  when the hero is within ~6 m at street level (global `player_pos`, all on
+  the GPU); two tree shapes (broad + columnar, random yaw); 1 888 pieces of
+  street furniture (benches, bins, hydrants, bollards, street signs,
+  planters, bus shelters on avenues) merged into one mesh per chunk – one
+  draw call, 190 m range. Assets: `tools/blender/build_street.py`.
+  Furniture has **no collision** (you can run through a bench).
+- **Camera**: max FOV 90° → 84°; running framing a little further back and
+  higher.
+- **HUD**: speed gauge/chain respect the iPhone safe area; the token marker
+  keeps out of the stick and SWING/JUMP zones (it overlapped SWING on iPad);
+  quieter buttons, resting thumb nub on the stick, a pulse on a ready web
+  target. Checked at 19.5:9 and 4:3.
+- **Audio**: footsteps by surface (pavement / roof gravel / park grass),
+  wall-bump thud + haptic, street traffic bed under 60 m, occasional far horns.
+- Not changed this pass: character animation and swing physics (motion audit
+  unchanged and passing).
+- Tests: 89 native pass (new: street maps vs plan, furniture on pavements and
+  out of buildings, traffic LOD + culling boxes); browser WebKit 10/10.
+
+## Taller city, hero suit, bug pass
 
 - **Bigger buildings**: the skyline is scaled up using the same random
   draws, so the plan didn't reshuffle: tallest 252 → 326 m, towers over

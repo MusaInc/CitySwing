@@ -13,10 +13,13 @@ extends Node3D
 const CHUNK := CityLayout.CHUNK
 const MODEL_DIR := "res://assets/models/"
 const PROP_RANGES := {
-	"streetlight": 260.0, "tree": 420.0, "water_tower": 520.0, "ac_unit": 240.0, "antenna": 700.0, "crane": 1200.0,
-	"traffic_light": 220.0, "roof_hut": 650.0,
+	"streetlight": 260.0, "tree": 320.0, "water_tower": 520.0, "ac_unit": 240.0, "antenna": 700.0, "crane": 1200.0,
+	"traffic_light": 220.0, "roof_hut": 650.0, "tree_tall": 320.0,
 }
-const MARKS_RANGE := 320.0
+## Street furniture (tools/blender/build_street.py), merged into one mesh per
+## chunk: [kind, inset from the kerb line (m)].
+const FURNITURE := ["bench", "bin", "hydrant", "bollard", "sign_post", "bus_shelter", "planter"]
+const FURNITURE_RANGE := 190.0
 ## Traffic models (tools/blender/build_cars.py) and how common each is.
 const CAR_KINDS := [["car_sedan", 0.32], ["car_hatch", 0.25], ["car_suv", 0.2], ["car_taxi", 0.13], ["car_van", 0.1]]
 const TAXI_YELLOW := Color(0.98, 0.76, 0.12)
@@ -36,9 +39,17 @@ var ground_mat: ShaderMaterial
 var water_mat: ShaderMaterial
 var prop_meshes := {}
 var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing
+var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) for chunks past CAR_NEAR
+## Full car models only in chunks this close (centre distance); 1 650 tris each
+## is wasted on a car a few pixels long.
+const CAR_NEAR := 260.0
+const CAR_FAR := 520.0
 var walker_mesh: Mesh
+var furniture_mat: StandardMaterial3D
+var _furn_src := {}             # kind -> [verts, normals, colors, indices] (material colours baked in)
+var _furniture_by_chunk := {}   # Vector2i -> Array of [kind, Transform3D]
 var _walk_paths: Array = []  # [from, to] pavement segments (directional)
-const WALKER_RANGE := 170.0
+const WALKER_RANGE := 130.0
 const CLOTHES := [Color(0.85, 0.85, 0.82), Color(0.12, 0.13, 0.16), Color(0.55, 0.12, 0.12), Color(0.16, 0.28, 0.5),
 	Color(0.36, 0.42, 0.3), Color(0.75, 0.6, 0.35), Color(0.45, 0.45, 0.48), Color(0.62, 0.36, 0.5), Color(0.2, 0.45, 0.48)]
 
@@ -76,6 +87,7 @@ func _ready() -> void:
 	_build_landmarks()
 	_build_structures()
 	_build_outskirts()
+	_bake_street_maps()
 	_build_birds()
 	GrappleTargeting.anchor_lines = layout.anchor_lines
 	print("CityWorld: %d buildings, %d props, %d chunks, layout+collision %d ms" % [
@@ -296,7 +308,7 @@ func _load_mesh(name: String) -> Mesh:
 
 
 func _load_props() -> void:
-	for k in ["streetlight", "tree", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
+	for k in ["streetlight", "tree", "tree_tall", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
 			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut"]:
 		var m := _load_mesh(k)
 		if m:
@@ -319,6 +331,7 @@ func _load_props() -> void:
 				sm.set_shader_parameter("roughness", 0.25 if name == "car_glass" else 0.45)
 				cm.surface_set_material(i, sm)
 		car_meshes.append(cm)
+		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
 	var walker := _load_mesh("pedestrian")
 	if walker:
 		walker_mesh = walker.duplicate()
@@ -329,9 +342,193 @@ func _load_props() -> void:
 			sm.shader = wshader
 			if src is BaseMaterial3D:
 				sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
-			sm.set_shader_parameter("use_instance_color", src != null and String(src.resource_name) == "shirt")
+			var nm := String(src.resource_name) if src else ""
+			sm.set_shader_parameter("use_instance_color", nm == "shirt")
+			sm.set_shader_parameter("part", {"skin": 1, "pants": 2, "hair": 3}.get(nm, 0))
 			walker_mesh.surface_set_material(i, sm)
 	_walk_paths = _pavement_paths()
+	for k in FURNITURE:
+		var fm := _load_mesh(k)
+		if fm:
+			_furn_src[k] = _flatten_colors(fm)
+	furniture_mat = StandardMaterial3D.new()
+	furniture_mat.vertex_color_use_as_albedo = true
+	furniture_mat.vertex_color_is_srgb = true
+	furniture_mat.roughness = 0.75
+	_furniture_by_chunk = _place_furniture()
+
+
+## Body + cabin boxes sized from the full model, sharing its paint and glass
+## materials (so the GPU drive, instance colour and taxi yellow still apply).
+static func _car_far_mesh(full: Mesh) -> Mesh:
+	var paint: Material
+	var glass: Material
+	for i in full.get_surface_count():
+		var m := full.surface_get_material(i) as ShaderMaterial
+		if m == null:
+			continue
+		if m.get_shader_parameter("use_instance_color"):
+			paint = m
+		elif is_equal_approx(float(m.get_shader_parameter("roughness")), 0.25):
+			glass = m
+	var bb := full.get_aabb()
+	var h := bb.size.y
+	var c := bb.get_center()
+	var out := ArrayMesh.new()
+	for part in [[Vector3(bb.size.x * 0.96, h * 0.42, bb.size.z * 0.98), Vector3(c.x, bb.position.y + h * 0.34, c.z), paint],
+			[Vector3(bb.size.x * 0.84, h * 0.4, bb.size.z * 0.5), Vector3(c.x, bb.position.y + h * 0.74, c.z + bb.size.z * 0.04), glass]]:
+		var box := BoxMesh.new()
+		box.size = part[0]
+		var arr := box.get_mesh_arrays()
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		for j in v.size():
+			v[j] += part[1]
+		arr[Mesh.ARRAY_VERTEX] = v
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		out.surface_set_material(out.get_surface_count() - 1, part[2])
+	return out
+
+
+## One mesh's surfaces flattened into a single vertex-coloured array set.
+static func _flatten_colors(m: Mesh) -> Array:
+	var v := PackedVector3Array()
+	var nrm := PackedVector3Array()
+	var col := PackedColorArray()
+	var idx := PackedInt32Array()
+	for i in m.get_surface_count():
+		var a := m.surface_get_arrays(i)
+		var mat := m.surface_get_material(i) as BaseMaterial3D
+		var c := mat.albedo_color if mat else Color.WHITE
+		var base := v.size()
+		v.append_array(a[Mesh.ARRAY_VERTEX])
+		nrm.append_array(a[Mesh.ARRAY_NORMAL])
+		for j in (a[Mesh.ARRAY_VERTEX] as PackedVector3Array).size():
+			col.append(c)
+		for j in a[Mesh.ARRAY_INDEX]:
+			idx.append(base + j)
+	return [v, nrm, col, idx]
+
+
+## Street furniture along every built-up block (not parks or dock basins):
+## kerbside bins, bollards, hydrants and corner street signs; benches,
+## planters and – on avenues – bus shelters back by the building line.
+## Placement walks each block edge with its own RNG (the layout's random
+## streams are untouched), keeps clear of junction corners, streetlights and
+## the two pedestrian walking lines (1.7 m / 3.0 m in from the kerb).
+func _place_furniture() -> Dictionary:
+	var out := {}
+	for blk in layout.blocks:
+		var r: Rect2 = blk
+		if r in layout.parks:
+			continue
+		var basin := false
+		for w in layout.water:
+			if (w as Rect2).position.x > 0.0 and (w as Rect2).encloses(r.grow(-7.0)):
+				basin = true
+		if basin:
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(Vector2i(int(r.position.x), int(r.position.y))) ^ 0xf00d
+		# Edges: start corner, direction along, outward normal (towards the road), length.
+		var edges := [
+			[Vector2(r.position.x, r.position.y), Vector2.RIGHT, Vector2.UP, r.size.x],
+			[Vector2(r.end.x, r.position.y), Vector2.DOWN, Vector2.RIGHT, r.size.y],
+			[Vector2(r.end.x, r.end.y), Vector2.LEFT, Vector2.DOWN, r.size.x],
+			[Vector2(r.position.x, r.end.y), Vector2.UP, Vector2.LEFT, r.size.y],
+		]
+		for ei in edges.size():
+			var e: Array = edges[ei]
+			var o: Vector2 = e[0]
+			var along: Vector2 = e[1]
+			var nrm: Vector2 = e[2]
+			var length: float = e[3]
+			var inward := -nrm
+			var basis := Basis.looking_at(Vector3(nrm.x, 0, nrm.y), Vector3.UP)  # front faces the road
+			var avenue := _street_width_beside(r, nrm) > 20.0
+			var put := func(kind: String, d: float, inset: float, yaw := 0.0):
+				var p2 := o + along * d + inward * inset
+				var key := Vector2i(floori(p2.x / CHUNK), floori(p2.y / CHUNK))
+				if not out.has(key):
+					out[key] = []
+				out[key].append([kind, Transform3D(basis * Basis(Vector3.UP, yaw), Vector3(p2.x, 0.15, p2.y))])
+			# Corner street sign at the start of every other edge.
+			if ei % 2 == 0:
+				put.call("sign_post", 2.2, 0.5, PI * 0.25)
+			# Kerbside line.
+			var d := 7.0 + rng.randf_range(0.0, 6.0)
+			while d < length - 7.0:
+				var lamp_d := fmod(absf((o + along * d).x - r.position.x) - 8.0 + 320.0, 32.0)
+				if ei % 2 == 1 or (lamp_d > 1.5 and lamp_d < 30.5):
+					var roll := rng.randf()
+					if roll < 0.32:
+						put.call("bin", d, 0.55)
+					elif roll < 0.44:
+						put.call("hydrant", d, 0.5, PI * 0.5)
+					elif roll < 0.58:
+						put.call("bollard", d, 0.45)
+						put.call("bollard", d + 1.4, 0.45)
+				d += rng.randf_range(11.0, 22.0)
+			# Building line: one bus shelter per avenue edge, benches/planters.
+			var shelter_at := length * rng.randf_range(0.35, 0.65) if avenue and length > 40.0 and rng.randf() < 0.7 else -100.0
+			if shelter_at > 0.0:
+				put.call("bus_shelter", shelter_at, 3.95)
+			d = 12.0 + rng.randf_range(0.0, 10.0)
+			while d < length - 10.0:
+				if absf(d - shelter_at) > 5.0:
+					var roll := rng.randf()
+					if roll < 0.4:
+						put.call("bench", d, 4.1)
+					elif roll < 0.6:
+						put.call("planter", d, 4.0)
+				d += rng.randf_range(16.0, 34.0)
+	return out
+
+
+## Width of the street on the `nrm` side of block `r` (0 if none found).
+func _street_width_beside(r: Rect2, nrm: Vector2) -> float:
+	var list: Array = layout.x_streets if nrm.x != 0.0 else layout.z_streets
+	var edge := (r.end.x if nrm.x > 0.0 else r.position.x) if nrm.x != 0.0 else (r.end.y if nrm.y > 0.0 else r.position.y)
+	for st in list:
+		if absf(st[0] - (edge + (nrm.x + nrm.y) * st[1] * 0.5)) < 1.0:
+			return st[1]
+	return 0.0
+
+
+## Merged furniture arrays for one chunk (worker-thread safe: reads only).
+func _furniture_arrays(key: Vector2i):
+	var items: Array = _furniture_by_chunk.get(key, [])
+	if items.is_empty() or _furn_src.is_empty():
+		return null
+	var v := PackedVector3Array()
+	var nrm := PackedVector3Array()
+	var col := PackedColorArray()
+	var idx := PackedInt32Array()
+	var n := 0
+	for it in items:
+		n += 1
+		if prop_density < 1.0 and fmod(n * 0.618, 1.0) > prop_density:
+			continue
+		var src: Array = _furn_src.get(it[0], [])
+		if src.is_empty():
+			continue
+		var xf: Transform3D = it[1]
+		var base := v.size()
+		for p in src[0]:
+			v.append(xf * p)
+		for q in src[1]:
+			nrm.append(xf.basis * q)
+		col.append_array(src[2])
+		for i in src[3]:
+			idx.append(base + i)
+	if v.is_empty():
+		return null
+	var a := []
+	a.resize(Mesh.ARRAY_MAX)
+	a[Mesh.ARRAY_VERTEX] = v
+	a[Mesh.ARRAY_NORMAL] = nrm
+	a[Mesh.ARRAY_COLOR] = col
+	a[Mesh.ARRAY_INDEX] = idx
+	return a
 
 
 # ------------------------------------------------------------- collision
@@ -517,6 +714,7 @@ func _build_outskirts() -> void:
 	var last_z: Array = layout.z_streets[-1]
 	var zr_out := _extend_ranges(first_z[0] - first_z[1] * 0.5, -1.0, 760.0, rng) \
 		+ _extend_ranges(last_z[0] + last_z[1] * 0.5, 1.0, 760.0, rng)
+	_outer_ranges = [xr_in + xr_out, zr_in + zr_out]
 	var grid := Rect2(CityLayout.MIN_X, CityLayout.MIN_Z, CityLayout.MAX_X - CityLayout.MIN_X, CityLayout.MAX_Z - CityLayout.MIN_Z)
 	for xr in xr_in + xr_out:
 		for zr in zr_in + zr_out:
@@ -665,6 +863,40 @@ static func _extend_ranges(edge: float, sgn: float, reach: float, rng: RandomNum
 	return out
 
 
+## Street layout for ground.gdshader: per axis, a 1-texel-per-metre strip
+## holding (offset from the nearest street centre line at the texel centre,
+## half width, avenue flag). The shader adds its sub-texel offset back, so
+## lane lines, crossings, kerbs and paving are exact without any geometry.
+var _outer_ranges: Array = [[], []]
+const STREET_MAP_X := Vector2(-640.0, 2600.0)  # origin, texels (1 m each)
+const STREET_MAP_Z := Vector2(-1500.0, 3000.0)
+
+
+func _bake_street_maps() -> void:
+	for axis in 2:
+		var streets: Array = (layout.x_streets if axis == 0 else layout.z_streets).duplicate()
+		var ranges: Array = _outer_ranges[axis].duplicate()
+		ranges.sort_custom(func(a, b): return a[0] < b[0])
+		for i in ranges.size() - 1:
+			var gap: float = ranges[i + 1][0] - ranges[i][1]
+			var c: float = (ranges[i][1] + ranges[i + 1][0]) * 0.5
+			if gap > 4.0 and gap < 40.0 and streets.all(func(st): return absf(st[0] - c) > 4.0):
+				streets.append([c, gap])
+		streets.sort_custom(func(a, b): return a[0] < b[0])
+		var m: Vector2 = STREET_MAP_X if axis == 0 else STREET_MAP_Z
+		var img := Image.create(int(m.y), 1, false, Image.FORMAT_RGBF)
+		var j := 0
+		for i in int(m.y):
+			var p := m.x + i + 0.5
+			while j < streets.size() - 1 and absf(streets[j + 1][0] - p) < absf(streets[j][0] - p):
+				j += 1
+			var st: Array = streets[j]
+			img.set_pixel(i, 0, Color(p - st[0], st[1] * 0.5, 1.0 if st[1] > 20.0 else 0.0))
+		ground_mat.set_shader_parameter("street_x" if axis == 0 else "street_z", ImageTexture.create_from_image(img))
+	ground_mat.set_shader_parameter("street_map", Vector4(STREET_MAP_X.x, STREET_MAP_X.y, STREET_MAP_Z.x, STREET_MAP_Z.y))
+	ground_mat.set_shader_parameter("has_streets", true)
+
+
 # ------------------------------------------------------------- streaming
 func _process(_dt: float) -> void:
 	if viewer == null:
@@ -720,17 +952,16 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 	var detail := BuildingMesher.new()
 	var low := BuildingMesher.new()
 	var ground := BuildingMesher.new()
-	var marks := BuildingMesher.new()
 	for b in _by_chunk.get(key, []):
 		detail.add_building(b, true)
 		low.add_building(b, false)
 	ground.add_ground(layout, rect)
-	marks.add_road_marks(layout, rect)
+	var furn: Variant = _furniture_arrays(key)
 	return {
 		"detail": null if detail.is_empty() else detail.arrays(),
 		"low": null if low.is_empty() else low.arrays(),
 		"ground": null if ground.is_empty() else ground.arrays(),
-		"marks": null if marks.is_empty() else marks.arrays(),
+		"furniture": furn,
 	}
 
 
@@ -788,15 +1019,6 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	var detail := _mesh_from(res.get("detail"))
 	var low := _mesh_from(res.get("low"))
 	var ground := _mesh_from(res.get("ground"))
-	var marks := _mesh_from(res.get("marks"))
-	if marks:
-		var mk := MeshInstance3D.new()
-		mk.name = "Marks"
-		mk.mesh = marks
-		mk.material_override = ground_mat
-		mk.visibility_range_end = MARKS_RANGE
-		mk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		root.add_child(mk)
 	if detail:
 		var mi := MeshInstance3D.new()
 		mi.name = "Detail"
@@ -805,6 +1027,19 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		mi.visibility_range_end = detail_range
 		mi.visibility_range_end_margin = 30.0
 		root.add_child(mi)
+		if low:
+			# Shadows come from the plain massing (walls + roofs, ~1/6 of the
+			# triangles): ledges, parapets and awnings don't need to be drawn
+			# twice more into the shadow splits.
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var sh := MeshInstance3D.new()
+			sh.name = "ShadowProxy"
+			sh.mesh = low
+			sh.material_override = building_mat
+			sh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+			sh.visibility_range_end = detail_range
+			sh.visibility_range_end_margin = 30.0
+			root.add_child(sh)
 	if low:
 		var lo := MeshInstance3D.new()
 		lo.name = "Low"
@@ -821,6 +1056,15 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 		gi.material_override = ground_mat
 		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(gi)
+	var furn := _mesh_from(res.get("furniture"))
+	if furn:
+		var fi := MeshInstance3D.new()
+		fi.name = "Furniture"
+		fi.mesh = furn
+		fi.material_override = furniture_mat
+		fi.visibility_range_end = FURNITURE_RANGE
+		fi.visibility_range_end_margin = 20.0
+		root.add_child(fi)
 	_add_props(root, key)
 	_add_traffic(root, key)
 	_add_walkers(root, key)
@@ -838,9 +1082,18 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 		if prop_density < 1.0 and p[0] in ["streetlight", "tree", "ac_unit", "traffic_light"] \
 				and fmod(i * 0.618, 1.0) > prop_density:
 			continue
-		if not by_kind.has(p[0]):
-			by_kind[p[0]] = []
-		by_kind[p[0]].append(p[1])
+		var kind: String = p[0]
+		var xf: Transform3D = p[1]
+		if kind == "tree":
+			# Mix in the columnar tree and turn each one differently (looks
+			# only: the layout's tree positions don't change).
+			var h := hash(Vector2i(int(xf.origin.x * 4.0), int(xf.origin.z * 4.0)))
+			if h % 5 < 2 and prop_meshes.has("tree_tall"):
+				kind = "tree_tall"
+			xf.basis = xf.basis * Basis(Vector3.UP, (h % 628) * 0.01)
+		if not by_kind.has(kind):
+			by_kind[kind] = []
+		by_kind[kind].append(xf)
 	for kind in by_kind:
 		var mesh: Mesh = prop_meshes.get(kind)
 		if mesh == null:
@@ -907,28 +1160,58 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 			k = 0
 		var col: Color = CAR_COLORS[rng.randi() % CAR_COLORS.size()]
 		groups[k].append([xf[i], custom[i], TAXI_YELLOW if CAR_KINDS[k][0] == "car_taxi" else col])
+	# Cars only ever drive inside their chunk (lanes are clipped to it), so the
+	# chunk itself is an exact culling box for the GPU-moved instances.
+	var bounds := AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 6.0, CHUNK))
 	for k in groups.size():
 		var g: Array = groups[k]
 		if g.is_empty() or car_meshes[k] == null:
 			continue
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_colors = true
-		mm.use_custom_data = true
-		mm.mesh = car_meshes[k]
-		mm.instance_count = g.size()
-		for i in g.size():
-			mm.set_instance_transform(i, g[i][0])
-			mm.set_instance_custom_data(i, g[i][1])
-			mm.set_instance_color(i, g[i][2])
-		var mmi := MultiMeshInstance3D.new()
-		mmi.name = "Traffic_" + CAR_KINDS[k][0]
-		mmi.multimesh = mm
-		mmi.visibility_range_end = 520.0
-		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# Cars travel up to a full segment along -Z; widen the culling box to match.
-		mmi.extra_cull_margin = CHUNK
-		root.add_child(mmi)
+		# One packed buffer for both LODs (much cheaper than per-instance setters
+		# on the main thread while chunks stream in).
+		var buf := _instance_buffer(g)
+		for far in [false, true]:
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = true
+			mm.use_custom_data = true
+			mm.mesh = car_far_meshes[k] if far else car_meshes[k]
+			mm.instance_count = g.size()
+			mm.buffer = buf
+			mm.custom_aabb = bounds
+			var mmi := MultiMeshInstance3D.new()
+			mmi.name = "Traffic_" + CAR_KINDS[k][0] + ("_far" if far else "")
+			mmi.multimesh = mm
+			if far:
+				mmi.visibility_range_begin = CAR_NEAR
+				mmi.visibility_range_end = CAR_FAR
+			else:
+				mmi.visibility_range_end = CAR_NEAR
+			mmi.visibility_range_begin_margin = 20.0
+			mmi.visibility_range_end_margin = 20.0
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(mmi)
+
+
+## MultiMesh buffer (TRANSFORM_3D + colour + custom) for [xform, custom, colour] items.
+static func _instance_buffer(items: Array) -> PackedFloat32Array:
+	var buf := PackedFloat32Array()
+	buf.resize(items.size() * 20)
+	var j := 0
+	for it in items:
+		var x: Transform3D = it[0]
+		var cu: Color = it[1]
+		var co: Color = it[2]
+		for r in 3:
+			buf[j] = x.basis.x[r]
+			buf[j + 1] = x.basis.y[r]
+			buf[j + 2] = x.basis.z[r]
+			buf[j + 3] = x.origin[r]
+			j += 4
+		buf[j] = co.r; buf[j + 1] = co.g; buf[j + 2] = co.b; buf[j + 3] = co.a
+		buf[j + 4] = cu.r; buf[j + 5] = cu.g; buf[j + 6] = cu.b; buf[j + 7] = cu.a
+		j += 8
+	return buf
 
 
 ## Two walking lines along every pavement (one each way), between the kerb
@@ -987,16 +1270,16 @@ func _add_walkers(root: Node3D, key: Vector2i) -> void:
 	mm.use_custom_data = true
 	mm.mesh = walker_mesh
 	mm.instance_count = xf.size()
+	var items: Array = []
 	for i in xf.size():
-		mm.set_instance_transform(i, xf[i])
-		mm.set_instance_custom_data(i, custom[i])
-		mm.set_instance_color(i, CLOTHES[rng.randi() % CLOTHES.size()])
+		items.append([xf[i], custom[i], CLOTHES[rng.randi() % CLOTHES.size()]])
+	mm.buffer = _instance_buffer(items)
+	mm.custom_aabb = AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 4.0, CHUNK))  # walks stay in the chunk
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "Walkers"
 	mmi.multimesh = mm
 	mmi.visibility_range_end = WALKER_RANGE
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mmi.extra_cull_margin = CHUNK
 	root.add_child(mmi)
 
 

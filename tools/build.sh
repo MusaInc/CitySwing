@@ -15,6 +15,7 @@ step() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 if [[ "$ARGS" == *" assets "* ]]; then
   step "Blender kit (procedural models -> assets/models/*.glb)"
   blender -b --factory-startup --python tools/blender/build_kit.py -- assets/models 2>&1 | grep -E "KIT|Error|Traceback"
+  blender -b --factory-startup --python tools/blender/build_street.py -- assets/models 2>&1 | grep -E "KIT|Error|Traceback"
   step "Synthesised audio (-> assets/audio/*.wav)"
   python3 tools/audio/gen_audio.py assets/audio | grep -E "DONE|Error"
 fi

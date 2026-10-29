@@ -10,5 +10,5 @@ mkdir -p screenshots
 rm -f screenshots/${name}_*.png
 xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile --resolution 960x540 \
   --fixed-fps 30 -- --shot="$PWD/screenshots/${name}.png" --shot-at="$times" "$@" 2>&1 \
-  | grep -E "SCREENSHOT|SCRIPT ERROR|^ERROR" | grep -v leaked || true
+  | grep -E "SCREENSHOT|RENDER_STATS|SCRIPT ERROR|^ERROR" | grep -v leaked || true
 python3 tools/contact_sheet.py screenshots/${name}_sheet.png screenshots/${name}_[0-9]*.png

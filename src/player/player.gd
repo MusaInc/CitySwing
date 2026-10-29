@@ -244,6 +244,7 @@ func _read_input(dt: float) -> Dictionary:
 
 
 func _physics_process(dt: float) -> void:
+	RenderingServer.global_shader_parameter_set(&"player_pos", global_position)  # pedestrians step aside
 	# Stun first: input read while stunned must never be applied after recovery.
 	if stunned:
 		_update_stun(dt)

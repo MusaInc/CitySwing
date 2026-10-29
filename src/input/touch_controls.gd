@@ -208,9 +208,12 @@ func _draw() -> void:
 		draw_circle(_stick_pos, 34.0, Color(1, 1, 1, 0.6))
 	else:
 		var hint := Vector2(_safe.position.x + 150, _safe.end.y - 150)
-		draw_arc(hint, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.2), 2.0, true)
+		draw_circle(hint, STICK_RADIUS, Color(1, 1, 1, 0.05))
+		draw_arc(hint, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.22), 2.0, true)
+		draw_circle(hint, 30.0, Color(1, 1, 1, 0.12))  # resting thumb nub
+		draw_arc(hint, 30.0, 0, TAU, 32, Color(1, 1, 1, 0.3), 1.5, true)
 		var lw := _font.get_string_size("MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(_font, hint + Vector2(-lw / 2.0, 5), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.38))
+		draw_string(_font, hint + Vector2(-lw / 2.0, STICK_RADIUS - 14.0), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.38))
 	var web_down := _has_kind("web")
 	var jump_down := false
 	for t in touches.values():
@@ -221,12 +224,12 @@ func _draw() -> void:
 		var b: Dictionary = buttons[action]
 		var c := button_center(action)
 		var down := web_down if action == "grapple" else jump_down
-		var fill := Color(1, 1, 1, 0.34 if down else 0.12)
+		var fill := Color(1, 1, 1, 0.32 if down else 0.08)
 		if action == "grapple" and (ready or down) and Settings.aim_mode != "tap":
 			fill = Color(1.0, 0.78, 0.35, 0.55 if down else 0.28)
 		draw_circle(c, b["r"] + 3.0, shade)
 		draw_circle(c, b["r"], fill)
-		var ring := white if down else Color(1, 1, 1, 0.5)
+		var ring := white if down else Color(1, 1, 1, 0.42)
 		if action == "grapple" and ready and Settings.aim_mode != "tap":
 			ring = Color(UiStyle.GOLD, 0.95)
 			draw_arc(c, b["r"] + 9.0, 0, TAU, 56, Color(UiStyle.GOLD, 0.35), 3.0, true)

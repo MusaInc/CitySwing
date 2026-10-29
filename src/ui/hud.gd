@@ -115,6 +115,10 @@ func _draw() -> void:
 			var d := player.hand_position().distance_to(aim_pt)
 			var r := clampf(900.0 / maxf(d, 1.0), 11.0, 24.0)
 			_draw_reticle(_reticle_pos, r, gold if t.pick_ok else Color(1, 1, 1, 0.8))
+			if t.pick_ok:
+				# A soft ring breathing out from a ready anchor: "SWING now works here".
+				var ph := fmod(_reticle_spin * 1.6, 1.0)
+				draw_arc(_reticle_pos, r + 4.0 + ph * 14.0, 0, TAU, 28, Color(gold, 0.5 * (1.0 - ph)), 2.0, true)
 		elif player.line_state == Player.Line.IDLE:
 			_reticle_pos = Vector2.INF
 			draw_arc(size / 2.0, 6, 0, TAU, 16, Color(1, 1, 1, 0.3), 1.5, true)
@@ -138,12 +142,15 @@ func _draw() -> void:
 			_text(pos + Vector2(16, 6), label, 18, red, Color(0, 0, 0, 0.4 * a2))
 
 	_speed_smooth = lerpf(_speed_smooth, player.speed(), 0.15)
-	_draw_speed_gauge(Vector2(86, 86), white, shadow)
+	# Top-left corner inside the safe area (clear of the notch / Dynamic
+	# Island on iPhones held in landscape).
+	var g := _safe_origin() + Vector2(86, 86)
+	_draw_speed_gauge(g, white, shadow)
 	if player.chain > 1:
 		var ct := "CHAIN ×%d" % player.chain
 		var cw := _font.get_string_size(ct, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
-		UiStyle.pill(self, Rect2(Vector2(86 - cw / 2.0 - 14, 150), Vector2(cw + 28, 30)), Color(UiStyle.GOLD, 0.22))
-		_text(Vector2(86 - cw / 2.0, 171), ct, 18, gold, shadow)
+		UiStyle.pill(self, Rect2(Vector2(g.x - cw / 2.0 - 14, g.y + 64), Vector2(cw + 28, 30)), Color(UiStyle.GOLD, 0.22))
+		_text(Vector2(g.x - cw / 2.0, g.y + 85), ct, 18, gold, shadow)
 	if mode_text != "":
 		var w := _font.get_string_size(mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
 		var w2 := _font.get_string_size(mode_sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x if mode_sub != "" else 0.0
@@ -291,6 +298,7 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var on := not behind and sp.x > margin and sp.x < size.x - margin and sp.y > margin and sp.y < size.y - margin \
 		and not (sp.x < 190.0 and sp.y < 200.0)
 	if on:
+		sp = _clear_of_thumbs(sp)
 		var pts := PackedVector2Array([sp + Vector2(0, -12), sp + Vector2(10, 0), sp + Vector2(0, 12), sp + Vector2(-10, 0), sp + Vector2(0, -12)])
 		draw_polyline(pts, teal, 2.5, true)
 		_text(sp + Vector2(16, 6), label, 16, teal, Color(0, 0, 0, 0.4))
@@ -307,9 +315,30 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var p := c + dir * t
 	if p.x < 190.0 and p.y < 200.0:
 		p.y = 200.0  # keep clear of the speed gauge
+	p = _clear_of_thumbs(p)
 	var side := Vector2(-dir.y, dir.x)
 	draw_colored_polygon(PackedVector2Array([p + dir * 14.0, p - dir * 8.0 + side * 10.0, p - dir * 8.0 - side * 10.0]), teal)
 	_text(p - dir * 30.0 + Vector2(-18, 5), label, 15, teal, Color(0, 0, 0, 0.4))
+
+
+## Safe-area top-left in HUD pixels (zero on desktop).
+func _safe_origin() -> Vector2:
+	var sa := DisplayServer.get_display_safe_area()
+	var win := DisplayServer.window_get_size()
+	if sa.size.x <= 0 or win.x <= 0:
+		return Vector2.ZERO
+	return (Vector2(sa.position) * size / Vector2(win)).clamp(Vector2.ZERO, size * 0.2)
+
+
+## Markers never sit under the stick (bottom left) or SWING/JUMP (bottom
+## right) in touch mode: pushed up above those zones.
+func _clear_of_thumbs(p: Vector2) -> Vector2:
+	if not touch_mode:
+		return p
+	var top := size.y - 270.0
+	if p.y > top and (p.x < 330.0 or p.x > size.x - 480.0):
+		p.y = top
+	return p
 
 
 func _text(pos: Vector2, s: String, fs: int, col: Color, sh: Color) -> void:

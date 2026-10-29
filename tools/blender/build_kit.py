@@ -194,20 +194,7 @@ def streetlight():
     export("streetlight.glb", [join("streetlight", parts + [arm, head, glow])])
 
 
-def tree():
-    reset()
-    bark = mat("bark", (0.3, 0.22, 0.16), 0.9)
-    leaf = mat("leaves", (0.32, 0.48, 0.24), 0.85)
-    parts = [cyl("trunk", 0.22, 3.0, (0, 0, 0), bark, 7, r2=0.14)]
-    for (x, y, z, r) in ((0, 0, 4.0, 1.9), (0.9, 0.4, 3.4, 1.3), (-0.8, -0.5, 3.6, 1.4), (0.2, -0.9, 4.6, 1.1)):
-        bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=r)
-        for v in bm.verts:  # lumpy, stylised canopy
-            n = v.co.normalized()
-            v.co += n * 0.18 * math.sin(v.co.x * 3.1 + v.co.y * 2.3 + v.co.z * 1.7)
-        bmesh.ops.translate(bm, vec=Vector((x, y, z)), verts=bm.verts)
-        parts.append(new_obj("c", bm, leaf))
-    export("tree.glb", [join("tree", parts)])
+# tree(), pedestrian(): tools/blender/build_street.py
 
 
 # ------------------------------------------------------------- landmarks
@@ -347,31 +334,6 @@ def roof_hut():
     p.append(box("door", (1.0, 0.06, 2.1), (0.6, 2.12, 1.05), door))
     p.append(box("vent", (0.6, 0.6, 0.5), (-0.9, -1.2, 3.4), trim))
     export("roof_hut.glb", [join("roof_hut", p)])
-
-
-def pedestrian():
-    """Low-poly walker (~200 faces), facing +Y (Godot -Z). Material names
-    drive the GPU walk cycle: "pants" legs swing, "shirt" sleeves swing,
-    "shirt" also takes the per-instance colour."""
-    reset()
-    skin = mat("skin", (0.62, 0.45, 0.36), 0.7)
-    shirt = mat("shirt", (1.0, 1.0, 1.0), 0.8)
-    pants = mat("pants", (0.17, 0.19, 0.25), 0.85)
-    hair = mat("hair", (0.12, 0.09, 0.07), 0.9)
-    shoes = mat("shoes", (0.1, 0.1, 0.1), 0.6)
-    p = []
-    for sx in (-0.1, 0.1):
-        p.append(box("leg", (0.15, 0.17, 0.82), (sx, 0, 0.47), pants))
-        p.append(box("shoe", (0.13, 0.26, 0.08), (sx, 0.04, 0.04), shoes))
-    p.append(box("hips", (0.36, 0.2, 0.14), (0, 0, 0.88), pants))
-    p.append(box("torso", (0.4, 0.23, 0.56), (0, 0, 1.2), shirt))
-    for sx in (-0.255, 0.255):
-        p.append(box("arm", (0.11, 0.13, 0.56), (sx, 0, 1.17), shirt))
-        p.append(sphere("hand", 0.055, (sx, 0, 0.86), skin, 6, 4))
-    p.append(cyl("neck", 0.055, 0.1, (0, 0, 1.47), skin, 6))
-    p.append(sphere("head", 0.115, (0, 0.01, 1.65), skin, 8, 6, scale=(0.9, 1.0, 1.08)))
-    p.append(sphere("hair", 0.12, (0, -0.012, 1.69), hair, 8, 4, scale=(0.95, 1.0, 0.8)))
-    export("pedestrian.glb", [join("pedestrian", p)])
 
 
 def traffic_light():
@@ -631,8 +593,9 @@ def character():
 
 
 if __name__ == "__main__":
-    # Cars: tools/blender/build_cars.py
-    for fn in (water_tower, ac_unit, antenna, streetlight, tree, clock_crown, harbour_dome, beacon,
-               cathedral_tower_top, viaduct, crane, traffic_light, pedestrian, roof_hut):
+    # Cars: tools/blender/build_cars.py; trees, pedestrians, street furniture:
+    # tools/blender/build_street.py
+    for fn in (water_tower, ac_unit, antenna, streetlight, clock_crown, harbour_dome, beacon,
+               cathedral_tower_top, viaduct, crane, traffic_light, roof_hut):
         fn()
     print("KIT DONE")
