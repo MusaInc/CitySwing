@@ -6,8 +6,9 @@ extends SceneTree
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
 ## Scenarios: idle run steps jump swing swing34 swingfast release wallrun crash
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
+##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing"]
 
 var player: Player
 var rig: CharacterRig
@@ -24,6 +25,7 @@ class Script_:
 	var move := Vector3.ZERO
 	var jump := false
 	var grapple := false
+	var human_steer := false  # steer with the player's turn assist
 	func drive(_p, _dt) -> Dictionary:
 		var j := jump
 		jump = false
@@ -126,6 +128,7 @@ func _sc_idle() -> void:
 
 func _sc_run() -> void:
 	var sc := _reset(Vector3(-20, 1.0, 20))
+	sc.human_steer = true  # the player's sprint (player_run_speed)
 	_cam_off = Vector3(0, 0.2, 3.6)
 	sc.move = Vector3.RIGHT
 	var cyc := []
@@ -165,6 +168,14 @@ func _sc_swing34() -> void:
 	_cam_off = Vector3(2.6, 0.6, 2.6)
 	player.fire_at(Vector3(0, 72, -32.0), 1)
 	await _film("swing34", 2.6, [0.15, 0.4, 0.8, 1.1, 1.4, 1.7, 2.0, 2.3])
+
+
+## The swing from the free-arm side (front-left): the wing arm and the lean.
+func _sc_swingwing() -> void:
+	_reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
+	_cam_off = Vector3(4.0, 0.8, -1.5)
+	player.fire_at(Vector3(0, 72, -32.0), 1)
+	await _film("swingwing", 2.6, [0.4, 0.8, 1.1, 1.4, 1.7, 2.0])
 
 
 ## A fast, deep swing (≈ 34 m/s entry) from the side.
@@ -232,6 +243,17 @@ func _sc_release() -> void:
 	_cam_off = Vector3(3.5, 0.8, 3.5)  # three-quarter view: arm depth reads
 	player.fire_at(Vector3(0, 72, -32.0), 1)
 	await _film("release34", 3.0, [1.7, 1.9, 2.1, 2.4, 2.7, 2.9], {1.6: func(): player.release_web()})
+
+
+## Release into a glide, then steer hard to one side: the bank into the turn.
+func _sc_airturn() -> void:
+	var sc := _reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
+	sc.human_steer = true
+	_cam_off = Vector3(-4.5, 1.2, 2.0)  # from behind-left: the bank reads
+	player.fire_at(Vector3(0, 72, -32.0), 1)
+	await _film("airturn", 3.4, [1.5, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2],
+		{1.6: func(): player.release_web(), 1.9: func(): sc.move = Vector3.FORWARD})
+	sc.move = Vector3.ZERO
 
 
 func _sc_wallrun() -> void:

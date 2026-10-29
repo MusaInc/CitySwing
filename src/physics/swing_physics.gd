@@ -34,6 +34,8 @@ class Controls:
 	## Human steering: sideways stick also turns the velocity (air/swing_turn_rate).
 	## The autopilot and the model tests leave it off.
 	var turn_assist := false
+	## A human is running (player_run_speed). Bots and the model tests leave it off.
+	var human := false
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -222,30 +224,32 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 	var vh := Vector3(v.x, 0.0, v.z)
 	var m := Vector3(c.move.x, 0.0, c.move.z).limit_length(1.0)
 	var speed := vh.length()
-	if speed > p.run_speed and m.length_squared() > 0.01 and m.dot(vh) > 0.0:
+	var run_speed := p.player_run_speed if c.human else p.run_speed
+	var run_accel := p.player_run_accel if c.human else p.run_accel
+	if speed > run_speed and m.length_squared() > 0.01 and m.dot(vh) > 0.0:
 		# Carrying swing momentum onto a rooftop: keep flowing, bleed slowly, steer.
-		var new_speed := maxf(p.run_speed, speed - p.ground_overspeed_decel * h)
+		var new_speed := maxf(run_speed, speed - p.ground_overspeed_decel * h)
 		var dir := vh.normalized().slerp(m.normalized(), clampf(4.0 * h, 0.0, 1.0))
 		vh = dir * new_speed
 	elif m.length_squared() > 0.01:
 		var want := m.normalized()
-		var want_speed := p.run_speed * m.length()
+		var want_speed := run_speed * m.length()
 		if speed < 0.5:
-			vh = vh.move_toward(m * p.run_speed, p.run_accel * h)
+			vh = vh.move_toward(m * run_speed, run_accel * h)
 		elif (vh / speed).dot(want) < -0.25:
 			# Reversing: plant and brake first (the body leans back), then go.
-			vh = vh.move_toward(Vector3.ZERO, p.run_accel * 1.3 * h)
+			vh = vh.move_toward(Vector3.ZERO, run_accel * 1.3 * h)
 		else:
 			# Turns keep momentum: the heading swings round at a rate that
 			# drops with speed, instead of the velocity cutting across.
 			var dir := vh / speed
 			var ang := dir.signed_angle_to(want, Vector3.UP)
-			var turn := lerpf(14.0, 7.0, clampf(speed / p.run_speed, 0.0, 1.0)) * h
+			var turn := lerpf(14.0, 7.0, clampf(speed / run_speed, 0.0, 1.0)) * h
 			if absf(ang) <= turn:
-				vh = vh.move_toward(m * p.run_speed, p.run_accel * h)
+				vh = vh.move_toward(m * run_speed, run_accel * h)
 			else:
 				dir = dir.rotated(Vector3.UP, signf(ang) * turn)
-				vh = dir * move_toward(speed, want_speed, p.run_accel * h)
+				vh = dir * move_toward(speed, want_speed, run_accel * h)
 	else:
 		vh = vh.move_toward(Vector3.ZERO, (p.ground_friction + speed * 2.0) * h)
 	return Vector3(vh.x, minf(v.y, 0.0), vh.z)

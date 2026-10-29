@@ -235,6 +235,15 @@ func test_ground_run_and_jump(t) -> void:
 	for i in 60:
 		SwingPhysics.step(s, c, p, DT)
 	t.near(s.velocity.x, p.run_speed, 0.01, "reaches run speed")
+	var hs := SwingPhysics.State.new()
+	hs.grounded = true
+	var hc := SwingPhysics.Controls.new()
+	hc.move = Vector3(1, 0, 0)
+	hc.human = true
+	for i in 60:
+		SwingPhysics.step(hs, hc, p, DT)
+	t.near(hs.velocity.x, p.player_run_speed, 0.01, "a human player sprints faster")
+	t.check(p.player_run_speed > p.run_speed * 1.2, "noticeably faster than the bots' base run")
 	c.jump = true
 	SwingPhysics.step(s, c, p, DT)
 	t.check(s.velocity.y > p.jump_speed * 0.9 and not s.grounded, "jump leaves the ground")

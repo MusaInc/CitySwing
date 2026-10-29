@@ -133,6 +133,10 @@ var _lead := "l"           # leg that was driving forward at take-off (it leads 
 var _jump_t := 0.0         # time since leaving the ground on a jump (not a web)
 var _release_t := 0.0      # launch stretch after letting go of a web (s left)
 var _hard_t := 0.0         # hard-landing crouch remaining (s)
+var _glide := 0.0          # 0..1 flying forward off a web: chest leads, arms out like wings
+var _glide_rope := 0.0     # 0..1 the same lean while swinging forward on the web
+var _bank := Vector3.ZERO  # smoothed sideways lean into an air turn (world, horizontal)
+var _turn := 0.0           # -1..1 how hard the body is turning (+ = right); head and arms lead it
 const HARD_TIME := 0.62
 var _hard_lead := "l"
 const RELEASE_TIME := 0.42
@@ -581,6 +585,10 @@ func _on_respawned() -> void:
 		_toe[sd] = 0.0
 		_heel[sd] = 0.0
 	_hard_t = 0.0
+	_glide = 0.0
+	_glide_rope = 0.0
+	_bank = Vector3.ZERO
+	_turn = 0.0
 	_getup_t = 0.0
 	_release_t = 0.0
 	_takeoff_t = 0.0
@@ -628,7 +636,8 @@ func debug_state() -> Dictionary:
 		hand_off = ((hand - sh) - dir * (hand - sh).dot(dir)).length()
 	return {"skinned": skeleton != null and not _skel_idx.is_empty(), "planted": _plant.size(),
 		"foot_gap": snappedf(gap, 0.001), "hand_line": snappedf(hand_off, 0.001), "ragdoll": ragdolling,
-		"trick": _trick if _trick != "" else _last_trick_seen, "tricks": tricks_done, "ko": player.knocked_out}
+		"trick": _trick if _trick != "" else _last_trick_seen, "tricks": tricks_done, "ko": player.knocked_out,
+		"glide": snappedf(maxf(_glide, _glide_rope), 0.01), "turn": snappedf(_turn, 0.01)}
 
 
 # ------------------------------------------------------------------ update
@@ -645,9 +654,11 @@ func _process(dt: float) -> void:
 	_sync_skeleton()
 	# Closed hands on the line, and loose fists when running or flying (open
 	# flat palms read as waving); open hands when standing.
+	# Gliding, the free hands open flat like wing tips.
 	var fists := not player.is_on_floor() or player.speed() > 3.5 or ragdolling
-	_set_grip("r", player.line_state != Player.Line.IDLE or fists)
-	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0) or fists)
+	var wing := maxf(_glide, _glide_rope) > 0.5 and not ragdolling
+	_set_grip("r", player.line_state != Player.Line.IDLE or (fists and not wing))
+	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
 
 
 func _set_grip(side: String, on: bool) -> void:
@@ -723,7 +734,7 @@ func _update_animated(dt: float) -> void:
 	elif hs > 1.0:
 		# Walking turns follow the path closely (feet and hips stay lined up
 		# with where the body is going); at a run the body swings round more.
-		var turn_rate := lerpf(10.0, 6.0, clampf((hs - 1.8) / 5.0, 0.0, 1.0)) if grounded else 3.5
+		var turn_rate := lerpf(10.0, 6.0, clampf((hs - 1.8) / 5.0, 0.0, 1.0)) if grounded else 6.5
 		_facing = _facing.slerp(vh.normalized(), 1.0 - exp(-turn_rate * dt)).normalized()
 	elif grounded and player.controls.move.length() > 0.1:
 		_facing = _facing.slerp(player.controls.move.normalized(), 1.0 - exp(-8.0 * dt)).normalized()
@@ -732,6 +743,24 @@ func _update_animated(dt: float) -> void:
 	_prev_facing_angle = ang
 	var right_w := Vector3.UP.cross(_facing).normalized() * -1.0  # facing × up = right
 	var la_w := _accel
+	# Turning in the air: the sideways (centripetal) part of the acceleration
+	# banks the body into the turn like a glider – the angle a body would
+	# lean to hold that turn (atan(a/g)), capped at ~43°.
+	var lat := Vector3.ZERO
+	if not grounded and hs > 3.0:
+		var hd := vh / hs
+		var ah := Vector3(la_w.x, 0.0, la_w.z)
+		lat = (ah - hd * ah.dot(hd)) / 9.8
+		lat = lat.limit_length(0.93) * clampf((hs - 3.0) / 6.0, 0.0, 1.0)
+	_bank = _bank.lerp(lat, 1.0 - exp(-7.0 * dt))
+	_turn = clampf(_bank.dot(right_w) / 0.7, -1.0, 1.0)
+	# Gliding: flying forward off a web (not a jump or a drop off a ledge),
+	# with air below – the chest leads, arms spread like wings.
+	var glide_go := not grounded and not on_rope and not _off_ledge and _trick == "" \
+		and hs > 6.0 and v.y > -16.0 and (_ground_h == INF or _ground_h > 5.0)
+	_glide = move_toward(_glide, clampf((hs - 6.0) / 6.0, 0.0, 1.0) if glide_go else 0.0, dt * (2.5 if glide_go else 4.0))
+	var rope_go := attached and speed > 7.0
+	_glide_rope = move_toward(_glide_rope, clampf((speed - 7.0) / 9.0, 0.0, 1.0) if rope_go else 0.0, dt * 3.0)
 
 	# --- whole-body orientation -------------------------------------------
 	var up := Vector3.UP
@@ -742,7 +771,7 @@ func _update_animated(dt: float) -> void:
 		var fa := clampf(la_w.dot(_facing) * 0.007, -0.24, 0.16)
 		# Runners lean from the ankles, more as they speed up (a straight line
 		# ankle–hip–shoulder, not a bend at the waist).
-		var run_lean := 0.05 + 0.13 * clampf((hs - 2.0) / 9.0, 0.0, 1.0) if hs > 1.0 else 0.0
+		var run_lean := 0.04 + 0.17 * clampf((hs - 2.0) / 12.0, 0.0, 1.0) if hs > 1.0 else 0.0
 		var bank := clampf(-_yaw_rate * hs * 0.025, -0.35, 0.35)
 		if _hard_t > 0.0:
 			# Three-point landing: the whole body pitches forward over the knee.
@@ -763,6 +792,9 @@ func _update_animated(dt: float) -> void:
 		var vt := v - up * v.dot(up)
 		if vt.length() > 1.0:
 			fwd_hint = vt.normalized()
+			# Swinging forward: the body leans into the travel, chest first.
+			up = (up + fwd_hint * tan(0.38 * _glide_rope)).normalized()
+		up = (up + _bank * 0.4).normalized()
 	else:
 		# Head-first only in a fast, steep descent with real forward speed.
 		dive = clampf((-v.y - 20.0) / 12.0, 0.0, 1.0) * clampf((speed - 28.0) / 10.0, 0.0, 1.0) \
@@ -771,6 +803,11 @@ func _update_animated(dt: float) -> void:
 		up = Vector3.UP.lerp(v.normalized() if speed > 1.0 else Vector3.UP, lean).normalized()
 		if v.y < -6.0:
 			up = up.lerp(Vector3.UP, 0.5).normalized()  # dropping: feet stay under the body
+		if _glide > 0.0 and hs > 0.1:
+			# Gliding: pitched ~35° forward over the direction of travel.
+			var gl := (Vector3.UP * cos(0.62) + vh / hs * sin(0.62)).normalized()
+			up = up.slerp(gl, _glide).normalized()
+		up = (up + _bank).normalized()  # banked into the turn
 		# Freefall arch: falling fast with height to spare, the body lies
 		# belly-down, head toward the travel direction.
 		var sky := _skydive(v, dive)
@@ -871,15 +908,15 @@ func _update_animated(dt: float) -> void:
 	else:
 		_pose_air(q, v, speed, la, dive, twist)
 	if _release_t > 0.0 and air and _trick == "":
-		# Release: the whole body extends along the throw – arms reaching
-		# overhead, chest open, legs long and together, toes pointed – then
-		# lets the rising stride and the apex gather take over.
+		# Release: the whole body extends along the throw – arms flung out
+		# wide like wings, chest open, legs long and together, toes pointed –
+		# then settles into the glide.
 		# (Eases in over a few frames too: limbs never jump into it.)
 		var r := smoothstep(0.0, 1.0, _release_t / RELEASE_TIME) * smoothstep(0.0, 0.07, RELEASE_TIME - _release_t)
 		_put(q, {
 			"spine": _rx(0.2), "chest": _rx(0.14), "neck": _rx(0.06), "head": _rx(0.12),
-			"upper_arm_r": _rx(2.75) * _rz(0.22), "upper_arm_l": _rx(2.55) * _rz(-0.32),
-			"forearm_r": _rx(0.2), "forearm_l": _rx(0.35),
+			"upper_arm_r": _rz(1.55) * _rx(0.35), "upper_arm_l": _rz(-1.5) * _rx(0.25),
+			"forearm_r": _rx(0.15), "forearm_l": _rx(0.2),
 			"thigh_l": _rx(-0.18) * _rz(-0.03), "thigh_r": _rx(-0.06) * _rz(0.03),
 			"shin_l": _rx(-0.2), "shin_r": _rx(-0.35), "foot_l": _rx(-0.65), "foot_r": _rx(-0.6),
 		}, r)
@@ -950,7 +987,7 @@ const GETUP_TIME := 1.05
 ## the knee forward and folds the heel up. Stance is ~60% of a walking cycle and
 ## ~28% of a sprint (longer flight). The cycle advances with distance.
 func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
-	var stride_len := clampf(0.4 + hs * 0.15, 0.5, 2.1)  # metres per step
+	var stride_len := clampf(0.4 + hs * 0.15, 0.5, 2.6)  # metres per step
 	_run_phase += dt * hs * PI / stride_len
 	var run := clampf((hs - 1.8) / 5.0, 0.0, 1.0)  # 0 walk … 1 run
 	var mv := clampf(hs / 1.2, 0.0, 1.0)            # 0 standing … 1 moving
@@ -988,19 +1025,25 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	var brake := clampf(la.z * 0.03, 0.0, 0.5) * clampf(hs / 3.0, 0.0, 1.0)
 	# Forward bend of the torso (+ = forward; torso bones tilt back on +X, so
 	# it's applied negated). Landing folds forward, braking sits back.
-	var lean := 0.04 * mv + 0.06 * run + _land_squash * 0.45 - brake * 0.4
+	# Swagger: walking, the chest is up and a touch back (a strut, not a
+	# shuffle); running, the body drives forward with the shoulders working.
+	var strut := mv * (1.0 - run)
+	var lean := -0.03 * strut + 0.1 * run * mv + _land_squash * 0.45 - brake * 0.4
 	var ph := _run_phase
 	var sw := sin(ph)
-	# Pelvis turns with the swinging leg, shoulders counter it, the head
-	# stays steady and level (it counters the whole-body lean too).
-	# Walking, the pelvis also drops toward the swinging leg (hip sway).
-	var sway := sw * 0.05 * (1.0 - run) * mv
-	q["hips"] = _ry(sw * 0.1 * mv) * _rz(sway)
-	q["spine"] = _rx(-lean) * _ry(-sw * 0.1 * mv) * _rz(-sway * 1.2)
-	q["chest"] = _ry(-sw * 0.2 * mv) * _rx(-0.04 * run)
+	var step2 := sin(2.0 * ph + 0.6)  # once per step: the bounce and the nod
+	# Pelvis turns with the swinging leg, shoulders counter it and roll (the
+	# leading shoulder dips), the head stays steady and level (it counters
+	# the whole-body lean too) with a small nod on each step. Walking, the
+	# pelvis also drops toward the swinging leg – a loose, rolling hip sway.
+	var sway := sw * 0.085 * strut
+	q["hips"] = _ry(sw * (0.1 + 0.08 * strut) * mv) * _rz(sway)
+	q["spine"] = _rx(-lean) * _ry(-sw * 0.12 * mv) * _rz(-sway * 1.3)
+	q["chest"] = _ry(-sw * (0.22 + 0.1 * strut + 0.06 * run) * mv) * _rx(-0.04 * run + 0.05 * strut) \
+		* _rz(sw * (0.07 * strut + 0.04 * run))
 	q["neck"] = _ry(sw * 0.12 * mv)
 	# Eyes level: undo the torso bend and most of the whole-body lean.
-	q["head"] = _rx(lean * 0.8 + 0.12 * run + 0.03)
+	q["head"] = _rx(lean * 0.8 + 0.14 * run + 0.03 + step2 * 0.045 * strut) * _rz(-sw * 0.05 * strut)
 	var bob := 0.0
 	for i in 2:
 		var sd := "l" if i == 0 else "r"
@@ -1019,7 +1062,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 			_toe[sd] = smoothstep(0.7, 1.0, w) * (0.5 + 0.25 * run) * mv  # toe-off: heel rolls up
 			foot -= _toe[sd]
 			_stance_w[sd] = w
-			bob -= (0.025 + 0.02 * run) * sin(PI * w) * mv
+			bob -= (0.035 + 0.01 * run) * sin(PI * w) * mv  # a bounce in the step
 		else:
 			var w := (u - stance) / (1.0 - stance)
 			var e := smoothstep(0.0, 1.0, w)
@@ -1046,9 +1089,15 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		# the hands travel hip → chin rather than flailing up to the face.
 		# Driven from the shoulder, further back than forward at speed; the
 		# elbow opens a little on the back swing and closes coming through.
-		var asw := -sw * (1.0 if i == 0 else -1.0) * (0.4 + 0.47 * run) * mv - 0.18 * run
-		q["upper_arm_" + sd] = _rx(asw) * _rz((0.12 + 0.05 * run) * (1.0 if sd == "r" else -1.0))
-		q["forearm_" + sd] = _rx(0.3 + 1.0 * run + 0.15 * mv + asw * 0.35)
+		# Walking, the arms hang loose and a little out (elbows out, a lazy
+		# swing) and the forearm follows through after the upper arm; running,
+		# they pump hard.
+		var asg := 1.0 if i == 0 else -1.0
+		var sdg := 1.0 if sd == "r" else -1.0
+		var asw := -sw * asg * (0.45 + 0.65 * run) * mv - 0.2 * run
+		var follow := maxf(-sin(ph - 0.9) * asg, 0.0) * 0.25 * strut
+		q["upper_arm_" + sd] = _rx(asw) * _rz((0.12 + 0.08 * strut + 0.05 * run) * sdg) * _ry(-0.25 * strut * sdg)
+		q["forearm_" + sd] = _rx(0.3 + 1.05 * run + 0.15 * mv + asw * 0.35 + follow)
 		if brake > 0.05:
 			# Braking: arms come forward and out to balance the backward lean.
 			q["upper_arm_" + sd] = q["upper_arm_" + sd].slerp(_rx(0.6) * _rz(0.45 * (1.0 if sd == "r" else -1.0)),
@@ -1061,12 +1110,17 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	_standing = false
 	if mv < 0.3:
 		# Idle: slow breathing, weight shifting from leg to leg, a glance about.
+		# The weight sits on one leg (hip cocked, the other knee loose) and
+		# only now and then swaps over; the shoulders counter the hip and the
+		# head tilts with an easy nod – relaxed, not standing to attention.
 		var k := 1.0 - mv / 0.3
 		var br := sin(_time * 1.5)
-		var shift := sin(_time * 0.45)
-		q["spine"] = q["spine"].slerp(_rz(shift * 0.035) * _rx(0.02), k)
-		q["chest"] = q["chest"].slerp(_rx(br * 0.025) * _rz(-shift * 0.03), k)
-		q["head"] = q["head"].slerp(_ry(sin(_time * 0.31) * 0.18) * _rx(0.03 + br * 0.01), k)
+		var shift := clampf(sin(_time * 0.21) * 2.4, -1.0, 1.0)
+		q["hips"] = q["hips"].slerp(_rz(shift * 0.07), k)
+		q["spine"] = q["spine"].slerp(_rz(-shift * 0.06) * _rx(-0.02), k)
+		q["chest"] = q["chest"].slerp(_rx(0.04 + br * 0.025) * _rz(-shift * 0.04) * _ry(shift * 0.06), k)
+		q["head"] = q["head"].slerp(_ry(sin(_time * 0.31) * 0.2) * _rz(shift * 0.06)
+			* _rx(0.02 + br * 0.01 + maxf(sin(_time * 0.9), 0.0) * 0.04), k)
 		q["thigh_l"] = q["thigh_l"].slerp(_rz(-0.05 - maxf(shift, 0.0) * 0.04) * _rx(0.04), k)
 		q["thigh_r"] = q["thigh_r"].slerp(_rz(0.05 - minf(shift, 0.0) * 0.04) * _rx(0.02), k)
 		q["shin_l"] = q["shin_l"].slerp(_rx(-0.12 - maxf(-shift, 0.0) * 0.2), k)
@@ -1115,7 +1169,9 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	q["upper_arm_r"] = ik_r[0]
 	q["forearm_r"] = ik_r[1]
 	# Free arm: counterbalance, or a second hand on the line under heavy load.
-	_lgrip = move_toward(_lgrip, 1.0 if attached and L > 0.75 else 0.0, dt * (3.0 if L > 0.75 else 2.0))
+	# (Not while swinging forward fast: that arm is out as a wing.)
+	var two_hands := attached and L > 0.75 and _glide_rope < 0.4
+	_lgrip = move_toward(_lgrip, 1.0 if two_hands else 0.0, dt * (3.0 if two_hands else 2.0))
 	var bal_up := _rz(-0.55 - (1.0 - L) * 0.35) * _rx(clampf(-la.z * 0.025, -0.9, 0.9) + 0.2)
 	var bal_fore := _rx(0.7 + (1.0 - L) * 0.3)
 	if _lgrip > 0.01:
@@ -1197,6 +1253,17 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 			var reach_up := up * (1.0 - _lgrip * 2.0)
 			q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rx(2.1) * _rz(-0.45), reach_up * 0.75)
 			q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.45), reach_up * 0.75)
+	# Swinging forward: the body leans into the arc (see the body lean in
+	# _update_animated), chest out, head up toward where it's going, and the
+	# free arm spreads out wide and a little back like a wing – dipping or
+	# lifting with the turn.
+	var gw := _glide_rope * (1.0 - _lgrip)
+	if gw > 0.01:
+		var flap := sin(_time * 2.3) * 0.05
+		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-1.28 - _turn * 0.3 - flap) * _rx(-0.5) * _ry(0.4), gw * 0.9)
+		q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.3), gw * 0.9)
+		q["chest"] = (q["chest"] as Quaternion) * _rx(0.08 * _glide_rope)
+		q["head"] = (q["head"] as Quaternion) * _rx(0.22 * _glide_rope) * _ry(-_turn * 0.3)
 
 
 ## Two-bone IK in the parent's frame (chest for arms, hips for legs). `dir`
@@ -1461,6 +1528,23 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"shin_" + ld: _rx(-1.15 - maxf(cyc, 0.0) * 0.35), "shin_" + tr: _rx(-0.85 - maxf(-cyc, 0.0) * 0.35),
 		"foot_" + ld: _rx(-0.2), "foot_" + tr: _rx(-0.35),
 	}, falling * (1.0 - sky))
+	# Glide: chest out and leading, head up looking where it's going, arms
+	# spread wide and a little back like wings (elbows soft, palms down), legs
+	# long behind with one knee bent and the toes pointed. Banking, the arms
+	# tilt with the turn – the inside wing dips, the outside one lifts – the
+	# head looks into it and the legs swing out the other way.
+	var tn := _turn
+	var flap := sin(_time * 2.3) * 0.05  # the wings ride the air a little
+	_put(q, {
+		"spine": _rx(0.12) * _ry(-tn * 0.18), "chest": _rx(0.14) * _ry(-tn * 0.15), "neck": _rx(0.1),
+		"head": _rx(0.32) * _ry(-tn * 0.4) * _rz(tn * 0.12),
+		"upper_arm_l": _rz(-1.28 - tn * 0.35 - flap) * _rx(-0.5) * _ry(0.4),
+		"upper_arm_r": _rz(1.28 - tn * 0.35 + flap) * _rx(-0.5) * _ry(-0.4),
+		"forearm_l": _rx(0.3 + flap), "forearm_r": _rx(0.3 - flap),
+		"thigh_" + ld: _rx(-0.08) * _rz(0.06 * sg[ld] - tn * 0.2),
+		"thigh_" + tr: _rx(-0.22) * _rz(0.04 * sg[tr] - tn * 0.2),
+		"shin_" + ld: _rx(-0.75), "shin_" + tr: _rx(-0.22), "foot_" + ld: _rx(-0.55), "foot_" + tr: _rx(-0.7),
+	}, _glide)
 	# Freefall arch.
 	_put(q, {
 		"spine": _rx(-0.3), "chest": _rx(-0.15), "neck": _rx(-0.2), "head": _rx(-0.45),

@@ -351,17 +351,6 @@ func show_settings(back: Callable) -> void:
 		Settings.quality = i
 		Settings.save())
 	box.add_child(_row("Quality", q))
-	var look := OptionButton.new()
-	var looks := ["comic", "toon", "painted", "clean"]
-	for n in ["Comic  ·  ink lines, flat colour", "Toon  ·  soft cel shading", "Painted  ·  brushy (heavier)", "Clean  ·  no filter"]:
-		look.add_item(n)
-	look.selected = maxi(looks.find(Settings.look), 0)
-	look.item_selected.connect(func(i):
-		_tap()
-		Settings.look = looks[i]
-		Settings.save())
-	_reg("look", look)
-	box.add_child(_row("Look", look))
 	box.add_child(_row("60 FPS", _check(Settings.fps_60, func(v): Settings.fps_60 = v; Settings.save())))
 	if OS.is_debug_build():
 		box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))

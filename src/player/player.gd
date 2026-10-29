@@ -252,7 +252,10 @@ func _physics_process(dt: float) -> void:
 	var move: Vector3 = inp.get("move", Vector3.ZERO)
 	_move_smooth = _move_smooth.lerp(move, 1.0 - exp(-dt / MOVE_SMOOTH))
 	controls.move = _move_smooth
-	controls.turn_assist = bot == null  # human steering turns the travel; bots/courses keep the raw model
+	# Human steering turns the travel; bots/courses keep the raw model (a
+	# review script can opt in with `human_steer` to move like a player).
+	controls.turn_assist = bot == null or bot.get("human_steer") == true
+	controls.human = controls.turn_assist
 	controls.reel = auto_tighten()
 	controls.jump = inp.get("jump", false)
 	controls.gravity_scale = 1.0

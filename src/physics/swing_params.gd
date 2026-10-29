@@ -81,6 +81,10 @@ extends Resource
 @export_group("Ground")
 @export var run_speed: float = 11.0
 @export var run_accel: float = 45.0
+## Human players sprint faster than this base speed (Controls.human). Bots and
+## the recorded courses keep run_speed: their routes depend on it.
+@export var player_run_speed: float = 14.5
+@export var player_run_accel: float = 58.0
 @export var ground_friction: float = 9.0
 ## Speed above run_speed decays at this rate (m/s²) so landings keep some flow.
 @export var ground_overspeed_decel: float = 14.0

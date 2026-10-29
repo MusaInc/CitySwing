@@ -1,6 +1,17 @@
 # Status: 2026-10-29 (visual + performance polish, 0.4.0)
 
-## Visual, city life and performance polish (latest)
+## Character feel pass: glide, banking, swagger, hood (latest)
+
+- Cartoon filter removed: Look defaults to Clean (settings v3 migrates saved Comic/Toon/Painted to Clean); the Look row is gone from Settings. `--look=` still works for comparisons.
+- Swinging forward: the body leans ~20° chest-first into the arc, head up, and the free arm spreads like a wing (the two-handed heavy-load grip only applies on slow swings now). Flying off a web: a glide pose, pitched ~35° forward, both arms out as wings with open palms, legs long behind.
+- Air turns: the body banks into the turn from the real sideways acceleration (atan(a/g), cap ~43°); the inside wing dips, the outside lifts, the head looks into the turn and the legs swing out. In-air facing follows the path faster.
+- Swagger: walk = chest up, rolling hips and shoulders, loose arms with follow-through, a bounce and a nod on each step; run = harder arm pump and more forward drive; idle = weight on one cocked hip, only now and then swapping over.
+- Players sprint at 14.5 m/s (`player_run_speed`, Controls.human); bots, the showcase pilot and the recorded courses keep run_speed 11 because their routes depend on it.
+- Baggy hoodie hood over the head (build_character.py `hood()`), recoloured with the suit; the hair tufts and goggles that it covered were removed.
+- Review: pose_lab `airturn` (human steering) and `swingwing` (front view). Motion audit now scores standing feet from the second slow sample (a dead stop against a wall can catch the stride mid-air). Known flake, present before this pass too: test_motion_quality ledge_dive get-up ankle limit fails ~1 in 3 full-suite runs.
+- Not yet tried on a device.
+
+## Visual, city life and performance polish
 
 Measured on the VPS (Xvfb, Mobile renderer, llvmpipe): render counts are
 device-independent, frame times are not – **no iPhone/iPad numbers yet**

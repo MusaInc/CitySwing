@@ -167,6 +167,7 @@ class Meter:
 		"joint_at": "", "joint_worst": 0.0, "slide": 0.0, "slide_avg": 0.0, "pops": 0, "body_at": "", "sink": 0.0, "float": 0.0, "hand": 0.0, "frames": 0}
 	var _slide_d := 0.0
 	var _slide_t := 0.0
+	var _was_slow := false
 	var _skip := 6  # frames to ignore after the respawn teleport
 	var trace := false
 
@@ -328,8 +329,13 @@ class Meter:
 				prev_ankle[sd] = a
 			else:
 				prev_ankle.erase(sd)
-		if st == "ground" and player.speed() < 1.5 and lowest < INF and rig._loco > 0.99:
+		# Standing feet: scored from the second slow sample on – a dead stop
+		# against a wall can catch the stride with both feet in the air, and
+		# no foot can be planted in zero frames.
+		var slow := st == "ground" and player.speed() < 1.5
+		if slow and _was_slow and lowest < INF and rig._loco > 0.99:
 			r["float"] = maxf(r["float"], lowest)
+		_was_slow = slow
 		if trace and player.line_state == Player.Line.ATTACHED:
 			var rd := (player.s.anchor - player.global_position).normalized()
 			print("%s L %.2f tension %.0f taut %s body-rope %.0f° v %s" % [tag, rig._load, player.s.tension, player.s.taut,

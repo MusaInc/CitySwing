@@ -96,6 +96,65 @@ def along(a, b, t):
     return a.lerp(b, t)
 
 
+def hood(o, material):
+    """Baggy hoodie hood up over the head (rides the head bone). An oversized
+    shell well clear of the skull: its front edge tunnels forward round the
+    face with a soft brim over the forehead, it's fuller at the back with the
+    point drooping behind the crown, and the bottom gathers into a loose cowl
+    round the neck and under the chin. Gentle folds break up the surface;
+    solidified so the opening has a lip."""
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=36, v_segments=24, radius=1.0)
+    # Pole forward: the face opening is cut along one clean ring of latitude.
+    bmesh.ops.rotate(bm, verts=bm.verts, matrix=Matrix.Rotation(-math.pi / 2, 3, "X"))
+    c = o(0, -0.02, 0.14)
+    rad = Vector((0.142, 0.155, 0.14))
+    drop = []
+    for v in bm.verts:
+        d = v.co.normalized()
+        p = Vector((d.x * rad.x, d.y * rad.y, d.z * rad.z))
+        back = max(-d.y, 0.0)
+        front = max(d.y, 0.0)
+        # Fuller (baggier) over the back of the head, more so up top.
+        p += Vector((d.x * 0.014, -0.03 * back, 0.016 * max(d.z, 0.0))) * (0.5 + back)
+        # The hood's point droops back and down behind the crown.
+        tip = max(0.0, -d.y - 0.4) * max(0.0, d.z + 0.15)
+        p += Vector((0, -0.07, -0.03)) * tip
+        # Lower half: the fabric falls and gathers round the neck – down onto
+        # the shoulders behind, a loose cowl under the chin in front.
+        if d.z < 0.0:
+            lo = -d.z
+            p.z -= lo * (0.07 + 0.05 * back + 0.09 * front * lo)
+            p.x *= 1.0 + 0.18 * lo
+            p.y += 0.03 * front * lo
+        # The opening's edge tunnels forward round the face; the brim rolls
+        # slightly forward over the forehead.
+        if front > 0.3:
+            p.y += 0.02 * (front - 0.3)
+        if d.y > 0.2 and d.z > 0.4:
+            p.y += 0.018 * d.z
+        # The opening sits a little low (brim over the brow, cowl under the
+        # chin) and a touch narrower than tall.
+        if front > 0.0:
+            p.z -= 0.035 * front
+            p.x *= 1.0 - 0.1 * front
+        # Soft folds (mostly at the back and down the sides).
+        ang = math.atan2(d.x, -d.y)
+        p += d * 0.0055 * math.sin(ang * 7.0 + d.z * 4.0) * (0.4 + back) * (1.0 - abs(d.z))
+        v.co = c + p
+        # Face opening (brim kept above the brow, cowl kept below the chin)
+        # and the neck hole.
+        if d.y > 0.62 or d.z < -0.9:
+            drop.append(v)
+    bmesh.ops.delete(bm, geom=drop, context="VERTS")
+    bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.012)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = K.new_obj("hood", bm)
+    for pl in ob.data.polygons:
+        pl.use_smooth = True
+    return K.paint(ob, material)
+
+
 def build():
     K.reset()
     M = K.mat
@@ -339,19 +398,7 @@ def build():
         if v.co.y - hc.y > 0.03 and v.co.z - hc.z < 0.17:
             v.co.y = hc.y + 0.03 - (v.co.y - hc.y - 0.03) * 0.3
     head.append(cap)
-    for (x, y, z, r) in ((0.0, 0.05, 0.225, 0.048), (0.04, 0.025, 0.232, 0.044), (-0.042, 0.018, 0.228, 0.044),
-                         (0.02, -0.035, 0.232, 0.05), (-0.03, -0.065, 0.205, 0.05)):
-        head.append(K.smooth(K.sphere("tuft", r, o(x, y, z), hair, 8, 5, (1.0, 1.2, 0.55)), 1))
-    band = K.paint(tube("goggle_band", [(o(0, -0.01, 0.168), 0.102, 0.11), (o(0, -0.01, 0.186), 0.102, 0.11)], segs=22, cap=False), strap)
-    head.append(band)
-    for sx in (-1, 1):  # goggles pushed up onto the forehead
-        g = K.cyl("goggle", 0.024, 0.02, (0, 0, 0), gear, 14)
-        g.rotation_euler = (math.pi / 2 - 0.5, 0, 0)
-        g.location = o(sx * 0.036, 0.083, 0.19)
-        le = K.cyl("lens", 0.018, 0.006, (0, 0, 0), lens, 14)
-        le.rotation_euler = (math.pi / 2 - 0.5, 0, 0)
-        le.location = o(sx * 0.036, 0.096, 0.198)
-        head += [g, le]
+    head.append(hood(o, jacket))
     part("head", head, hc)
 
     # ---- spool on the back (rides the chest bone)
