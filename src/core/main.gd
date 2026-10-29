@@ -189,15 +189,17 @@ func to_title() -> void:
 	hud.mode_sub = ""
 	hud.visible = false
 	touch.visible = false
-	_attract(SwingBot.Style.EXPERT)
+	_attract(SwingBot.Style.EXPERT, true)
 	# Frame the hero in the right half: the menus sit on the left.
-	camera.cam.h_offset = -1.3
+	camera.cam.h_offset = -2.8
 	menus.show_title()
 
 
 func start_mode(kind: String, arg: String) -> void:
 	get_tree().paused = false
 	camera.cam.h_offset = 0.0
+	camera.rail = Callable()
+	camera.distance_scale = 1.0
 	_end_mode()
 	_last_mode = [kind, arg]
 	player.bot = null
@@ -296,12 +298,35 @@ func _on_finished(result: Dictionary) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
-## Title screen backdrop: the autopilot swings through the city.
-func _attract(style: int) -> void:
-	var bot := SwingBot.new(style, Vector3.FORWARD)
-	if world.has_method("bot_goal"):
-		bot.goal_fn = world.bot_goal
+## Title screen backdrop: the autopilot swings through the city. The
+## showcase pilot tours the avenues; --bot=expert|novice gets the test bots.
+func _attract(style: int, showcase := false) -> void:
+	var bot: SwingBot
+	if showcase and world is CityWorld:
+		bot = ShowcasePilot.new(world)
+		_showcase_shot(bot as ShowcasePilot)
+		camera.rail = (bot as ShowcasePilot).rail
+		camera.distance_scale = 0.7
+	else:
+		bot = SwingBot.new(style, Vector3.FORWARD)
+		if world.has_method("bot_goal"):
+			bot.goal_fn = world.bot_goal
 	player.bot = bot
+
+
+## Straight into a swing down one of the tour's avenues (a camera cut).
+func _showcase_shot(pilot: ShowcasePilot) -> void:
+	var e := pilot.entry(_spawn_rng)
+	player.respawn(e[0])
+	player.s.velocity = e[1]
+	camera.snap()
+
+
+func _physics_process(dt: float) -> void:
+	if state == State.TITLE and player.bot is ShowcasePilot:
+		var pilot := player.bot as ShowcasePilot
+		if pilot.needs_cut(player, dt):
+			_showcase_shot(pilot)
 
 
 func _apply_settings() -> void:

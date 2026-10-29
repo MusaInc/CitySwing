@@ -17,6 +17,9 @@ const PROP_RANGES := {
 	"traffic_light": 220.0, "roof_hut": 650.0,
 }
 const MARKS_RANGE := 320.0
+## Traffic models (tools/blender/build_cars.py) and how common each is.
+const CAR_KINDS := [["car_sedan", 0.32], ["car_hatch", 0.25], ["car_suv", 0.2], ["car_taxi", 0.13], ["car_van", 0.1]]
+const TAXI_YELLOW := Color(0.98, 0.76, 0.12)
 const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62, 0.08, 0.07), Color(0.12, 0.24, 0.45),
 	Color(0.55, 0.57, 0.6), Color(0.9, 0.72, 0.15), Color(0.2, 0.35, 0.3)]
 
@@ -32,7 +35,7 @@ var building_mat: ShaderMaterial
 var ground_mat: ShaderMaterial
 var water_mat: ShaderMaterial
 var prop_meshes := {}
-var car_mesh: Mesh
+var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing
 var walker_mesh: Mesh
 var _walk_paths: Array = []  # [from, to] pavement segments (directional)
 const WALKER_RANGE := 170.0
@@ -298,20 +301,24 @@ func _load_props() -> void:
 		var m := _load_mesh(k)
 		if m:
 			prop_meshes[k] = m
-	var car := _load_mesh("car")
-	if car:
-		car_mesh = car.duplicate()
-		var shader: Shader = load("res://src/world/shaders/traffic.gdshader")
-		for i in car_mesh.get_surface_count():
-			var src := car_mesh.surface_get_material(i)
-			var sm := ShaderMaterial.new()
-			sm.shader = shader
-			var name := String(src.resource_name) if src else ""
-			if src is BaseMaterial3D:
-				sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
-			sm.set_shader_parameter("use_instance_color", name == "paint")
-			sm.set_shader_parameter("emission", 2.0 if name.begins_with("lamp") else 0.0)
-			car_mesh.surface_set_material(i, sm)
+	var shader: Shader = load("res://src/world/shaders/traffic.gdshader")
+	for kind in CAR_KINDS:
+		var car := _load_mesh(kind[0])
+		var cm: Mesh = null
+		if car:
+			cm = car.duplicate()
+			for i in cm.get_surface_count():
+				var src := cm.surface_get_material(i)
+				var sm := ShaderMaterial.new()
+				sm.shader = shader
+				var name := String(src.resource_name) if src else ""
+				if src is BaseMaterial3D:
+					sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
+				sm.set_shader_parameter("use_instance_color", name == "paint")
+				sm.set_shader_parameter("emission", 2.0 if name.begins_with("lamp") else 0.0)
+				sm.set_shader_parameter("roughness", 0.25 if name == "car_glass" else 0.45)
+				cm.surface_set_material(i, sm)
+		car_meshes.append(cm)
 	var walker := _load_mesh("pedestrian")
 	if walker:
 		walker_mesh = walker.duplicate()
@@ -856,7 +863,7 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 
 
 func _add_traffic(root: Node3D, key: Vector2i) -> void:
-	if car_mesh == null or traffic_density <= 0.0:
+	if car_meshes.is_empty() or traffic_density <= 0.0:
 		return
 	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
 	var rng := RandomNumberGenerator.new()
@@ -883,24 +890,45 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 	_parked_cars(rect, rng, xf, custom)
 	if xf.is_empty():
 		return
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.use_custom_data = true
-	mm.mesh = car_mesh
-	mm.instance_count = xf.size()
+	# Sort the cars into one MultiMesh per model (own RNG: the colour draws
+	# below stay as they were).
+	var kind_rng := RandomNumberGenerator.new()
+	kind_rng.seed = hash(key) ^ 0xca75
+	var groups: Array = []
+	for k in CAR_KINDS.size():
+		groups.append([])
 	for i in xf.size():
-		mm.set_instance_transform(i, xf[i])
-		mm.set_instance_custom_data(i, custom[i])
-		mm.set_instance_color(i, CAR_COLORS[rng.randi() % CAR_COLORS.size()])
-	var mmi := MultiMeshInstance3D.new()
-	mmi.name = "Traffic"
-	mmi.multimesh = mm
-	mmi.visibility_range_end = 520.0
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Cars travel up to a full segment along -Z; widen the culling box to match.
-	mmi.extra_cull_margin = CHUNK
-	root.add_child(mmi)
+		var r := kind_rng.randf()
+		var k := 0
+		while k < CAR_KINDS.size() - 1 and r > CAR_KINDS[k][1]:
+			r -= CAR_KINDS[k][1]
+			k += 1
+		if car_meshes[k] == null:
+			k = 0
+		var col: Color = CAR_COLORS[rng.randi() % CAR_COLORS.size()]
+		groups[k].append([xf[i], custom[i], TAXI_YELLOW if CAR_KINDS[k][0] == "car_taxi" else col])
+	for k in groups.size():
+		var g: Array = groups[k]
+		if g.is_empty() or car_meshes[k] == null:
+			continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.use_custom_data = true
+		mm.mesh = car_meshes[k]
+		mm.instance_count = g.size()
+		for i in g.size():
+			mm.set_instance_transform(i, g[i][0])
+			mm.set_instance_custom_data(i, g[i][1])
+			mm.set_instance_color(i, g[i][2])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "Traffic_" + CAR_KINDS[k][0]
+		mmi.multimesh = mm
+		mmi.visibility_range_end = 520.0
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Cars travel up to a full segment along -Z; widen the culling box to match.
+		mmi.extra_cull_margin = CHUNK
+		root.add_child(mmi)
 
 
 ## Two walking lines along every pavement (one each way), between the kerb

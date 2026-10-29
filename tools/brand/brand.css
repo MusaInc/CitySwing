@@ -1,0 +1,6 @@
+@font-face { font-family: Outfit; font-weight: 600; src: url(../../assets/fonts/outfit_semibold.ttf); }
+@font-face { font-family: Outfit; font-weight: 700; src: url(../../assets/fonts/outfit_bold.ttf); }
+@font-face { font-family: Outfit; font-weight: 900; src: url(../../assets/fonts/outfit_black.ttf); }
+:root { --ink: #110D26; --night: #17123A; --dusk: #43286F; --ember: #FF4D3D; --gold: #FFC93C; --web: #F7F3EA; --signal: #5CF2D0; --sunset: #FF9A4D; }
+html, body { margin: 0; background: transparent; font-family: Outfit, sans-serif; }
+svg text { font-family: Outfit; font-weight: 900; }

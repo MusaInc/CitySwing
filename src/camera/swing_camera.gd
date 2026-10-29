@@ -66,6 +66,10 @@ var _shake_t := 0.0
 var _body: Node3D          # the character, hidden if the lens gets inside it
 ## Overrides for close-up captures (--closeup).
 var distance_scale := 1.0
+## Title-screen drone shot: callable(pos) -> [point on the avenue's centre
+## line, unit direction of travel]. The camera faces down the avenue and
+## stays near its middle (never against a facade). Empty = normal follow.
+var rail: Callable
 
 
 func _ready() -> void:
@@ -147,7 +151,11 @@ func _process(dt: float) -> void:
 	var grounded := target.is_on_floor() and not target.s.attached
 
 	# --- yaw: follow the travel heading, smoothly and without flips ----------
-	if vh.length() > 3.0 and vh.length() > absf(v.y) * 0.35:
+	var rail_at: Array = rail.call(target.global_position) if rail.is_valid() else []
+	if not rail_at.is_empty():
+		var rd: Vector3 = rail_at[1]
+		_heading = atan2(-rd.x, -rd.z)
+	elif vh.length() > 3.0 and vh.length() > absf(v.y) * 0.35:
 		var travel := atan2(-vh.x, -vh.z)
 		var diff := wrapf(travel - _heading, -PI, PI)
 		if absf(diff) > deg_to_rad(110.0):
@@ -223,10 +231,18 @@ func _process(dt: float) -> void:
 		_col_dist = -1.0
 		_snapped = false
 	_focus = _smooth_damp(0, _focus, focus_goal, aim_smooth, dt)
-	_pos = _smooth_damp(1, _pos, _focus + basis.z * _dist, follow_smooth, dt)
+	var pos_goal := _focus + basis.z * _dist
+	if not rail_at.is_empty():
+		# Drone: further back and higher, slid most of the way to the centre line.
+		var rd: Vector3 = rail_at[1]
+		var side := rd.cross(Vector3.UP).normalized()
+		pos_goal = _focus + basis.z * (_dist + 1.0) + Vector3.UP * 1.2
+		pos_goal -= side * (pos_goal - (rail_at[0] as Vector3)).dot(side) * 0.75
+	_pos = _smooth_damp(1, _pos, pos_goal, follow_smooth * (1.3 if not rail_at.is_empty() else 1.0), dt)
 	var off := _pos - _focus
-	if off.length() > _dist * 1.2:
-		_pos = _focus + off.normalized() * _dist * 1.2
+	var max_off := _dist * 1.2 if rail_at.is_empty() else _dist + 3.0
+	if off.length() > max_off:
+		_pos = _focus + off.normalized() * max_off
 	var shaken := _focus + Vector3.UP * _bump * 0.5
 	# The focus leads/lags the body; hugging a facade it can end up inside the
 	# wall, and every wall check from there passes. Keep it on the body's side.

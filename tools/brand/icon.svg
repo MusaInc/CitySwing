@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <!-- City Swing app icon: the hero mid-swing across a sunset sun, skyline below.
+       Full-bleed square (iOS masks the corners). Palette: docs/BRAND.md -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17123A"/>
+      <stop offset="0.42" stop-color="#43286F"/>
+      <stop offset="0.74" stop-color="#D9505F"/>
+      <stop offset="1" stop-color="#FF9A4D"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.4" r="0.62">
+      <stop offset="0" stop-color="#FFE7A3"/>
+      <stop offset="0.65" stop-color="#FFC93C"/>
+      <stop offset="1" stop-color="#FFA92E"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFC93C" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#FFC93C" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="far" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5B2F6E"/>
+      <stop offset="1" stop-color="#2A1A4A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <circle cx="500" cy="540" r="480" fill="url(#glow)"/>
+  <circle cx="500" cy="540" r="318" fill="url(#sun)"/>
+
+  <!-- far skyline (haze) -->
+  <path fill="url(#far)" opacity="0.8" transform="translate(0 40)" d="M0 760 H60 V690 H110 V650 H160 V720 H230 V600 H262 V560 H286 V600 H320 V700 H380 V660 H440
+    V720 H520 V640 H560 V600 H600 V650 H660 V700 H700 V620 H760 V580 H800 V660 H850 V700 H900 V630 H960 V690 H1024 V1024 H0 Z"/>
+  <!-- near skyline -->
+  <path fill="#110D26" d="M0 820 H48 V740 H128 V800 H170 V690 H200 V650 H214 V560 H222 V650 H236 V690 H268 V780 H330 V850
+    H400 V790 H470 V880 H560 V830 H620 V760 H650 V720 H690 V760 H720 V820 H770 V700 H850 V660 H880 V700 H900 V790 H960 V740
+    H1024 V1024 H0 Z"/>
+  <g fill="#FFC93C">
+    <rect x="66" y="760" width="14" height="20" opacity="0.9"/><rect x="96" y="790" width="14" height="20" opacity="0.6"/>
+    <rect x="186" y="712" width="14" height="20" opacity="0.9"/><rect x="236" y="740" width="14" height="20" opacity="0.7"/>
+    <rect x="788" y="724" width="14" height="20" opacity="0.9"/><rect x="818" y="760" width="14" height="20" opacity="0.6"/>
+    <rect x="788" y="796" width="14" height="20" opacity="0.8"/><rect x="976" y="770" width="14" height="20" opacity="0.8"/>
+    <rect x="636" y="790" width="14" height="20" opacity="0.7"/><rect x="420" y="812" width="14" height="20" opacity="0.6"/>
+  </g>
+
+  <!-- web line from off-canvas top right to the hero's hand -->
+  <path d="M1070 -120 L640 240" stroke="#F7F3EA" stroke-width="13" stroke-linecap="round"/>
+
+  <!-- hero, swinging right: web arm straight up the line, body arched,
+       knees tucked and swept back, free arm thrown forward -->
+  <g transform="translate(0 -60)">
+  <g fill="#110D26" stroke="#110D26" stroke-linecap="round" stroke-linejoin="round">
+    <!-- neck -->
+    <path d="M540 380 L548 420" stroke-width="34" fill="none"/>
+    <!-- web arm: upper + forearm, hand on the line -->
+    <path d="M572 432 L612 352" stroke-width="44" fill="none"/>
+    <path d="M612 352 L640 300" stroke-width="36" fill="none"/>
+    <circle cx="642" cy="298" r="22" stroke="none"/>
+    <!-- torso: shoulders wide, tapering to the hips, slight arch -->
+    <path stroke="none" d="M540 412 C590 410 616 440 604 478 L530 610 C512 640 462 640 452 606 C446 584 470 540 488 500 C500 460 506 418 540 412 Z"/>
+    <!-- free arm thrown forward -->
+    <path d="M590 462 L668 486" stroke-width="40" fill="none"/>
+    <path d="M668 486 L736 452" stroke-width="32" fill="none"/>
+    <circle cx="740" cy="450" r="19" stroke="none"/>
+    <!-- head -->
+    <circle cx="538" cy="372" r="44" stroke="none"/>
+    <!-- front leg: thigh forward, shin tucked back -->
+    <path d="M500 600 L586 668" stroke-width="58" fill="none"/>
+    <path d="M586 668 L536 764" stroke-width="46" fill="none"/>
+    <path d="M536 764 L566 782" stroke-width="30" fill="none"/>
+    <!-- back leg: long, trailing -->
+    <path d="M478 606 L420 706" stroke-width="58" fill="none"/>
+    <path d="M420 706 L332 744" stroke-width="46" fill="none"/>
+    <path d="M332 744 L318 772" stroke-width="30" fill="none"/>
+  </g>
+  <!-- suit: one ember band across the chest -->
+  <path fill="#FF4D3D" d="M532 452 L600 474 L590 494 L522 474 Z"/>
+  </g>
+</svg>

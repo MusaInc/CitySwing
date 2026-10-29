@@ -194,27 +194,6 @@ def streetlight():
     export("streetlight.glb", [join("streetlight", parts + [arm, head, glow])])
 
 
-def car():
-    reset()
-    paint = mat("paint", (1.0, 1.0, 1.0), 0.35, 0.3)
-    glass = mat("car_glass", (0.08, 0.1, 0.12), 0.1, 0.2)
-    tyre = mat("tyre", (0.05, 0.05, 0.05), 0.9)
-    lights = mat("lamp", (1.0, 0.92, 0.75), 0.3, 0.0, emit=(1.0, 0.85, 0.6))
-    tail = mat("lamp_red", (0.9, 0.1, 0.05), 0.4, 0.0, emit=(1.0, 0.1, 0.05))
-    body = box("body", (1.8, 4.3, 0.7), (0, 0, 0.62), paint, bevel=0.18, segs=3)
-    cabin = box("cabin", (1.6, 2.3, 0.62), (0, -0.25, 1.22), glass, bevel=0.2, segs=3)
-    parts = [body, cabin]
-    for sx in (-0.86, 0.86):
-        for sy in (-1.35, 1.35):
-            w = cyl("w", 0.34, 0.24, (sx - 0.12 * (1 if sx < 0 else -1), sy, 0.34), tyre, 12)
-            w.rotation_euler = (0, math.pi / 2, 0)
-            w.location = (sx - 0.12, sy, 0.34) if sx > 0 else (sx - 0.12, sy, 0.34)
-            parts.append(w)
-    parts.append(box("hl", (1.5, 0.05, 0.14), (0, 2.16, 0.72), lights))
-    parts.append(box("tl", (1.5, 0.05, 0.14), (0, -2.16, 0.78), tail))
-    export("car.glb", [join("car", parts)])
-
-
 def tree():
     reset()
     bark = mat("bark", (0.3, 0.22, 0.16), 0.9)
@@ -652,7 +631,8 @@ def character():
 
 
 if __name__ == "__main__":
-    for fn in (water_tower, ac_unit, antenna, streetlight, car, tree, clock_crown, harbour_dome, beacon,
+    # Cars: tools/blender/build_cars.py
+    for fn in (water_tower, ac_unit, antenna, streetlight, tree, clock_crown, harbour_dome, beacon,
                cathedral_tower_top, viaduct, crane, traffic_light, pedestrian, roof_hut):
         fn()
     print("KIT DONE")

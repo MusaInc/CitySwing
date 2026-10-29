@@ -1,4 +1,32 @@
-# Status: 2026-10-29 (movement & body physics pass)
+# Status: 2026-10-29 (brand, menus, cars, title-screen pilot)
+
+## Brand, front end, cars, showcase pilot (latest)
+
+- **Brand system** (docs/BRAND.md): new app icon (hero mid-swing across a gold
+  sun over a dusk skyline), roundel mark, stacked + horizontal wordmark,
+  splash/banner, palette, type and UI rules. All rendered from source by
+  `node tools/brand/render.mjs` (Playwright Chromium + ImageMagick trim).
+  Boot splash and iOS launch background use it.
+- **Menus**: the code-drawn logo is replaced by the wordmark texture; cards
+  are Night Ink glass with a hairline edge, gold focus ring; "TAP TO START"
+  is a gold pill; palette moved to `UiStyle` brand constants.
+- **Cars**: five models from `tools/blender/build_cars.py` (sedan, hatchback,
+  SUV, van, taxi – profiled bodies, glass cabins, wheels with hubs, bumpers,
+  lamps, mirrors, ~750 faces each), one MultiMesh per model per chunk; taxis
+  are always yellow. The old two-box `car.glb` is gone.
+- **Title-screen pilot** (`ShowcasePilot`, title only – the tests' expert bot
+  is unchanged): tours a loop of the four inner avenues, steers to the
+  centre line, picks webs whose predicted swing stays inside the avenue,
+  re-webs before drifting into a facade, always takes the wall-kick save,
+  and the title cuts to a fresh mid-air entry if a shot goes wrong (stalled,
+  off the avenue, knocked out, on the street). Camera: `SwingCamera.rail`
+  drone shot down the avenue, closer framing (distance 0.7).
+  `tools/attract_audit.gd` measures it (12 × 50 s, vs. the expert from the
+  same starts): speed 23.5 vs 19.0 m/s, swings 38 vs 27, bumps 7.1 vs 8.7,
+  KOs 0.08 vs 0.17 per run. Hard wall hits are still ~4 per run before cuts.
+- **Look**: the default Comic look is cleaner – no halftone grain, gentler
+  split-tone and vignette, slightly brighter, fewer interior ink lines.
+- Tests: 80 native pass. Not yet checked on a device.
 
 ## Dives, knockouts, bumps, turning, walk control (latest)
 

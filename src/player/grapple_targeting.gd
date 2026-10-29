@@ -171,6 +171,11 @@ static func _closest_on_segment_to_ray(a: Vector3, b: Vector3, o: Vector3, d: Ve
 	return a + u * t
 
 
+## Ranked anchor candidates from the last scan: [score, point, normal], best first.
+func candidates() -> Array:
+	return _candidates
+
+
 ## Re-evaluates `pick` when it is stale (call every tick; cheap otherwise).
 func refresh_pick(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, p: SwingParams,
 		exclude: Array[RID], dt: float, force := false) -> void:

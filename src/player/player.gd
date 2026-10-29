@@ -579,6 +579,8 @@ func _fire(origin: Vector3) -> void:
 	if line_will_hit:
 		s.position = global_position
 		line_target = targeting.best_flyable(get_world_3d().direct_space_state, s, params, [get_rid()])
+		if bot != null and bot.has_method("choose_anchor"):
+			line_target = bot.choose_anchor(self, line_target)  # title-screen pilot
 	else:
 		line_target = origin + aim_dir.normalized() * params.grapple_range * 0.8
 	grapple_fired.emit(line_target, line_will_hit)

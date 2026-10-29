@@ -1,8 +1,7 @@
 class_name MenuParts
 extends RefCounted
-## Building blocks for the front end: vector icons, the logo with its web
-## line, and the left-hand backdrop gradient. Everything is drawn in code
-## (no image assets), so it stays sharp at any resolution.
+## Building blocks for the front end: vector icons (drawn in code, sharp at
+## any resolution), the brand wordmark, and the backdrop gradients.
 
 
 ## A small vector icon. `kind`: play, timer, endurance, training, suit, stats,
@@ -111,34 +110,19 @@ class Icon:
 				draw_circle(c, s * 0.3, color)
 
 
-## CITY / SWING lockup with a web line slung under the second word.
+## The City Swing wordmark (assets/brand/wordmark_stacked.png, rendered by
+## tools/brand/render.mjs). `k` = 1 is 470 px wide.
 class Logo:
-	extends Control
-	var scale_k := 1.0
+	extends TextureRect
 
 	func _init(k := 1.0) -> void:
-		scale_k = k
-		custom_minimum_size = Vector2(470, 196) * k
+		texture = load("res://assets/brand/wordmark_stacked.png")
+		expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+		var aspect := texture.get_height() / float(texture.get_width()) if texture else 0.42
+		custom_minimum_size = Vector2(470.0, 470.0 * aspect) * k
+		size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	func _draw() -> void:
-		var k := scale_k
-		var black := UiStyle.font("black")
-		var fs := int(124 * k)
-		var sw := "SWING"
-		var width := black.get_string_size(sw, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		# SWING hangs off a web line: anchored up and to the right, taut down
-		# to the top of the G (drawn first, so the letters sit over it).
-		var anchor := Vector2(4 + width / k + 34, 4) * k
-		var grip := Vector2(4 + width / k - 30, 78) * k
-		draw_line(anchor, grip, Color(1, 1, 1, 0.9), 3.0 * k, true)
-		draw_circle(anchor, 5.0 * k, Color.WHITE)
-		draw_string(black, Vector2(6, 52) * k, "C I T Y", HORIZONTAL_ALIGNMENT_LEFT, -1, int(44 * k),
-			Color(1, 1, 1, 0.95))
-		draw_string(black, Vector2(4, 158) * k + Vector2(4, 5) * k, sw, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
-			Color(0, 0, 0, 0.35))
-		draw_string(black, Vector2(4, 158) * k, sw, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiStyle.GOLD)
-		draw_circle(grip, 4.5 * k, UiStyle.TEAL)
 
 
 ## Full-rect gradient: dark on the left where the menus sit, clear on the

@@ -1,12 +1,16 @@
 class_name UiStyle
 extends RefCounted
 ## Shared HUD / controls / menu look: Outfit (assets/fonts, OFL) and the
-## palette. Fonts fall back to the engine font if the files are missing.
+## brand palette (docs/BRAND.md). Fonts fall back to the engine font if the
+## files are missing.
 
-const GOLD := Color(1.0, 0.82, 0.4)
-const TEAL := Color(0.45, 1.0, 0.85)
-const INK := Color(0.05, 0.06, 0.09)
-const PANEL := Color(0.05, 0.06, 0.09, 0.42)
+const GOLD := Color("#FFC93C")   # Signal Gold: primary, calls to action
+const EMBER := Color("#FF4D3D")  # hero suit, warnings
+const TEAL := Color("#5CF2D0")   # Web Teal: tokens, highlights
+const WEB := Color("#F7F3EA")    # Web White: text, the web line
+const DUSK := Color("#43286F")   # panels, sky
+const INK := Color("#110D26")    # Night Ink: type on gold, silhouettes
+const PANEL := Color(0.067, 0.051, 0.149, 0.5)
 
 static var _fonts := {}
 
