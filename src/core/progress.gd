@@ -109,6 +109,4 @@ static func newly_unlocked(before: Array) -> Array:
 
 
 static func current_suit_color() -> Color:
-	var id: String = _save().data.get("suit", "ember")
-	var s := suit(id)
-	return s["color"] if unlocked(s) else SUITS[0]["color"]
+	return Shop.item(Shop.equipped("suit"))["color"]

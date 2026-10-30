@@ -22,6 +22,7 @@ extends Node3D
 ## correction from "pivot in A-pose" to "skeleton bone at rest".
 
 const MODEL_PATH := "res://assets/models/character.glb"
+const GEAR_PATH := "res://assets/models/gear.glb"
 
 # Bone layout: name -> [parent, local rest offset, length]
 const BONES := {
@@ -158,6 +159,9 @@ const SETTLE_DIST := 0.16  # a standing foot further than this from its rest spo
 const SETTLE_TIME := 0.28
 var _step_off := 0.0       # visual ease after the capsule steps up a kerb
 var _grips := {}           # "l"/"r" -> [open_node, grip_node]
+var _gear := {}            # headwear model name -> MeshInstance3D on the head pivot
+## The outfit being drawn (Shop.look()).
+var look_state := {}
 var _scarf: Array[Node3D] = []
 var _scarf_pts: Array[Vector3] = []
 var _scarf_prev: Array[Vector3] = []
@@ -171,7 +175,6 @@ func _ready() -> void:
 	if skeleton:
 		for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
 			(mi as MeshInstance3D).material_override = mat
-	set_suit_color(Progress.current_suit_color())
 	for name in BONES:
 		var def: Array = BONES[name]
 		var pivot := Node3D.new()
@@ -197,6 +200,25 @@ func _ready() -> void:
 			bones["hand_" + side].add_child(grip)
 			grip.visible = false
 			_grips[side] = [parts.get("hand_" + side), grip]
+	# Headwear: the hood (part of the character model) and the shop gear
+	# (gear.glb) all ride the head; apply_look shows one hat and one face piece.
+	var hood: MeshInstance3D = parts.get("hood")
+	if hood:
+		_gear["hood"] = hood
+	if ResourceLoader.exists(GEAR_PATH):
+		var g: Node = (load(GEAR_PATH) as PackedScene).instantiate()
+		for mi in g.find_children("*", "MeshInstance3D", true, false):
+			mi.get_parent().remove_child(mi)
+			mi.owner = null
+			_gear[String(mi.name).to_lower()] = mi
+		g.free()
+	for key in _gear:
+		var gm: MeshInstance3D = _gear[key]
+		gm.transform = Transform3D.IDENTITY
+		gm.material_override = mat
+		gm.visible = false
+		bones["head"].add_child(gm)
+	apply_look(Shop.look())
 	launcher = bones["hand_r"]
 	_bind_skeleton()
 	for i in (3 if parts.has("scarf_0") else 0):  # optional cloth tail
@@ -218,6 +240,18 @@ func _ready() -> void:
 func set_suit_color(c: Color) -> void:
 	if _mat:
 		_mat.set_shader_parameter("suit_color", Vector3(c.r, c.g, c.b))
+
+
+## Dresses the hero in a Shop.look(): region colours and the headwear.
+func apply_look(look: Dictionary) -> void:
+	look_state = look
+	if _mat:
+		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
+				["glove", "glove_color"], ["glow", "glow_color"]]:
+			var c: Color = look[k[0]]
+			_mat.set_shader_parameter(k[1], Vector3(c.r, c.g, c.b))
+	for key in _gear:
+		(_gear[key] as MeshInstance3D).visible = key == look.get("head", "hood") or key == look.get("face", "")
 
 
 func set_player(p: Player) -> void:

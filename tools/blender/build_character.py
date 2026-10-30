@@ -10,7 +10,7 @@ Output: character.glb with
                   one surface instead of rigid segments), decimated for mobile,
                   vertex-coloured from the painted source shapes, and weighted
                   automatically (bone heat).
-  * rigid parts – head, open hands, gripping fists, sneakers, spool and the
+  * rigid parts – head, hood (separate so headwear can swap it), open hands, gripping fists, sneakers, spool and the
                   web gauntlet, one object per bone with its origin at the joint (the
                   same convention as before: Godot parents them to the pivots).
 
@@ -398,8 +398,9 @@ def build():
         if v.co.y - hc.y > 0.03 and v.co.z - hc.z < 0.17:
             v.co.y = hc.y + 0.03 - (v.co.y - hc.y - 0.03) * 0.3
     head.append(cap)
-    head.append(hood(o, jacket))
     part("head", head, hc)
+    # The hood is its own part (same origin) so shop headwear can replace it.
+    part("hood", [hood(o, jacket)], hc)
 
     # ---- spool on the back (rides the chest bone)
     cc = J["chest"]

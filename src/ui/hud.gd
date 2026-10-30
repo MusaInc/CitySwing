@@ -16,6 +16,13 @@ var hint := ""
 var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
+var coins: CoinMeter
+var _coin_shown := -1.0    # rolling balance readout
+var _gain := 0             # coins in the current "+n" burst
+var _gain_t := 0.0
+var _mult_pop := 0.0       # multiplier step-up pop (s remaining)
+var _lost_t := 0.0         # multiplier lost flash (s remaining, real time)
+var _lost_from := 1.0
 var _marks: Array = []  # [{pos, ok, reason, t}]
 var _banner_t := 0.0
 var _font: Font
@@ -63,6 +70,19 @@ func on_knockout(speed: float) -> void:
 	_ko_kmh = int(speed * 3.6)
 
 
+func on_coins(n: int) -> void:
+	_gain = (_gain if _gain_t > 0.0 else 0) + n
+	_gain_t = 1.1
+
+
+func on_multiplier(_mult: float, up: bool, from: float) -> void:
+	if up:
+		_mult_pop = 0.6
+	else:
+		_lost_t = KO_TIME
+		_lost_from = from
+
+
 func flash(text: String, seconds := 2.0) -> void:
 	banner = text
 	_banner_t = seconds
@@ -75,6 +95,9 @@ func _process(dt: float) -> void:
 	_lines_boost = maxf(_lines_boost - dt * 1.6, 0.0)
 	_reticle_spin += dt * 1.4
 	_ko_t = maxf(_ko_t - dt / maxf(Engine.time_scale, 0.05), 0.0)
+	_lost_t = maxf(_lost_t - dt / maxf(Engine.time_scale, 0.05), 0.0)
+	_gain_t = maxf(_gain_t - dt, 0.0)
+	_mult_pop = maxf(_mult_pop - dt, 0.0)
 	for m in _marks:
 		m["t"] += dt
 	_marks = _marks.filter(func(m): return m["t"] < (0.45 if m["ok"] else 0.9))
@@ -146,6 +169,8 @@ func _draw() -> void:
 	# Island on iPhones held in landscape).
 	var g := _safe_origin() + Vector2(86, 86)
 	_draw_speed_gauge(g, white, shadow)
+	if coins and coins.active:
+		_draw_coins(g + Vector2(78, -50), white, shadow)
 	if player.chain > 1:
 		var ct := "CHAIN ×%d" % player.chain
 		var cw := _font.get_string_size(ct, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
@@ -225,6 +250,67 @@ func _draw_knockout() -> void:
 	var sub := "WALL · %d KM/H" % _ko_kmh
 	var sw := _font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 	_text(Vector2(size.x / 2.0 - sw / 2.0, size.y * 0.36 + 32), sub, 18, Color(1, 1, 1, 0.8 * a), Color(0, 0, 0, 0.4 * a))
+	if _lost_t > 0.0:
+		var lt := "×%s MULTIPLIER LOST" % _fmt_mult(_lost_from)
+		var lw := _font_black.get_string_size(lt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+		var lp := Vector2(size.x / 2.0 - lw / 2.0, size.y * 0.36 + 64)
+		draw_string(_font_black, lp + Vector2(2, 2), lt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0, 0, 0, 0.45 * a))
+		draw_string(_font_black, lp, lt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(UiStyle.GOLD, a))
+
+
+## Coin balance (rolling up as coins come in, with a "+n" burst) over the
+## multiplier and its progress to the next step. Top-left, right of the
+## speed gauge.
+func _draw_coins(p: Vector2, white: Color, shadow: Color) -> void:
+	var bal := float(SaveData.data.get("coins", 0))
+	_coin_shown = bal if _coin_shown < 0.0 or absf(bal - _coin_shown) > 5000.0 else move_toward(_coin_shown, bal,
+		maxf(absf(bal - _coin_shown) * 0.12, 0.5))
+	var txt := _fmt_int(int(round(_coin_shown)))
+	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+	UiStyle.pill(self, Rect2(p, Vector2(tw + 62, 40)), Color(0, 0, 0, 0.32))
+	draw_coin(self, p + Vector2(21, 20), 11.0)
+	draw_string(_font_black, p + Vector2(40, 30), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, shadow)
+	draw_string(_font_black, p + Vector2(38, 28), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, white)
+	if _gain_t > 0.0:
+		var ga := clampf(_gain_t / 0.4, 0.0, 1.0)
+		var gp := p + Vector2(tw + 72, 29 - (1.1 - _gain_t) * 10.0)
+		draw_string(_font_black, gp + Vector2(2, 2), "+%d" % _gain, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0, 0, 0, 0.4 * ga))
+		draw_string(_font_black, gp, "+%d" % _gain, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(UiStyle.GOLD, ga))
+	# Multiplier: warms from white to gold as it climbs; pops on each step.
+	var m := coins.multiplier()
+	var hot := clampf((m - 1.0) / (CoinMeter.MAX_MULT - 1.0), 0.0, 1.0)
+	var col := Color(1, 1, 1, 0.92).lerp(UiStyle.GOLD, minf(hot * 2.0, 1.0))
+	var pop := 1.0 + 0.45 * (_mult_pop / 0.6) * (_mult_pop / 0.6)
+	var fs := int(30 * pop)
+	var mt := "×%s" % _fmt_mult(m)
+	var mp := p + Vector2(4, 80)
+	draw_string(_font_black, mp + Vector2(2, 3), mt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, shadow)
+	draw_string(_font_black, mp, mt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
+	var bar := Rect2(p + Vector2(6, 90), Vector2(96, 6))
+	UiStyle.pill(self, bar, Color(1, 1, 1, 0.18))
+	var k := coins.level_progress()
+	if k > 0.02:
+		UiStyle.pill(self, Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), col)
+
+
+## A gold coin (also used by the shop).
+static func draw_coin(ci: CanvasItem, c: Vector2, r: float) -> void:
+	ci.draw_circle(c, r, Color(0.78, 0.52, 0.12))
+	ci.draw_circle(c + Vector2(0, -0.8), r * 0.86, UiStyle.GOLD)
+	ci.draw_arc(c + Vector2(0, -0.8), r * 0.56, 0, TAU, 20, Color(0.78, 0.52, 0.12), maxf(1.5, r * 0.14), true)
+
+
+static func _fmt_mult(m: float) -> String:
+	return ("%d" % int(m)) if is_equal_approx(m, round(m)) else ("%.1f" % m)
+
+
+static func _fmt_int(n: int) -> String:
+	var s := str(absi(n))
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.right(3) + out
+		s = s.left(s.length() - 3)
+	return ("-" if n < 0 else "") + s + out
 
 
 ## Speed: a 270° gauge (full at 144 km/h) that warms from white to gold
@@ -296,7 +382,7 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var sp := cam.unproject_position(pointer)
 	var margin := 48.0
 	var on := not behind and sp.x > margin and sp.x < size.x - margin and sp.y > margin and sp.y < size.y - margin \
-		and not (sp.x < 190.0 and sp.y < 200.0)
+		and not (sp.x < 340.0 and sp.y < 200.0)
 	if on:
 		sp = _clear_of_thumbs(sp)
 		var pts := PackedVector2Array([sp + Vector2(0, -12), sp + Vector2(10, 0), sp + Vector2(0, 12), sp + Vector2(-10, 0), sp + Vector2(0, -12)])
@@ -313,7 +399,7 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var half := c - Vector2(margin, margin)
 	var t := minf(half.x / maxf(absf(dir.x), 1e-4), half.y / maxf(absf(dir.y), 1e-4))
 	var p := c + dir * t
-	if p.x < 190.0 and p.y < 200.0:
+	if p.x < 340.0 and p.y < 200.0:
 		p.y = 200.0  # keep clear of the speed gauge
 	p = _clear_of_thumbs(p)
 	var side := Vector2(-dir.y, dir.x)

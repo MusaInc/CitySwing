@@ -2,7 +2,7 @@ class_name Menus
 extends Control
 ## The front end, built in code: a tap-to-start splash, the main menu down
 ## the left of the screen (the attract-mode swing stays visible on the
-## right), and every other screen – time trials, suits, stats, settings,
+## right), and every other screen – time trials, the shop, stats, settings,
 ## pause, results, live tuning – in the same layout: a header with a back
 ## button, cards with icons and progress, slide-in transitions, UI clicks.
 ## Big touch targets; focus-navigable for controllers and keyboards.
@@ -13,7 +13,8 @@ signal restart
 signal quit_to_title
 signal tuning_changed
 signal end_session
-signal suit_changed(color: Color)
+## The hero should wear this Shop.look() (equipped outfit or a try-on).
+signal look_changed(look: Dictionary)
 
 const ACCENT := UiStyle.GOLD
 const DIM := Color(1, 1, 1, 0.62)
@@ -215,11 +216,11 @@ func _show_main() -> void:
 	if trained:
 		train.custom_minimum_size.x = 264
 		grid.add_child(train)
-		var suits := _card("Suits", "%d/%d unlocked" % [Progress.unlocked_ids().size(), Progress.SUITS.size()],
-			"suit", show_suits)
-		suits.custom_minimum_size.x = 264
-		_reg("suits_card", suits)
-		grid.add_child(suits)
+		var shop := _card("Shop", "Suits, clothes, webs", "shop", show_shop.bind("", "", true),
+			Hud._fmt_int(Shop.coins()), false, "coin", ACCENT)
+		shop.custom_minimum_size.x = 264
+		_reg("shop_card", shop)
+		grid.add_child(shop)
 	left.add_child(grid)
 	row.add_child(_spacer())
 	# Right: progress chips at the top, quick buttons at the bottom.
@@ -230,14 +231,13 @@ func _show_main() -> void:
 	chips.alignment = BoxContainer.ALIGNMENT_END
 	chips.add_child(_chip("token", UiStyle.TEAL, "%d/%d" % [tokens, Progress.TOKEN_TOTAL]))
 	chips.add_child(_chip("medal", Progress.MEDAL_COLORS[Progress.Medal.GOLD], "%d/%d" % [mc[0], CourseBuilder.COURSES.size()]))
-	chips.add_child(_chip("suit", Progress.suit(SaveData.data.get("suit", "ember"))["color"].lightened(0.2),
-		"%d/%d" % [Progress.unlocked_ids().size(), Progress.SUITS.size()]))
+	chips.add_child(_coin_chip(Shop.coins()))
 	right.add_child(chips)
 	right.add_child(_spacer(true))
 	var quick := HBoxContainer.new()
 	quick.alignment = BoxContainer.ALIGNMENT_END
 	if not trained:
-		quick.add_child(_reg("suits", _icon_button("suit", "Suits", show_suits)))
+		quick.add_child(_reg("shop", _icon_button("shop", "Shop", show_shop.bind("", "", true))))
 	quick.add_child(_reg("stats", _icon_button("stats", "Stats", show_stats)))
 	quick.add_child(_reg("settings", _icon_button("gear", "Settings", func(): show_settings(show_title))))
 	right.add_child(quick)
@@ -279,39 +279,192 @@ func show_courses() -> void:
 		first.grab_focus.call_deferred()
 
 
-# =================================================================== suits
+# ==================================================================== shop
+var _shop_tab := "suit"
+var _shop_sel := ""
+
+
 func show_suits() -> void:
-	var box := _page("suits", "SUITS", show_title, 660)
-	box.add_child(_label("Your hero wears the suit right away – watch the city.", 18, DIM, "semibold",
-		HORIZONTAL_ALIGNMENT_LEFT))
-	var current: String = SaveData.data.get("suit", "ember")
-	var focus: Button
+	show_shop("suit")
+
+
+## The shop: a tab per slot, the picked item (worn on the hero straight away
+## as a try-on) with its Buy / Wear button, and every item in the slot.
+## Leaving puts the equipped outfit back on.
+func show_shop(tab := "", sel := "", anim := true) -> void:
+	if tab != "":
+		_shop_tab = tab
+	if Shop.in_slot(_shop_tab).is_empty():
+		_shop_tab = "suit"
+	_shop_sel = sel if not Shop.item(sel).is_empty() else Shop.equipped(_shop_tab)
+	var box := _page("shop", "SHOP", _leave_shop, 700, 0.0, anim)
+	var col := box.get_parent().get_parent() as VBoxContainer
+	var head := col.get_child(0) as HBoxContainer
+	head.add_child(_spacer())
+	var bal := _coin_chip(Shop.coins(), 22)
+	bal.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(bal)
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 6)
+	for sl in Shop.SLOTS:
+		var slot: String = sl[0]
+		var on := slot == _shop_tab
+		var b := Button.new()
+		b.text = sl[1]
+		b.add_theme_font_size_override("font_size", 17)
+		b.custom_minimum_size = Vector2(0, 50)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if on:
+			for st in ["normal", "hover", "focus", "pressed"]:
+				b.add_theme_stylebox_override(st, _box(ACCENT, 14, Color.WHITE if st == "focus" else Color.TRANSPARENT,
+					3 if st == "focus" else 0, 4))
+			for fc in ["font_color", "font_hover_color", "font_focus_color", "font_pressed_color"]:
+				b.add_theme_color_override(fc, UiStyle.INK)
+		else:
+			b.add_theme_stylebox_override("normal", _box(Color(UiStyle.INK, 0.62), 14, Color(1, 1, 1, 0.09), 1, 4))
+		b.pressed.connect(func():
+			_tap()
+			show_shop(slot, "", false))
+		_reg("tab_" + slot, b)
+		tabs.add_child(b)
+	col.add_child(tabs)
+	col.move_child(tabs, 1)
+	var detail := _shop_detail(Shop.item(_shop_sel))
+	col.add_child(detail)
+	col.move_child(detail, 2)
 	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 12)
-	for sd in Progress.SUITS:
-		var open := Progress.unlocked(sd)
-		var id: String = sd["id"]
-		var col: Color = sd["color"]
-		var equipped: bool = id == current
-		var b := _card(sd["name"], "Equipped" if equipped else ("Tap to wear" if open else sd["hint"]),
-			"suit" if open else "lock", func():
-				if not open:
-					return
-				SaveData.set_suit(id)
-				suit_changed.emit(col)
-				show_suits(), "", false, "check" if equipped else "", ACCENT,
-				col.lightened(0.15) if open else Color(col.lightened(0.3), 0.5))
-		b.custom_minimum_size = Vector2(318, 78)
-		b.disabled = not open
-		_reg("suit_" + id, b)
-		grid.add_child(b)
-		if equipped:
-			focus = b
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	var focus: Button
+	for it in Shop.in_slot(_shop_tab):
+		var t := _shop_tile(it)
+		grid.add_child(t)
+		if it["id"] == _shop_sel:
+			focus = t
 	box.add_child(grid)
+	look_changed.emit(Shop.look({_shop_tab: _shop_sel}))
 	if focus:
 		focus.grab_focus.call_deferred()
+
+
+func _leave_shop() -> void:
+	look_changed.emit(Shop.look())
+	show_title()
+
+
+func _shop_tile(it: Dictionary) -> Button:
+	var id: String = it["id"]
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(222, 84)
+	b.focus_mode = Control.FOCUS_ALL
+	if id == _shop_sel:
+		b.add_theme_stylebox_override("normal", _box(Color(UiStyle.DUSK, 0.8), 16, ACCENT, 3))
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 12
+	row.offset_right = -10
+	row.add_theme_constant_override("separation", 10)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sw := MenuParts.Swatch.new(it, 52)
+	sw.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(sw)
+	var texts := VBoxContainer.new()
+	texts.alignment = BoxContainer.ALIGNMENT_CENTER
+	texts.add_theme_constant_override("separation", 2)
+	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	texts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var nl := _label(it["name"], 19, Color.WHITE, "bold", HORIZONTAL_ALIGNMENT_LEFT)
+	nl.clip_text = true
+	nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	texts.add_child(nl)
+	texts.add_child(_shop_status(it, 15))
+	row.add_child(texts)
+	b.add_child(row)
+	b.pressed.connect(func():
+		_tap(1.1)
+		show_shop(_shop_tab, id, false))
+	_reg("item_" + id, b)
+	return b
+
+
+## Equipped / Owned / price / how to earn it.
+func _shop_status(it: Dictionary, size: int) -> Control:
+	var id: String = it["id"]
+	if Shop.equipped(it["slot"]) == id:
+		return _label("Equipped", size, UiStyle.TEAL, "bold", HORIZONTAL_ALIGNMENT_LEFT)
+	if Shop.owns(id):
+		return _label("Owned", size, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT)
+	if not Shop.for_sale(id):
+		var l := _label(it.get("hint", "Locked"), size, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT)
+		l.clip_text = true
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		return l
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var ic := MenuParts.Icon.new("coin", Color.WHITE, size + 3)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(ic)
+	var dear: bool = Shop.coins() < it["price"]
+	row.add_child(_label(Hud._fmt_int(it["price"]), size + 1, FAINT if dear else ACCENT, "black", HORIZONTAL_ALIGNMENT_LEFT))
+	return row
+
+
+## The picked item: big swatch, name, and what you can do with it.
+func _shop_detail(it: Dictionary) -> PanelContainer:
+	var id: String = it["id"]
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.7), 18, Color(1, 1, 1, 0.1), 1, 12))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	p.add_child(row)
+	row.add_child(_gap_x(2))
+	var sw := MenuParts.Swatch.new(it, 72)
+	sw.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(sw)
+	var texts := VBoxContainer.new()
+	texts.alignment = BoxContainer.ALIGNMENT_CENTER
+	texts.add_theme_constant_override("separation", 2)
+	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	texts.add_child(_label(it["name"], 30, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
+	var equipped := Shop.equipped(it["slot"]) == id
+	var sub: String = "Wearing it now" if equipped else ("Yours – try it on" if Shop.owns(id) else
+		("Trying it on – buy to keep it" if Shop.for_sale(id) else "Earned: " + it.get("hint", "")))
+	texts.add_child(_label(sub, 16, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	row.add_child(texts)
+	var act: Button
+	if equipped:
+		row.add_child(_chip("check", UiStyle.TEAL, "EQUIPPED", 18))
+	elif Shop.owns(id):
+		act = _card("Wear", "", "check", func():
+			Shop.equip(id)
+			show_shop(_shop_tab, id, false), "", true)
+	elif Shop.for_sale(id):
+		var need: int = int(it["price"]) - Shop.coins()
+		if need <= 0:
+			act = _card("Buy", "", "coin", func():
+				if Shop.buy(id):
+					Shop.equip(id)
+					Settings.haptic(30, 0.7)
+					_tap(1.4)
+				show_shop(_shop_tab, id, false), Hud._fmt_int(it["price"]), true)
+		else:
+			act = _card("%s more" % Hud._fmt_int(need), "Swing to earn coins", "coin", func(): pass)
+			act.disabled = true
+	else:
+		row.add_child(MenuParts.Icon.new("lock", FAINT, 34))
+	if act:
+		act.custom_minimum_size = Vector2(230, 76)
+		act.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_reg("shop_action", act)
+		row.add_child(act)
+	row.add_child(_gap_x(2))
+	return p
+
+
+func _coin_chip(n: int, size := 17) -> PanelContainer:
+	return _chip("coin", Color.WHITE, Hud._fmt_int(n), size)
 
 
 # =================================================================== stats
@@ -332,6 +485,8 @@ func show_stats() -> void:
 		["%d/%d" % [SaveData.token_count(), Progress.TOKEN_TOTAL], "Tokens"],
 		["%d/%d" % [mc[0], CourseBuilder.COURSES.size()], "Medals  (gold %d)" % mc[1]],
 		["%d min" % int(d["play_time_s"] / 60.0), "Time played"],
+		[Hud._fmt_int(int(d["coins_earned"])), "Coins earned"],
+		["×%s" % Hud._fmt_mult(float(d["best_multiplier"])), "Best multiplier"],
 	]:
 		grid.add_child(_tile(e[0], e[1]))
 	box.add_child(grid)
@@ -456,6 +611,12 @@ func show_results(r: Dictionary) -> void:
 	g2.add_child(_tile("×%d" % r.get("chain", 0), "Longest chain", 190))
 	g2.add_child(_tile("%d km/h" % int(r.get("top_speed", 0.0) * 3.6), "Top speed", 190))
 	box.add_child(g2)
+	if r.has("coins"):
+		var cr := HBoxContainer.new()
+		cr.add_child(_chip("coin", Color.WHITE, "+%s COINS" % Hud._fmt_int(r["coins"]), 20))
+		cr.add_child(_chip("coin", Color.WHITE, "BEST ×%s" % Hud._fmt_mult(r.get("best_mult", 1.0)), 20))
+		cr.add_child(_chip("coin", Color.WHITE, "BALANCE %s" % Hud._fmt_int(Shop.coins()), 20))
+		box.add_child(cr)
 	for u in r.get("unlocks", []):
 		box.add_child(_chip("suit", UiStyle.TEAL, "SUIT UNLOCKED: %s" % String(u).to_upper(), 18))
 	var b: Button
@@ -552,7 +713,7 @@ func _margins(root: Control, l: float, t: float, r: float, b: float) -> MarginCo
 
 ## A left-hand page: header (back button + title) over a scrolling column.
 ## `dim` darkens the whole view too (pause / results over gameplay).
-func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0) -> VBoxContainer:
+func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0, anim := true) -> VBoxContainer:
 	var root := _new_screen(id)
 	if dim > 0.0:
 		var shade := ColorRect.new()
@@ -598,7 +759,8 @@ func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0) 
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 12)
 	scroll.add_child(box)
-	_enter(col)
+	if anim:
+		_enter(col)
 	return box
 
 

@@ -16,6 +16,10 @@ var _mat: StandardMaterial3D
 var _glow := 0.0
 const WHITE := Color(0.96, 0.95, 0.9)
 const SWEET := Color(1.0, 0.78, 0.3)
+## Web colour from the shop (Shop.look()); rainbow cycles hues along the line.
+var color := WHITE
+var rainbow := false
+var _hue := 0.0
 
 
 func _ready() -> void:
@@ -25,6 +29,7 @@ func _ready() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = WHITE
+	mat.vertex_color_use_as_albedo = true
 	_mat = mat
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	# Transparent + top priority: drawn after the LookFilter pass, so the web
@@ -47,7 +52,8 @@ func _process(dt: float) -> void:
 	# Timing cue: the web glows gold inside the perfect-release window.
 	var want := 1.0 if player.line_state == Player.Line.ATTACHED and player.is_perfect_release() else 0.0
 	_glow = move_toward(_glow, want, dt * (12.0 if want > _glow else 5.0))
-	_mat.albedo_color = WHITE.lerp(SWEET, _glow)
+	_hue = fmod(_hue + dt * 0.35, 1.0)
+	_mat.albedo_color = (Color.WHITE if rainbow else color).lerp(SWEET, _glow)
 	var w_scale := 1.0 + _glow * 0.6
 	var start := hand.global_position if hand else player.hand_position()
 	var pts: PackedVector3Array
@@ -83,6 +89,10 @@ func _process(dt: float) -> void:
 				p += side * sin(t * 9.0 - _wave) * amp * t * (1.0 - t) * 4.0
 			var to_cam := (cam_pos - p).normalized()
 			var w := tangent.cross(to_cam).normalized() * width * w_scale * (1.0 + p.distance_to(cam_pos) * 0.009)
+			if rainbow:
+				_mesh.surface_set_color(Color.from_hsv(fmod(_hue + (seg_i + t) * 0.35, 1.0), 0.75, 1.0))
+			else:
+				_mesh.surface_set_color(Color.WHITE)
 			_mesh.surface_add_vertex(p - w)
 			_mesh.surface_add_vertex(p + w)
 	_mesh.surface_end()

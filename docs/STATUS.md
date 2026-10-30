@@ -1,6 +1,17 @@
-# Status: 2026-10-30 (first-swing safety, 0.5.x)
+# Status: 2026-10-30 (shop + coins)
 
-## First swing never knocks you out (latest)
+## Shop and coins (latest)
+
+- **Coins for swinging** (`src/core/coin_meter.gd`): every metre covered off the ground (on a web or flying between webs) pays coins: 1 per 25 m at ×1. Running, standing and lying stunned pay nothing. The **multiplier** starts at ×1 and climbs ×0.5 per 120 m swung (a perfect release counts as 40 m), up to ×10, until a **wall knockout**, which drops it straight back to ×1 ("×4.5 MULTIPLIER LOST" under the KO banner). Coins already earned are kept. First-time tokens pay +100. Counts in every played mode except Benchmark; never on the title autopilot. Save is written every 8 s, at run end, and when the app is backgrounded/closed.
+- **HUD**: coin balance (rolls up, "+n" bursts) and the multiplier with a progress bar to the next step, right of the speed gauge. Token pointer keeps clear of it.
+- **Shop** (`src/core/shop.gd` catalogue, `Menus.show_shop`): tabs for Suits, Trousers, Shoes, Gloves, Hats, Face and Webs; 59 items. Tapping an item tries it on (the hero wears it right away; the title drone moves in close while the shop is open); Buy / Wear on the detail panel; leaving puts the equipped outfit back. The 8 old progression suits are still earned, not sold; 10 new suits are for sale (250–2,000). Hats: Hood, No Hat, Cap, Beanie, Headphones, Crown (5,000). Face: Shades, Bandana, Visor. Webs recolour the line and the gear glow; Rainbow (3,000) cycles hues.
+- Saved in `save.json`: `coins`, `coins_earned`, `best_multiplier`, `owned`, `outfit` (the suit stays in `suit`). Results show coins this run, best multiplier and balance; Stats show lifetime coins and best multiplier. Main menu: Shop card + coin chip replace Suits.
+- **Character**: `character.gdshader` swaps exact baked palette keys per vertex (jacket, jacket dark, sole, trousers, trousers dark, sneaker, glove, emissive glow) instead of the old "anything red" rule. The hood is now its own part (`build_character.py`; body/head otherwise identical: same 18 colours, same counts). Shop headwear = `tools/blender/build_gear.py` → `assets/models/gear.glb` (one object per item, origin at the head joint). Review with `tools/gear_lab.gd` (head close-ups of every look). Blender gotcha: set `rotation_euler`/`location` on a part and call `view_layer.update()` before `join()`, else the join bakes the stale matrix (pieces fly off round the origin).
+- `--save=<path>` uses a scratch save (captures/tests); `--menu=shop --shop_tab=<slot>`.
+- Tests: 94 native pass (new `test_shop.gd`: catalogue, buy/equip/fallbacks, multiplier climb/reset/cap, rig shows the right headwear). Known ledge_dive flake still ~1 in 3. Browser test not re-run. Not yet tried on a device; prices are a first guess (a clean 5-minute run is roughly 1,000+ coins).
+
+
+## First swing never knocks you out
 
 - Found with the new `tools/spawn_audit.gd` (drops a player on N Free Swing spawns, holds the touch SWING button with no stick, counts knockouts): in the taller city, **11 of 24** fresh spawns ended in a wall knockout. Cause: from many roofs the only anchors in reach are high on the facade straight ahead, and a held web pendulums you into it; the rope also wraps round lower tiers and shortens the swing.
 - Spawn heading (`CityWorld._first_swing_clear`): flies the held swing for each of 16 headings with the real model (armed press through the launch hop, line flight, zip-up, auto-tighten, rope wrapping, roof skims, wall slides) for every anchor the game might pick, and faces the first safe one; otherwise the best heading with a web in reach (as before). The aim now matches the camera's resting −12° pitch (`CityWorld.spawn_aim`).

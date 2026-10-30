@@ -52,6 +52,8 @@ func _on_token(_id: int, left: int) -> void:
 	if audio:
 		audio.play("checkpoint")
 	Settings.haptic(20, 0.5)
+	if coins and coins.active:
+		coins.bonus(CoinMeter.TOKEN_COINS)
 	var fresh := Progress.newly_unlocked(_suits_before)
 	if not fresh.is_empty():
 		_suits_before = Progress.unlocked_ids()
@@ -59,7 +61,7 @@ func _on_token(_id: int, left: int) -> void:
 	elif left == 0:
 		hud.flash("EVERY TOKEN FOUND!", 3.0)
 	else:
-		hud.flash("TOKEN  %d LEFT" % left, 1.2)
+		hud.flash("TOKEN +%d COINS  ·  %d LEFT" % [CoinMeter.TOKEN_COINS, left], 1.6)
 
 
 func stop() -> void:

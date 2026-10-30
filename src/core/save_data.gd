@@ -19,6 +19,11 @@ const DEFAULTS := {
 	"tokens": [],  # collected Free Swing token ids
 	"tutorial_done": false,
 	"suit": "ember",
+	"coins": 0,         # spendable (Shop)
+	"coins_earned": 0,  # lifetime
+	"best_multiplier": 1.0,
+	"owned": [],        # bought Shop item ids
+	"outfit": {},       # Shop slot -> item id (the suit stays in "suit")
 }
 
 
@@ -105,6 +110,12 @@ func complete_tutorial() -> void:
 	if not data["tutorial_done"]:
 		data["tutorial_done"] = true
 		save()
+
+
+## Banks coins in memory; `save()` (or the next save) writes them out.
+func add_coins(n: int) -> void:
+	data["coins"] = int(data["coins"]) + n
+	data["coins_earned"] = int(data["coins_earned"]) + n
 
 
 func set_suit(id: String) -> void:

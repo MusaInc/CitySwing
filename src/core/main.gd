@@ -6,6 +6,7 @@ extends Node3D
 ##   --world=prototype|city   --mode=free|endurance|trial:<course>
 ##   --bot=expert|novice   --shot=<png> --shot-at=<s,s,...>   --quality=0|1|2
 ##   --perf   --touch   --look=clean|comic|toon|painted   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
+##   --save=<path> (scratch save file)   --menu=shop --shop_tab=<slot>
 
 enum State { TITLE, PLAYING, PAUSED, RESULTS }
 
@@ -15,6 +16,7 @@ var player: Player
 var camera: SwingCamera
 var rig: CharacterRig
 var rope: RopeVisual
+var coins: CoinMeter
 var hud: Hud
 var touch: TouchControls
 var menus: Menus
@@ -34,6 +36,8 @@ func _ready() -> void:
 		var kv := a.trim_prefix("--").split("=", true, 1)
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	world_kind = args.get("world", world_kind)
+	if args.has("save"):
+		SaveData.use_file(args["save"])  # captures/tests: a scratch save, not the player's
 	if args.has("quality"):
 		Settings.quality = int(args["quality"])
 	if args.has("perf"):
@@ -74,6 +78,11 @@ func _ready() -> void:
 	add_child(rope)
 	rope.player = player
 	rope.hand = rig.launcher
+	coins = CoinMeter.new()
+	coins.name = "Coins"
+	add_child(coins)
+	coins.set_player(player)
+	dress(Shop.look())
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
@@ -107,6 +116,9 @@ func _ready() -> void:
 	touch.player = player
 	touch.web_feedback.connect(hud.web_feedback)
 	player.perfect_release.connect(hud.on_perfect)
+	hud.coins = coins
+	coins.multiplier_changed.connect(hud.on_multiplier)
+	coins.earned.connect(hud.on_coins)
 	# Wall knockout: hit-stop + slow-mo, camera jolt, red flash, the slam.
 	impact_fx = ImpactFx.new()
 	impact_fx.name = "ImpactFx"
@@ -132,7 +144,7 @@ func _ready() -> void:
 		if mode is FreeSwingMode:
 			get_tree().paused = false
 			(mode as FreeSwingMode).stop())
-	menus.suit_changed.connect(func(c): rig.set_suit_color(c))
+	menus.look_changed.connect(dress)
 	Settings.changed.connect(_apply_settings)
 
 	if args.has("cam"):
@@ -157,14 +169,14 @@ func _ready() -> void:
 			"courses": menus.show_courses()
 			"tuning": menus.show_tuning()
 			"pause": menus.show_pause()
-			"suits": menus.show_suits()
+			"suits", "shop": menus.show_shop(String(args.get("shop_tab", "suit")))
 			"main":
 				menus._splash_done = true
 				menus.show_title()
 			"stats": menus.show_stats()
 			"results": menus.show_results({"mode": "trial", "time": 71.4, "course": "Canyon Sprint", "par": 84.4,
 				"best": 71.4, "new_best": true, "medal": Progress.Medal.SILVER, "swings": 24, "chain": 17,
-				"top_speed": 41.0, "unlocks": ["Violet"]})
+				"top_speed": 41.0, "unlocks": ["Violet"], "coins": 312, "best_mult": 4.5})
 	if args.has("nohud"):
 		ui.visible = false
 	if OS.has_feature("web"):
@@ -192,6 +204,13 @@ func _ready() -> void:
 
 
 # --------------------------------------------------------------- states
+## Wears a Shop.look() (equipped outfit, or a try-on from the shop).
+func dress(look: Dictionary) -> void:
+	rig.apply_look(look)
+	rope.color = look["web"]
+	rope.rainbow = look["rainbow"]
+
+
 func to_title() -> void:
 	get_tree().paused = false
 	_end_mode()
@@ -241,6 +260,8 @@ func start_mode(kind: String, arg: String) -> void:
 			spawn_on_random_rooftop()
 	mode.finished.connect(_on_finished)
 	mode.start()
+	if kind != "benchmark":
+		coins.start_run()
 	state = State.PLAYING
 	menus.hide_all()
 	hud.visible = true
@@ -271,11 +292,13 @@ func spawn_on_random_rooftop() -> Dictionary:
 
 func _install(m: GameMode) -> void:
 	m.name = "Mode"
+	m.coins = coins
 	add_child(m)
 	m.setup(player, hud, audio, world)
 
 
 func _end_mode() -> void:
+	coins.stop_run()
 	if mode:
 		if mode is TimeTrialMode:
 			(mode as TimeTrialMode).abandon()
@@ -302,6 +325,9 @@ func unpause() -> void:
 
 func _on_finished(result: Dictionary) -> void:
 	result["unlocks"] = Progress.newly_unlocked(_suits_before)
+	coins.stop_run()
+	result["coins"] = coins.run_coins
+	result["best_mult"] = coins.best_mult
 	state = State.RESULTS
 	touch.visible = false
 	player.input_enabled = false
@@ -454,9 +480,15 @@ func _publish_web_state(dt: float) -> void:
 	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
 
 
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
+	if state == State.TITLE and player.bot is ShowcasePilot:
+		# Shop: the drone moves in close so try-ons are easy to see (the
+		# hero stays framed in the right half, clear of the shop column).
+		var shop := menus.screen_name == "shop"
+		camera.distance_scale = 0.3 if shop else 0.7
+		camera.cam.h_offset = lerpf(camera.cam.h_offset, -1.6 if shop else -2.8, 1.0 - exp(-3.0 * dt))
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -475,6 +507,9 @@ func _notification(what: int) -> void:
 	# Leaving the app (home button, call) pauses a run.
 	if OS.has_feature("mobile") and (what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED):
 		pause()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
+		if coins:
+			coins.flush()
 
 
 ## Export validation: confirms the packaged build loaded everything it needs.
@@ -495,6 +530,8 @@ func _selftest() -> void:
 		problems.append("kit meshes %d/11" % props)
 	if (rig.bones["chest"] as Node3D).get_child_count() == 0 or not ResourceLoader.exists(CharacterRig.MODEL_PATH):
 		problems.append("character model")
+	if not ResourceLoader.exists(CharacterRig.GEAR_PATH) or (rig.bones["head"] as Node3D).get_child_count() < 8:
+		problems.append("shop gear")
 	for sh in ["building", "ground", "water", "sky", "traffic"]:
 		if not ResourceLoader.exists("res://src/world/shaders/%s.gdshader" % sh):
 			problems.append("shader " + sh)

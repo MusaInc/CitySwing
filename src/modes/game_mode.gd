@@ -9,6 +9,7 @@ var player: Player
 var hud: Hud
 var audio: AudioDirector
 var world: Node3D
+var coins: CoinMeter
 var elapsed := 0.0
 var running := false
 
