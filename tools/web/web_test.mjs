@@ -24,7 +24,7 @@ async function waitFor(predicate, timeout = 30000) {
   return s;
 }
 const started = Date.now();
-await page.goto(`${baseUrl}${baseUrl.includes("?") ? "&" : "?"}debug=1&seed=13`, { waitUntil: "load" });
+await page.goto(`${baseUrl}${baseUrl.includes("?") ? "&" : "?"}debug=1&seed=${process.env.WEB_SEED ?? 7}`, { waitUntil: "load" });
 let s = await waitFor(v => v?.state === "title", 120000);
 check(s?.state === "title", `game booted in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 const rect = await page.evaluate(() => {

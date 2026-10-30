@@ -85,6 +85,44 @@ func test_player_stands_on_spawn_roof(t) -> void:
 	p.queue_free()
 
 
+func test_holding_swing_on_a_fresh_spawn_never_knocks_you_out(t) -> void:
+	# A new player's first move: stand on the spawn roof and hold the touch
+	# SWING button, no stick. The spawn heading is chosen so that held swing
+	# (zip-up, rope wrapping, roof skims included) misses every wall at
+	# knockout speed. Was 11 of 24 before the check flew the held swing.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	var kos := 0
+	var last := Vector3.INF
+	for i in 10:
+		var spot := world.random_rooftop(rng, last)
+		last = spot["position"]
+		var p := Player.new()
+		p.params = load("res://config/swing_params.tres").duplicate()
+		add_child(p)
+		var bot := _Aim.new()
+		bot.aim = CityWorld.spawn_aim(spot["yaw"])
+		p.bot = bot
+		p.respawn(spot["position"])
+		for f in 60:
+			await get_tree().physics_frame
+			if f > 3 and p.is_on_floor():
+				break
+		var ko := [false]
+		p.knockout.connect(func(_s, _n): ko[0] = true)
+		p.assist_fire(7)
+		for f in 300:
+			await get_tree().physics_frame
+			if ko[0]:
+				break
+		if ko[0]:
+			kos += 1
+			t.note("knocked out from %s facing %.0f°" % [spot["position"].snapped(Vector3.ONE), rad_to_deg(spot["yaw"])])
+		p.queue_free()
+		await get_tree().physics_frame
+	t.check(kos == 0, "no knockouts holding SWING from 10 spawns (%d)" % kos)
+
+
 func test_camera_is_a_stable_follow_camera(t) -> void:
 	# 30 s of real swinging from each of four rooftops: the camera stays
 	# behind the direction of travel, turns smoothly, never flips or orbits,
@@ -300,3 +338,11 @@ class _Run:
 	func drive(_p, _dt) -> Dictionary:
 		f += 1
 		return {"move": Vector3.FORWARD, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": f == 25}
+
+
+class _Aim:
+	extends RefCounted
+	var aim := Vector3.FORWARD
+	var human_steer := true
+	func drive(_p, _dt) -> Dictionary:
+		return {"move": Vector3.ZERO, "aim": aim, "grapple": false, "reel": 0.0, "jump": false}

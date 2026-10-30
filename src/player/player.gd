@@ -102,6 +102,9 @@ var _move_smooth := Vector3.ZERO
 var _attach_length := 0.0
 ## Set by a ground launch: the web zips the body up before swinging normally.
 var _zip := false
+## From a respawn until the first web is let go: wall knockouts become wall
+## runs for human players (see _resolve_contacts).
+var _first_swing_grace := false
 var _launch_pending := false
 ## Touch finger still holding SWING with no target yet: fire as soon as one appears.
 var _armed_touch := -1
@@ -435,8 +438,10 @@ func _resolve_contacts(dt: float) -> void:
 		wall_kicked.emit()
 		wall_saved.emit(worst_into)
 		trick.emit()
-	elif facade and worst_into >= params.wall_run_max_speed:
-		# Head-on and fast: knocked out.
+	elif facade and worst_into >= params.wall_run_max_speed and not (_first_swing_grace and controls.human):
+		# Head-on and fast: knocked out. (Not on a player's first web after a
+		# spawn: holding SWING from a standstill must never end in a knockout;
+		# that hit becomes the wall run below.)
 		impact.emit(worst_into)
 		_knockout(worst_into, wall_n, pre_hit)
 	elif facade:
@@ -628,6 +633,7 @@ func _let_go() -> void:
 			s.velocity *= params.perfect_release_boost
 			s.velocity.y += params.perfect_release_lift
 		swings += 1
+		_first_swing_grace = false
 		chain += 1
 		best_chain = maxi(best_chain, chain)
 		_from_swing = true
@@ -733,6 +739,7 @@ func respawn(at: Variant = null) -> void:
 	stunned = false
 	knocked_out = false
 	_grapple_held = true  # require a fresh press
+	_first_swing_grace = true
 	global_position = at if at is Vector3 else last_safe_position
 	s.velocity = Vector3.ZERO
 	velocity = Vector3.ZERO

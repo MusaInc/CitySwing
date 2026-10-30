@@ -170,9 +170,21 @@ func random_rooftop(rng: RandomNumberGenerator, avoid := Vector3.INF) -> Diction
 	for attempt in 24:
 		var c: Dictionary = all[rng.randi() % all.size()]
 		if not c.has("yaw"):
-			c["yaw"] = _best_heading(c["position"], c["height"])
-			if not is_nan(c["yaw"]) and not _web_in_reach(c["position"], c["yaw"]):
-				c["yaw"] = NAN  # nothing to web from a standstill here
+			# Best-scoring heading where holding SWING from a standstill gives a
+			# swing that clears every wall (a new player's first move).
+			# Otherwise the best heading with a web in reach (Player's
+			# first-swing grace covers the wall there).
+			c["yaw"] = NAN
+			var hs := _headings(c["position"], c["height"])
+			for yaw in hs:
+				if _first_swing_clear(c["position"], yaw):
+					c["yaw"] = yaw
+					break
+			if is_nan(c["yaw"]):
+				for yaw in hs:
+					if _web_in_reach(c["position"], yaw):
+						c["yaw"] = yaw
+						break
 		if is_nan(c["yaw"]):
 			continue  # nowhere promising to swing from this roof
 		if avoid == Vector3.INF or c["position"].distance_to(avoid) > 150.0:
@@ -184,17 +196,124 @@ func random_rooftop(rng: RandomNumberGenerator, avoid := Vector3.INF) -> Diction
 var _spawn_params: SwingParams
 
 
-## True if holding SWING on this roof, facing `yaw`, finds an anchor.
+## True if holding SWING on this roof, facing `yaw`, fires a web: at once,
+## or during the launch hop (see _armed_launch).
 func _web_in_reach(p: Vector3, yaw: float) -> bool:
+	return not is_inside_tree() or not _armed_launch(p, yaw).is_empty()
+
+
+## The press from the roof launches (Player._launch_state); with nothing in
+## reach yet it stays armed through the hop and fires once an anchor comes
+## into view. Returns [body state, targeting, seconds waited] at that moment,
+## or [] if the hop comes back down first.
+func _armed_launch(p: Vector3, yaw: float) -> Array:
+	if _spawn_params == null:
+		_spawn_params = load("res://config/swing_params.tres")
+	var space := get_world_3d().direct_space_state
+	var t := GrappleTargeting.new()
+	var st := SwingPhysics.State.new()
+	st.position = p
+	st.velocity = Vector3.FORWARD.rotated(Vector3.UP, yaw) * 6.0 + Vector3.UP * _spawn_params.jump_speed
+	t.update(space, p + Vector3.UP * 0.5, spawn_aim(yaw), Vector3.ZERO, _spawn_params, true, [])
+	var c := SwingPhysics.Controls.new()
+	var waited := 0.0
+	while not t.has_target:
+		SwingPhysics.step(st, c, _spawn_params, 1.0 / 30.0)
+		waited += 1.0 / 30.0
+		if waited > 1.2 or st.position.y < p.y - 1.0:
+			return []
+		t.update(space, st.position + Vector3.UP * 0.5, spawn_aim(yaw), st.velocity, _spawn_params, false, [])
+	return [st, t, waited]
+
+
+## Where a fresh spawn's view points: along `yaw`, tilted down by the
+## camera's resting pitch (SwingCamera.base_pitch).
+static func spawn_aim(yaw: float) -> Vector3:
+	return Vector3.FORWARD.rotated(Vector3.RIGHT, deg_to_rad(-12.0)).rotated(Vector3.UP, yaw)
+
+
+## True if holding SWING on this roof, facing `yaw` – and keeping it held, as
+## a new player does – swings without a wall knockout or a drop to the street.
+## Near-equal anchors flip with tiny differences (hand vs body position), so
+## every anchor the game might pick then must be safe.
+func _first_swing_clear(p: Vector3, yaw: float) -> bool:
 	if not is_inside_tree():
 		return true
 	if _spawn_params == null:
 		_spawn_params = load("res://config/swing_params.tres")
-	var dir := Vector3.FORWARD.rotated(Vector3.UP, yaw)
-	var t := GrappleTargeting.new()
-	t.update(get_world_3d().direct_space_state, p + Vector3.UP * 0.5, (dir + Vector3.UP * 0.2).normalized(),
-		Vector3.ZERO, _spawn_params, true, [])
-	return t.has_target
+	var launch := _armed_launch(p, yaw)
+	if launch.is_empty():
+		return false
+	var space := get_world_3d().direct_space_state
+	var st: SwingPhysics.State = launch[0]
+	var t: GrappleTargeting = launch[1]
+	var waited: float = launch[2]
+	var picks: Array[Vector3] = [t.best_flyable(space, st, _spawn_params, [])]
+	for cand in t.candidates():
+		if picks.size() >= 4:
+			break
+		if picks.all(func(q: Vector3): return q.distance_to(cand[1]) > 4.0):
+			picks.append(cand[1])
+	for anchor in picks:
+		if not _held_swing_safe(space, st, anchor, waited):
+			return false
+	return true
+
+
+## Flies a held web from `from` (the body in the air when the web fires) for
+## ~5 s: line flight, zip-up, auto-tighten, rope wrapping, wall slides.
+func _held_swing_safe(space: PhysicsDirectSpaceState3D, from: SwingPhysics.State, anchor: Vector3, t0: float) -> bool:
+	var st := SwingPhysics.State.new()
+	st.position = from.position
+	st.velocity = from.velocity
+	var c := SwingPhysics.Controls.new()
+	var q := PhysicsRayQueryParameters3D.new()
+	q.collision_mask = 1 | GrappleTargeting.GRAPPLE_MASK | (1 << 3)
+	var dt := 1.0 / 30.0
+	# The web flies out while the body is in the air (Player._advance_line).
+	var fly := (anchor - st.position).length() / _spawn_params.line_speed
+	var attach_length := 0.0
+	var zip := true
+	for i in int((5.0 - t0) / dt):
+		var a := st.position
+		if not st.attached and i * dt >= fly:
+			if not SwingPhysics.attach(st, anchor, _spawn_params):
+				return false
+			attach_length = st.rope_length
+		if st.attached:
+			# The ground launch winches in first (Player.auto_tighten's zip).
+			zip = zip and st.rope_length > attach_length * _spawn_params.auto_tighten_min_fraction + 0.5
+			c.reel = 2.0 if zip else SwingPhysics.auto_tighten(st, _spawn_params, attach_length)
+		SwingPhysics.step(st, c, _spawn_params, dt)
+		q.from = a
+		q.to = st.position + (st.position - a).normalized() * 0.4
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			# The rope catching on a corner (Player wraps it there) shortens
+			# the swing into the wall below: count it as unsafe.
+			if st.attached and not Player._clear(space, st.position, anchor):
+				return false
+			continue
+		var n: Vector3 = hit["normal"]
+		var col = hit.get("collider")
+		if col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & (1 << 3)) != 0:
+			return false  # the street
+		if n.y > 0.6:
+			if Vector2(st.velocity.x, st.velocity.z).length() < 8.0:
+				return true  # set down on a roof
+			# Skimming a roof edge at speed: carried on along it.
+			st.position = (hit["position"] as Vector3) + n * 0.95
+			st.velocity.y = maxf(st.velocity.y, 0.0)
+			continue
+		# A facade: knocked out if it's fast and head-on (margin for the real
+		# body's width and timing); anything softer slides along it and the
+		# swing carries on (Player.move_and_slide).
+		var into := -st.velocity.dot(n)
+		if into > _spawn_params.wall_run_max_speed * 0.92 and into > st.velocity.length() * _spawn_params.wall_glance_ratio:
+			return false
+		st.velocity += n * maxf(into, 0.0)
+		st.position = (hit["position"] as Vector3) + n * 0.45
+	return true
 
 
 func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
@@ -225,13 +344,12 @@ func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
 	return best
 
 
-## Direction with the most taller anchors ahead and nothing blocking the run-up.
-## Returns the camera-style yaw (looking along -Z rotated by yaw), NAN if none.
-func _best_heading(p: Vector3, roof_h: float) -> float:
-	var best := NAN
-	var best_s := 0.5
-	for k in 8:
-		var dir := Vector3.FORWARD.rotated(Vector3.UP, k * TAU / 8.0)
+## Headings (camera-style yaw: looking along -Z rotated by yaw) with taller
+## anchors ahead and nothing blocking the run-up, best first.
+func _headings(p: Vector3, roof_h: float) -> Array:
+	var ranked: Array = []
+	for k in 16:
+		var dir := Vector3.FORWARD.rotated(Vector3.UP, k * TAU / 16.0)
 		var score := 0.0
 		var blocked := false
 		for b in layout.buildings:
@@ -250,10 +368,10 @@ func _best_heading(p: Vector3, roof_h: float) -> float:
 			if d < 25.0 or d > 110.0 or off.normalized().dot(dir) < 0.8 or top < roof_h + 5.0:
 				continue
 			score += minf(top - roof_h, 60.0) / d
-		if not blocked and score > best_s:
-			best_s = score
-			best = atan2(-dir.x, -dir.z)
-	return best
+		if not blocked:  # weak headings rank last, but a safe one beats none
+			ranked.append([score, atan2(-dir.x, -dir.z)])
+	ranked.sort_custom(func(a, b): return a[0] > b[0])
+	return ranked.map(func(r): return r[1])
 
 
 func bot_heading() -> Vector3:

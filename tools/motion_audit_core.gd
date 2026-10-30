@@ -18,6 +18,8 @@ class Drive:
 	var move := Vector3.ZERO
 	var jump := false
 	var grapple := false
+	## AUDIT_HUMAN=1 audits the player's movement (sprint speed, turn assist).
+	var human_steer := OS.get_environment("AUDIT_HUMAN") == "1"
 	func drive(_p, _dt) -> Dictionary:
 		var j := jump
 		jump = false

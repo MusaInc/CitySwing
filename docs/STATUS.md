@@ -1,4 +1,15 @@
-# Status: 2026-10-29 (visual + performance polish, 0.4.0)
+# Status: 2026-10-30 (first-swing safety, 0.5.x)
+
+## First swing never knocks you out (latest)
+
+- Found with the new `tools/spawn_audit.gd` (drops a player on N Free Swing spawns, holds the touch SWING button with no stick, counts knockouts): in the taller city, **11 of 24** fresh spawns ended in a wall knockout. Cause: from many roofs the only anchors in reach are high on the facade straight ahead, and a held web pendulums you into it; the rope also wraps round lower tiers and shortens the swing.
+- Spawn heading (`CityWorld._first_swing_clear`): flies the held swing for each of 16 headings with the real model (armed press through the launch hop, line flight, zip-up, auto-tighten, rope wrapping, roof skims, wall slides) for every anchor the game might pick, and faces the first safe one; otherwise the best heading with a web in reach (as before). The aim now matches the camera's resting −12° pitch (`CityWorld.spawn_aim`).
+- First-swing grace (`Player._first_swing_grace`): from a respawn until a human player first lets go of a web, a knockout-speed wall hit becomes a wall run. Walls stay lethal from the second swing on. Bots are unaffected (courses/tests unchanged).
+- Result: 0 knockouts in 40 audited spawns (one roof can end a 6 s hold gently on the street). New test `test_holding_swing_on_a_fresh_spawn_never_knocks_you_out`. Spawn variety unchanged (28 distinct spots in 40 picks).
+- Browser test seed 13 → 7 (`WEB_SEED` env overrides): with the new headings seed 13's scripted route wall-runs as JUMP is pressed. Chromium 18/18, WebKit 10/10.
+- `AUDIT_HUMAN=1 tools/motion_audit.gd` audits the player's movement (sprint 14.5 m/s, turn assist). Foot slide at sprint is ~30% higher than at the bot's 11 m/s, mostly feet re-planting mid-cut on hard turns; shorter steps on cuts were tried and didn't help.
+- Tests: 90 native pass. Not yet tried on a device.
+
 
 ## Character feel pass: glide, banking, swagger, hood (latest)
 
