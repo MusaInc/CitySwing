@@ -23,6 +23,9 @@ extends Node3D
 
 const MODEL_PATH := "res://assets/models/character.glb"
 const GEAR_PATH := "res://assets/models/gear.glb"
+## Gear pieces that ride a bone other than the head (gadgets).
+const GEAR_BONES := {"jet_l": "foot_l", "jet_r": "foot_r", "jet_l_fire": "foot_l", "jet_r_fire": "foot_r",
+	"glider": "chest", "glider_open": "chest", "chrono": "forearm_l", "magnet": "hips"}
 
 # Bone layout: name -> [parent, local rest offset, length]
 const BONES := {
@@ -162,6 +165,7 @@ var _grips := {}           # "l"/"r" -> [open_node, grip_node]
 var _gear := {}            # headwear model name -> MeshInstance3D on the head pivot
 ## The outfit being drawn (Shop.look()).
 var look_state := {}
+var _gadget_on := false
 var _scarf: Array[Node3D] = []
 var _scarf_pts: Array[Vector3] = []
 var _scarf_prev: Array[Vector3] = []
@@ -217,7 +221,7 @@ func _ready() -> void:
 		gm.transform = Transform3D.IDENTITY
 		gm.material_override = mat
 		gm.visible = false
-		bones["head"].add_child(gm)
+		bones[GEAR_BONES.get(key, "head")].add_child(gm)
 	apply_look(Shop.look())
 	launcher = bones["hand_r"]
 	_bind_skeleton()
@@ -250,8 +254,25 @@ func apply_look(look: Dictionary) -> void:
 				["glove", "glove_color"], ["glow", "glow_color"]]:
 			var c: Color = look[k[0]]
 			_mat.set_shader_parameter(k[1], Vector3(c.r, c.g, c.b))
+	_show_gear()
+
+
+## A running gadget shows its active pieces (jet flames, open wings).
+func set_gadget_active(on: bool) -> void:
+	if on != _gadget_on:
+		_gadget_on = on
+		_show_gear()
+
+
+func _show_gear() -> void:
+	var g: Dictionary = look_state.get("gadget", {})
+	var parts: Array = g.get("parts", [])
+	var active: Array = g.get("active", [])
+	if _gadget_on and g.get("swap", false):
+		parts = []
 	for key in _gear:
-		(_gear[key] as MeshInstance3D).visible = key == look.get("head", "hood") or key == look.get("face", "")
+		(_gear[key] as MeshInstance3D).visible = key == look_state.get("head", "hood") \
+			or key == look_state.get("face", "") or key in parts or (_gadget_on and key in active)
 
 
 func set_player(p: Player) -> void:

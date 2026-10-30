@@ -22,6 +22,10 @@ const STICK_RADIUS := 96.0  # finger travel for full speed (longer = finer walki
 
 var camera: SwingCamera
 var player: Player
+var gadgets: Gadgets
+## Above SWING, only drawn (and tappable) with a gadget equipped.
+const GADGET_POS := Vector2(-118, -318)
+const GADGET_R := 50.0
 var buttons := {
 	"grapple": {"pos": Vector2(-150, -150), "r": 92.0, "label": "SWING"},
 	"jump": {"pos": Vector2(-338, -92), "r": 60.0, "label": "JUMP"},
@@ -79,6 +83,11 @@ func touch_down(idx: int, pos: Vector2) -> void:
 	var local := _to_local(pos)
 	if local.distance_to(Vector2(_safe.end.x - 44, _safe.position.y + 44)) < 40:
 		pause_pressed.emit()
+		return
+	if _gadget_shown() and local.distance_to(_safe.end + GADGET_POS) <= GADGET_R * 1.2:
+		touches[idx] = {"kind": "gadget", "start": pos, "last": pos}
+		gadgets.trigger()
+		queue_redraw()
 		return
 	var jc := button_center("jump")
 	if local.distance_to(jc) <= buttons["jump"]["r"] * 1.15:
@@ -141,6 +150,10 @@ func touch_up(idx: int) -> void:
 			if player:
 				player.release_web(idx)  # only if this finger still owns the web
 	queue_redraw()
+
+
+func _gadget_shown() -> bool:
+	return gadgets != null and gadgets.kind() != "" and gadgets.enabled
 
 
 func release_all() -> void:
@@ -238,8 +251,25 @@ func _draw() -> void:
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		draw_string(_font, c + Vector2(-tw / 2.0 + 1, fs * 0.35 + 2), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.35))
 		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, white)
+	if _gadget_shown():
+		_draw_gadget(_safe.end + GADGET_POS, white, shade)
 	var pp := Vector2(_safe.end.x - 44, _safe.position.y + 44)
 	draw_circle(pp, 26, shade)
 	draw_circle(pp, 24, faint)
 	draw_rect(Rect2(pp + Vector2(-8, -9), Vector2(5, 18)), white)
 	draw_rect(Rect2(pp + Vector2(3, -9), Vector2(5, 18)), white)
+
+
+## The gadget button: its icon, a ring that fills as it recharges, gold when
+## ready, lit while it runs.
+func _draw_gadget(c: Vector2, white: Color, shade: Color) -> void:
+	var k := gadgets.charge()
+	var ready := gadgets.ready_to_use()
+	var on := gadgets.running()
+	draw_circle(c, GADGET_R + 3.0, shade)
+	draw_circle(c, GADGET_R, Color(UiStyle.TEAL, 0.4) if on else Color(1, 1, 1, 0.08))
+	draw_arc(c, GADGET_R, 0, TAU, 40, Color(1, 1, 1, 0.18), 3.0, true)
+	if k > 0.01:
+		draw_arc(c, GADGET_R, -PI / 2, -PI / 2 + TAU * k, maxi(4, int(40 * k)),
+			Color(UiStyle.GOLD, 0.95) if ready else Color(1, 1, 1, 0.55), 4.0, true)
+	MenuParts.draw_gadget(self, gadgets.kind(), c, 30.0, white if ready or on else Color(1, 1, 1, 0.45))

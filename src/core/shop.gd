@@ -8,10 +8,11 @@ extends RefCounted
 
 const SLOTS := [
 	["suit", "Suits"], ["pants", "Trousers"], ["shoes", "Shoes"], ["gloves", "Gloves"],
-	["head", "Hats"], ["face", "Face"], ["web", "Webs"],
+	["head", "Hats"], ["face", "Face"], ["web", "Webs"], ["gadget", "Gadgets"],
 ]
 const DEFAULTS := {"suit": "ember", "pants": "pants_navy", "shoes": "shoes_classic", "gloves": "gloves_black",
-	"head": "head_hood", "face": "face_none", "web": "web_classic"}
+	"head": "head_hood", "face": "face_none", "web": "web_classic",
+	"gadget": "gadget_none"}
 ## The classic web glow (gauntlet LEDs, spool rings, visor) is teal under a
 ## white line.
 const CLASSIC_GLOW := Color(0.2, 0.945, 0.945)
@@ -74,6 +75,20 @@ const OTHER_ITEMS := [
 	{"id": "web_red", "slot": "web", "name": "Red", "color": Color(1.0, 0.22, 0.18), "price": 600},
 	{"id": "web_shadow", "slot": "web", "name": "Shadow", "color": Color(0.1, 0.08, 0.14), "glow": Color(0.6, 0.25, 1.0), "price": 900},
 	{"id": "web_rainbow", "slot": "web", "name": "Rainbow", "color": Color(1, 1, 1), "rainbow": true, "price": 3000},
+	# Gadgets: one equipped, used with the GADGET button (see Gadgets).
+	# parts = gear.glb pieces worn; active = shown while it runs (replaces
+	# the parts when `swap`). duration/cooldown in seconds.
+	{"id": "gadget_none", "slot": "gadget", "name": "None", "kind": "", "price": 0},
+	{"id": "gadget_jets", "slot": "gadget", "name": "Jet Boots", "kind": "boost", "price": 1500,
+		"desc": "Blast forward and up, off a web or the ground", "parts": ["jet_l", "jet_r"],
+		"active": ["jet_l_fire", "jet_r_fire"], "duration": 0.7, "cooldown": 7.0},
+	{"id": "gadget_glider", "slot": "gadget", "name": "Glider", "kind": "glide", "price": 2000,
+		"desc": "Wings out: float for 4 s between webs", "parts": ["glider"], "active": ["glider_open"], "swap": true,
+		"duration": 4.0, "cooldown": 10.0},
+	{"id": "gadget_chrono", "slot": "gadget", "name": "Chrono Watch", "kind": "focus", "price": 2500,
+		"desc": "Slow time for 3 s to line up the next web", "parts": ["chrono"], "duration": 3.0, "cooldown": 15.0},
+	{"id": "gadget_magnet", "slot": "gadget", "name": "Coin Magnet", "kind": "surge", "price": 3000,
+		"desc": "Double coins for 8 s", "parts": ["magnet"], "duration": 8.0, "cooldown": 25.0},
 ]
 
 static var _items: Array = []
@@ -187,6 +202,7 @@ static func look(preview := {}) -> Dictionary:
 		"rainbow": web.get("rainbow", false),
 		"head": pick["head"]["model"],
 		"face": pick["face"]["model"],
+		"gadget": pick["gadget"],
 	}
 
 

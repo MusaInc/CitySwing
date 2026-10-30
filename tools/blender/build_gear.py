@@ -2,9 +2,10 @@
 
 Run:  blender -b --factory-startup --python tools/blender/build_gear.py -- assets/models
 
-Output: gear.glb, one object per shop item (Shop.ITEMS "model"), each with its
+Output: gear.glb, one object per shop piece. Headwear/face items have their
 origin at the head joint like the character's head and hood parts, so Godot
-parents them straight onto the head pivot. Shapes are fitted to the head in
+parents them straight onto the head pivot; gadget pieces are built in their
+own bone's frame (CharacterRig.GEAR_BONES says which). Shapes are fitted to the head in
 build_character.py (same J / head offset). Colours use the character palette
 so character.gdshader recolours them: "jacket" follows the suit colour,
 "gear_glow" follows the web colour; everything else is fixed.
@@ -203,6 +204,78 @@ def build():
                                           (o(sx * 0.03, -0.14, 0.02), 0.012, 0.003)], segs=6), jacket_dk) for sx in (-1, 1)]
     seam = K.box("mask_seam", (0.004, 0.004, 0.04), o(0, 0.123, 0.07), white)  # a light stitch line down the front
     item("mask", [mask, knot, seam] + tails)
+
+    # ================================================================ gadgets
+    # Built in their bone's local frame (origin at the joint, Blender +Y =
+    # the bone's front, +Z = up the bone), like the character's rigid parts.
+    metal = M("metal", (0.55, 0.57, 0.6), 0.35, 0.8)
+    flame = M("flame", (1.0, 0.62, 0.2), 0.3, 0.0, emit=(1.0, 0.5, 0.1))
+
+    def gadget(name, objs):
+        ob = K.join(name, objs, (0, 0, 0))
+        K.bake_vertex_colors(ob)
+        ob.location = (0, 0, 0)
+        items.append(ob)
+
+    # ---- Jet boots: a thruster pod behind each heel (foot pivot: ankle
+    # origin, toes +Y, sole bottom at z -0.13), and its flame.
+    for side in ("l", "r"):
+        # Up the back of the ankle, nozzle just above the heel.
+        pod = K.cyl("jet_pod", 0.03, 0.09, (0, -0.1, -0.06), gear, 16)
+        cap = K.sphere("jet_cap", 0.03, (0, -0.1, 0.03), gear, 14, 8, (1, 1, 0.7))
+        nozzle = K.cyl("jet_nozzle", 0.026, 0.02, (0, -0.1, -0.08), metal, 16, r2=0.033)
+        band = K.cyl("jet_band", 0.0315, 0.008, (0, -0.1, -0.03), glow, 16)
+        strap_ = K.box("jet_strap", (0.11, 0.035, 0.014), (0, -0.07, -0.01), strap)
+        gadget("jet_" + side, [pod, cap, nozzle, band, strap_])
+        # Cones wide at the nozzle (z -0.135), tips pointing down.
+        f1 = K.cyl("jet_flame", 0.006, 0.26, (0, -0.1, -0.34), flame, 14, r2=0.036)
+        f2 = K.cyl("jet_core", 0.003, 0.16, (0, -0.1, -0.24), glow, 10, r2=0.018)
+        gadget("jet_%s_fire" % side, [f1, f2])
+
+    # ---- Glider pack on the back (chest pivot; the spool housing reaches
+    # y -0.19): two folded wing slats, and the open wings shown in a glide.
+    folded = [K.box("glider_case", (0.2, 0.035, 0.07), (0, -0.215, 0.22), gear, bevel=0.012)]
+    for sx in (-1, 1):
+        slat = placed(K.box("glider_slat", (0.05, 0.016, 0.32), (0, 0, 0), jacket, bevel=0.008),
+                      (sx * 0.1, -0.215, 0.07), (0, sx * math.radians(28), 0))
+        folded.append(slat)
+    gadget("glider", folded)
+    wings = [K.box("glider_case", (0.2, 0.035, 0.07), (0, -0.215, 0.22), gear, bevel=0.012)]
+    for sx in (-1, 1):
+        bm = bmesh.new()
+        outline = [(0.06, 0.24), (0.45, 0.2), (0.86, 0.08), (0.8, 0.0), (0.55, -0.06), (0.3, -0.12), (0.08, -0.08)]
+        vs = [bm.verts.new(Vector((sx * x, -0.215 - 0.12 * x * x, z))) for x, z in outline]
+        bm.faces.new(vs if sx > 0 else list(reversed(vs)))
+        bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.012)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        wings.append(K.paint(K.new_obj("glider_wing", bm), jacket))
+        spar = C.tube("glider_spar", [(Vector((sx * 0.06, -0.216, 0.24)), 0.008, 0.008),
+                                      (Vector((sx * 0.45, -0.24, 0.205)), 0.007, 0.007),
+                                      (Vector((sx * 0.86, -0.305, 0.085)), 0.005, 0.005)], segs=6)
+        wings.append(K.paint(spar, gear))
+        wings.append(K.sphere("glider_tip", 0.012, (sx * 0.86, -0.305, 0.085), glow, 8, 6))
+    gadget("glider_open", wings)
+
+    # ---- Chrono watch on the left wrist (forearm pivot: elbow origin, arm
+    # along -Z, back of the forearm +Y).
+    watch = [K.paint(C.tube("chrono_strap", [(Vector((0, 0.005, -0.198)), 0.046, 0.047),
+                                             (Vector((0, 0.005, -0.232)), 0.046, 0.047)], segs=16), strap),
+             K.box("chrono_case", (0.062, 0.024, 0.06), (0, 0.052, -0.215), metal, bevel=0.008),
+             K.box("chrono_face", (0.048, 0.006, 0.046), (0, 0.066, -0.215), glow),
+             K.box("chrono_crown", (0.012, 0.012, 0.01), (0.036, 0.052, -0.215), metal)]
+    gadget("chrono", watch)
+
+    # ---- Coin magnet clipped to the right hip (hips pivot; belt at z ~0,
+    # radius ~0.176 to the side): a horseshoe hanging prongs-down.
+    arc = [(Vector((0.198, -0.02 + 0.05 * math.cos(a), -0.04 + 0.05 * math.sin(a))), 0.016, 0.016)
+           for a in [i * math.pi / 8 for i in range(9)]]
+    shoe = K.paint(C.tube("magnet_arc", arc, segs=10, front=Vector((1, 0, 0))), ruby)
+    mag = [shoe]
+    for sy in (-1, 1):
+        mag.append(K.cyl("magnet_prong", 0.016, 0.05, (0.198, -0.02 + sy * 0.05, -0.09), ruby, 10))
+        mag.append(K.cyl("magnet_tip", 0.0165, 0.022, (0.198, -0.02 + sy * 0.05, -0.112), glow, 10))
+    mag.append(K.box("magnet_clip", (0.012, 0.03, 0.04), (0.183, -0.02, 0.005), metal))
+    gadget("magnet", mag)
 
     bpy.ops.object.select_all(action="DESELECT")
     for it in items:

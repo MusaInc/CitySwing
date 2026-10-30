@@ -17,6 +17,8 @@ var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
 var coins: CoinMeter
+var gadgets: Gadgets
+const GADGET_NAMES := {"boost": "JET BOOST", "glide": "GLIDE", "focus": "SLOW-MO", "surge": "DOUBLE COINS"}
 var _coin_shown := -1.0    # rolling balance readout
 var _gain := 0             # coins in the current "+n" burst
 var _gain_t := 0.0
@@ -68,6 +70,10 @@ func on_perfect(streak: int) -> void:
 func on_knockout(speed: float) -> void:
 	_ko_t = KO_TIME
 	_ko_kmh = int(speed * 3.6)
+
+
+func on_gadget(kind: String) -> void:
+	flash(GADGET_NAMES.get(kind, ""), 0.9)
 
 
 func on_coins(n: int) -> void:
@@ -197,6 +203,8 @@ func _draw() -> void:
 		draw_string(_font_black, pp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.82, 0.4, a))
 	if pointer != Vector3.INF:
 		_draw_pointer(cam)
+	if gadgets and gadgets.enabled and gadgets.kind() != "":
+		_draw_gadget_status(white, shadow)
 	if _ko_t > 0.0:
 		_draw_knockout()
 	if hint != "":
@@ -291,6 +299,26 @@ func _draw_coins(p: Vector2, white: Color, shadow: Color) -> void:
 	var k := coins.level_progress()
 	if k > 0.02:
 		UiStyle.pill(self, Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), col)
+
+
+## Gadget readiness. On touch the GADGET button shows it; with keys/pad a
+## small badge bottom-right ("E" / X) does, plus a bar while it runs.
+func _draw_gadget_status(white: Color, shadow: Color) -> void:
+	if gadgets.running():
+		var left: float = gadgets.active_t / maxf(float(gadgets.item.get("duration", 1.0)), 0.01)
+		var r := Rect2(Vector2(size.x / 2.0 - 90, size.y * 0.32 + 18), Vector2(180, 8))
+		UiStyle.pill(self, r, Color(0, 0, 0, 0.35))
+		UiStyle.pill(self, Rect2(r.position, Vector2(r.size.x * left, r.size.y)), Color(UiStyle.TEAL, 0.9))
+	if touch_mode:
+		return
+	var c := size - Vector2(70, 70)
+	var ready := gadgets.ready_to_use()
+	draw_circle(c, 40.0, Color(0, 0, 0, 0.35))
+	var k := gadgets.charge()
+	draw_arc(c, 38.0, -PI / 2, -PI / 2 + TAU * k, maxi(4, int(40 * k)), UiStyle.GOLD if ready else Color(1, 1, 1, 0.5),
+		4.0, true)
+	MenuParts.draw_gadget(self, gadgets.kind(), c, 34.0, white if ready or gadgets.running() else Color(1, 1, 1, 0.45))
+	_text(c + Vector2(-58, -30), "E", 18, white if ready else Color(1, 1, 1, 0.5), shadow)
 
 
 ## A gold coin (also used by the shop).
@@ -421,7 +449,7 @@ func _safe_origin() -> Vector2:
 func _clear_of_thumbs(p: Vector2) -> Vector2:
 	if not touch_mode:
 		return p
-	var top := size.y - 270.0
+	var top := size.y - (390.0 if gadgets and gadgets.kind() != "" else 270.0)
 	if p.y > top and (p.x < 330.0 or p.x > size.x - 480.0):
 		p.y = top
 	return p

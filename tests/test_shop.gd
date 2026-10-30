@@ -93,3 +93,77 @@ func test_rig_wears_the_look(t) -> void:
 			shown.append(String(c.name).to_lower())
 	t.check(shown == ["hood"], "default look is the hood (%s)" % [shown])
 	rig.queue_free()
+
+
+## A player standing on a slab (scene tests need a floor and physics frames).
+func _stage() -> Array:
+	var root: Window = (Engine.get_main_loop() as SceneTree).root
+	var stage := Node3D.new()
+	root.add_child(stage)
+	PrototypeWorld.add_box(stage, Vector3(0, -0.5, 0), Vector3(200, 1, 200), Color.GRAY, false, true)
+	var p := Player.new()
+	p.params = load("res://config/swing_params.tres").duplicate()
+	p.input_enabled = false
+	stage.add_child(p)
+	p.respawn(Vector3(0, 1.0, 0))
+	var g := Gadgets.new()
+	stage.add_child(g)
+	g.player = p
+	g.coins = CoinMeter.new()
+	stage.add_child(g.coins)
+	g.enabled = true
+	return [stage, p, g]
+
+
+func test_gadgets(t) -> void:
+	var st := _stage()
+	var p: Player = st[1]
+	var g: Gadgets = st[2]
+	var tree := Engine.get_main_loop() as SceneTree
+	for i in 20:
+		await tree.physics_frame
+	g.equip(Shop.item("gadget_none"))
+	t.check(not g.trigger(), "nothing equipped, nothing happens")
+	g.equip(Shop.item("gadget_jets"))
+	t.check(g.trigger(), "jet boots fire")
+	t.check(p.s.velocity.y > 5.0 and Vector2(p.s.velocity.x, p.s.velocity.z).length() > 12.0,
+		"boost throws you forward and up (%s)" % p.s.velocity)
+	t.check(not g.trigger(), "can't fire again while it runs")
+	g.stop()
+	t.check(g.cooldown > 0.0 and not g.ready_to_use(), "then it recharges")
+	g.cooldown = 0.0
+	p.bot = SwingBot.new(SwingBot.Style.EXPERT, Vector3.FORWARD)
+	t.check(not g.trigger(), "never for the autopilot")
+	p.bot = null
+	# Glider: from high up, the fall stays slow.
+	g.equip(Shop.item("gadget_glider"))
+	p.respawn(Vector3(0, 80.0, 0))
+	g.cooldown = 0.0
+	t.check(g.trigger() and p.glide, "glider opens")
+	for i in 60:
+		await tree.physics_frame
+	t.check(p.s.velocity.y >= -Player.GLIDE_SINK - 0.5, "gliding sinks slowly (%.1f m/s)" % p.s.velocity.y)
+	g.stop()
+	t.check(not p.glide, "wings fold when it ends")
+	# Coin magnet doubles the pay.
+	g.equip(Shop.item("gadget_magnet"))
+	g.cooldown = 0.0
+	g.coins.start_run()
+	g.coins.swing(CoinMeter.METRES_PER_COIN * 10.0)
+	var single := g.coins.run_coins
+	g.trigger()
+	g.coins.swing(CoinMeter.METRES_PER_COIN * 10.0)
+	t.check(g.coins.run_coins - single >= single * 2 - 1, "magnet doubles coins (%d then %d)" % [single, g.coins.run_coins - single])
+	g.stop()
+	t.check(not g.coins.surge, "magnet ends")
+	# Chrono watch slows time and always gives it back.
+	g.equip(Shop.item("gadget_chrono"))
+	g.cooldown = 0.0
+	g.trigger()
+	await tree.process_frame
+	await tree.process_frame
+	t.check(Engine.time_scale < 0.6, "chrono slows time (%.2f)" % Engine.time_scale)
+	g.stop()
+	t.check(Engine.time_scale == 1.0, "time back to normal")
+	g.coins.active = false
+	(st[0] as Node).queue_free()

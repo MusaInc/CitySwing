@@ -17,6 +17,7 @@ var camera: SwingCamera
 var rig: CharacterRig
 var rope: RopeVisual
 var coins: CoinMeter
+var gadgets: Gadgets
 var hud: Hud
 var touch: TouchControls
 var menus: Menus
@@ -130,6 +131,20 @@ func _ready() -> void:
 		audio.play("knockout", linear_to_db(clampf(spd / 35.0, 0.5, 1.0)))
 		Settings.haptic(160, 1.0))
 	player.respawned.connect(func(): impact_fx.cancel())
+	gadgets = Gadgets.new()
+	gadgets.name = "Gadgets"
+	add_child(gadgets)
+	gadgets.player = player
+	gadgets.coins = coins
+	gadgets.rig = rig
+	gadgets.camera = camera
+	gadgets.impact_fx = impact_fx
+	gadgets.audio = audio
+	gadgets.equip(Shop.look()["gadget"])
+	player.respawned.connect(gadgets.stop)
+	gadgets.used.connect(func(k): hud.on_gadget(k))
+	hud.gadgets = gadgets
+	touch.gadgets = gadgets
 	hud.touch_mode = DisplayServer.is_touchscreen_available() or args.has("touch")
 	touch.pause_pressed.connect(pause)
 	menus = Menus.new()
@@ -207,6 +222,8 @@ func _ready() -> void:
 ## Wears a Shop.look() (equipped outfit, or a try-on from the shop).
 func dress(look: Dictionary) -> void:
 	rig.apply_look(look)
+	if gadgets:
+		gadgets.equip(look["gadget"])
 	rope.color = look["web"]
 	rope.rainbow = look["rainbow"]
 
@@ -262,6 +279,7 @@ func start_mode(kind: String, arg: String) -> void:
 	mode.start()
 	if kind != "benchmark":
 		coins.start_run()
+		gadgets.enabled = true
 	state = State.PLAYING
 	menus.hide_all()
 	hud.visible = true
@@ -299,6 +317,9 @@ func _install(m: GameMode) -> void:
 
 func _end_mode() -> void:
 	coins.stop_run()
+	gadgets.stop()
+	gadgets.enabled = false
+	gadgets.cooldown = 0.0
 	if mode:
 		if mode is TimeTrialMode:
 			(mode as TimeTrialMode).abandon()
@@ -326,6 +347,8 @@ func unpause() -> void:
 func _on_finished(result: Dictionary) -> void:
 	result["unlocks"] = Progress.newly_unlocked(_suits_before)
 	coins.stop_run()
+	gadgets.stop()
+	gadgets.enabled = false
 	result["coins"] = coins.run_coins
 	result["best_mult"] = coins.best_mult
 	state = State.RESULTS

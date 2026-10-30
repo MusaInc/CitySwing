@@ -1,6 +1,18 @@
-# Status: 2026-10-30 (shop + coins)
+# Status: 2026-10-30 (shop, coins, gadgets)
 
-## Shop and coins (latest)
+## Gadgets (latest)
+
+- New **Gadgets** shop tab (`Shop` slot "gadget", `src/player/gadgets.gd`): one equipped, used with GADGET (E, pad X, or the touch button above SWING with a recharge ring that turns gold when ready). Players only, never the title autopilot; timers run on real time.
+  - **Jet Boots** (1,500): burst forward where the camera looks + up, lets go of the web (`Player.boost`); 7 s recharge. Heel thrusters, flames while firing.
+  - **Glider** (2,000): 4 s of slow sink off the web (`Player.glide`: gravity ×0.18, fall capped 3.5 m/s); 10 s. Folded pack on the back opens into wings.
+  - **Chrono Watch** (2,500): 3 s at 0.4 time scale, eases out; yields to the knockout hit-stop (`ImpactFx.busy`); 15 s. On the left wrist.
+  - **Coin Magnet** (3,000): coins pay double for 8 s (`CoinMeter.surge`, multiplier untouched); 25 s. On the right hip.
+- A knockout cuts a running gadget short (except the magnet). A shield gadget was considered and dropped (user: shields don't make sense here).
+- Models in `build_gear.py` (gadget pieces built in their bone's frame; `CharacterRig.GEAR_BONES` maps them); `tools/gear_lab.gd` now also films each gadget on a standing player, idle and running. HUD: gadget name flash + duration bar; non-touch badge bottom-right.
+- Tests: 95 native pass (`test_gadgets`: boost, cooldown, bot lockout, glide sink, magnet doubling, time scale restored). The ledge_dive motion flake also shows up on the previous commit when test_modes runs before it (1 in 3).
+
+
+## Shop and coins
 
 - **Coins for swinging** (`src/core/coin_meter.gd`): every metre covered off the ground (on a web or flying between webs) pays coins: 1 per 25 m at ×1. Running, standing and lying stunned pay nothing. The **multiplier** starts at ×1 and climbs ×0.5 per 120 m swung (a perfect release counts as 40 m), up to ×10, until a **wall knockout**, which drops it straight back to ×1 ("×4.5 MULTIPLIER LOST" under the KO banner). Coins already earned are kept. First-time tokens pay +100. Counts in every played mode except Benchmark; never on the title autopilot. Save is written every 8 s, at run end, and when the app is backgrounded/closed.
 - **HUD**: coin balance (rolls up, "+n" bursts) and the multiplier with a progress bar to the next step, right of the speed gauge. Token pointer keeps clear of it.

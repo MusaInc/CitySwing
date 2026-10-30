@@ -30,6 +30,11 @@ func cancel() -> void:
 	Engine.time_scale = 1.0
 
 
+## The knockout effect is driving time_scale right now.
+func busy() -> bool:
+	return _t > -1.0
+
+
 func active() -> bool:
 	return _t > -1.0 or Engine.time_scale < 1.0
 

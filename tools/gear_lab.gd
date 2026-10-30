@@ -1,6 +1,7 @@
 extends SceneTree
 ## Shop gear review: the hero's head close up wearing each headwear / face
-## item (front and three-quarter views), one PNG per look.
+## item (front and three-quarter views), then each gadget on the whole body
+## (idle and running), one PNG per shot.
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 480x480 -s res://tools/gear_lab.gd -- <outdir>
 ## Then: python3 tools/contact_sheet.py <outdir>/sheet.png <outdir>/gear_*.png
@@ -39,5 +40,36 @@ func _go() -> void:
 				await process_frame
 			n += 1
 			root.get_texture().get_image().save_png("%s/gear_%d.png" % [out, n])
+	# Gadgets: on a real (standing) player so the rig poses every bone.
+	rig.queue_free()
+	var stage := Node3D.new()
+	root.add_child(stage)
+	PrototypeWorld.add_box(stage, Vector3(0, -0.5, 0), Vector3(60, 1, 60), Color(0.42, 0.43, 0.45), false, true)
+	var player := Player.new()
+	player.params = load("res://config/swing_params.tres").duplicate()
+	player.input_enabled = false
+	root.add_child(player)
+	player.global_position = Vector3(0, 1.0, 0)
+	rig = CharacterRig.new()
+	player.add_child(rig)
+	rig.set_player(player)
+	for i in 60:
+		await physics_frame
+	# Whole body from behind-left and the front-right, idle and running.
+	for g in ["gadget_jets", "gadget_glider", "gadget_chrono", "gadget_magnet"]:
+		for on in [false, true]:
+			rig.apply_look(Shop.look({"gadget": g}))
+			rig.set_gadget_active(on)
+			for view in [PI + 0.7, -0.6]:
+				var close: bool = g == "gadget_jets" or g == "gadget_magnet" or g == "gadget_chrono"
+				var c := rig.global_position + Vector3(0, {"gadget_jets": -0.65, "gadget_magnet": 0.0,
+					"gadget_chrono": -0.05}.get(g, 0.0), 0)
+				cam.global_position = c + Vector3(sin(view), 0.25, -cos(view)).normalized() * (1.5 if close else 3.6)
+				cam.look_at(c)
+				for i in 3:
+					await process_frame
+				n += 1
+				root.get_texture().get_image().save_png("%s/gear_%d.png" % [out, n])
+		rig.set_gadget_active(false)
 	print("GEAR_LAB ", n, " shots in ", out)
 	quit()

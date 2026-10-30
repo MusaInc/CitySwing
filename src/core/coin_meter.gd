@@ -28,6 +28,9 @@ var level := 0
 var progress := 0.0   # metres toward the next step
 var run_coins := 0
 var best_mult := 1.0
+## Coin Magnet gadget running: payouts doubled (the multiplier itself is
+## unchanged).
+var surge := false
 var _frac := 0.0
 var _last_dist := 0.0
 var _dirty_t := 0.0
@@ -60,6 +63,7 @@ func start_run() -> void:
 
 func stop_run() -> void:
 	active = false
+	surge = false
 	flush()
 
 
@@ -83,7 +87,7 @@ func lose() -> void:
 func swing(metres: float) -> void:
 	if metres <= 0.0:
 		return
-	_frac += metres / METRES_PER_COIN * multiplier()
+	_frac += metres / METRES_PER_COIN * multiplier() * (2.0 if surge else 1.0)
 	var n := int(_frac)
 	if n > 0:
 		_frac -= n

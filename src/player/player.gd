@@ -91,6 +91,10 @@ var air_time := 0.0
 var distance_travelled := 0.0
 var swings := 0
 var chain := 0
+## Gadgets (see Gadgets): off unless a player's gadget is running.
+var glide := false       # off the web: slow sink, a little forward carry
+const GLIDE_SINK := 3.5  # m/s
+const GLIDE_GRAVITY := 0.18
 var best_chain := 0
 var perfect_streak := 0
 var perfects := 0
@@ -266,6 +270,9 @@ func _physics_process(dt: float) -> void:
 		# Hang at the top of the flight: time to pick the next anchor.
 		var k := absf(s.velocity.y) / params.apex_window
 		controls.gravity_scale = lerpf(params.apex_gravity_scale, 1.0, k * k)
+	if glide and not s.attached and not is_on_floor():
+		controls.gravity_scale = GLIDE_GRAVITY
+		s.velocity.y = maxf(s.velocity.y, -GLIDE_SINK)
 	aim_dir = inp.get("aim", aim_dir)
 	if inp.get("respawn", false):
 		respawn()
@@ -750,6 +757,14 @@ func respawn(at: Variant = null) -> void:
 	perfect_streak = 0
 	_from_swing = false
 	respawned.emit()
+
+
+## A gadget's push (jet boots): added to the velocity, and off the ground.
+func boost(v: Vector3) -> void:
+	if line_state != Line.IDLE:
+		_let_go()
+	s.velocity += v
+	_launch_pending = true
 
 
 func reset_stats() -> void:

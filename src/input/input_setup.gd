@@ -15,6 +15,7 @@ const BINDINGS := {
 	"grapple": [KEY_SPACE, JOY_AXIS_TRIGGER_RIGHT, 1.0],
 	"jump": [KEY_SHIFT, JOY_BUTTON_A],
 	"respawn": [KEY_R, JOY_BUTTON_Y],
+	"gadget": [KEY_E, JOY_BUTTON_X],
 	"pause": [KEY_ESCAPE, JOY_BUTTON_START],
 	"toggle_debug": [KEY_F3, JOY_BUTTON_BACK],
 }

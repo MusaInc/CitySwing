@@ -116,6 +116,35 @@ class Icon:
 				draw_circle(c, s * 0.3, color)
 
 
+## A gadget's icon (shop swatch, touch button, HUD). `s` = icon size.
+static func draw_gadget(ci: CanvasItem, kind: String, c: Vector2, s: float, col: Color) -> void:
+	var w := maxf(2.0, s * 0.09)
+	match kind:
+		"boost":  # boot with flames
+			ci.draw_colored_polygon(PackedVector2Array([c + Vector2(-0.3, -0.45) * s, c + Vector2(-0.05, -0.45) * s,
+				c + Vector2(-0.05, -0.05) * s, c + Vector2(0.4, 0.05) * s, c + Vector2(0.4, 0.2) * s,
+				c + Vector2(-0.3, 0.2) * s]), col)
+			for x in [-0.22, 0.0, 0.22]:
+				ci.draw_colored_polygon(PackedVector2Array([c + Vector2(x - 0.08, 0.27) * s, c + Vector2(x + 0.08, 0.27) * s,
+					c + Vector2(x, 0.5) * s]), UiStyle.GOLD)
+		"glide":  # swept wings
+			for sx in [-1.0, 1.0]:
+				ci.draw_colored_polygon(PackedVector2Array([c + Vector2(sx * 0.06, -0.12) * s, c + Vector2(sx * 0.5, -0.02) * s,
+					c + Vector2(sx * 0.44, 0.1) * s, c + Vector2(sx * 0.06, 0.16) * s]), col)
+			ci.draw_circle(c + Vector2(0, -0.2) * s, s * 0.08, col)
+		"focus":  # watch face
+			ci.draw_rect(Rect2(c + Vector2(-0.14, -0.5) * s, Vector2(0.28, 1.0) * s), Color(col, 0.45))
+			ci.draw_circle(c, s * 0.34, Color(0.1, 0.1, 0.12))
+			ci.draw_arc(c, s * 0.34, 0, TAU, 28, col, w, true)
+			ci.draw_line(c, c + Vector2(0, -0.22) * s, col, w, true)
+			ci.draw_line(c, c + Vector2(0.15, 0.06) * s, col, w, true)
+		"surge":  # horseshoe magnet
+			ci.draw_arc(c + Vector2(0, -0.05) * s, s * 0.28, PI, TAU, 20, Color(0.85, 0.12, 0.2), s * 0.16, true)
+			for sx in [-1.0, 1.0]:
+				ci.draw_rect(Rect2(c + Vector2(sx * 0.28 - 0.08, -0.05) * s, Vector2(0.16, 0.3) * s), Color(0.85, 0.12, 0.2))
+				ci.draw_rect(Rect2(c + Vector2(sx * 0.28 - 0.08, 0.25) * s, Vector2(0.16, 0.13) * s), col)
+
+
 ## A shop item's picture: colour items as a swatch shaped like the garment,
 ## webs as a line, headwear and face pieces as small drawings on a head.
 class Swatch:
@@ -156,6 +185,11 @@ class Swatch:
 				draw_colored_polygon(P.call([Vector2(0.3, 0.86), Vector2(0.3, 0.42), Vector2(0.22, 0.3),
 					Vector2(0.3, 0.26), Vector2(0.38, 0.36), Vector2(0.38, 0.16), Vector2(0.47, 0.16), Vector2(0.48, 0.13),
 					Vector2(0.58, 0.14), Vector2(0.6, 0.17), Vector2(0.68, 0.2), Vector2(0.72, 0.42), Vector2(0.7, 0.86)]), col)
+			"gadget":
+				if it.get("kind", "") == "":
+					draw_arc(c, s * 0.42, 0, TAU, 24, Color(1, 1, 1, 0.25), 2.0, true)
+				else:
+					MenuParts.draw_gadget(self, it["kind"], c, s * 0.62, UiStyle.TEAL)
 			"web":
 				var pts := PackedVector2Array()
 				for i in 25:

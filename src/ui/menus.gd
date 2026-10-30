@@ -429,6 +429,11 @@ func _shop_detail(it: Dictionary) -> PanelContainer:
 	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	texts.add_child(_label(it["name"], 30, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
 	var equipped := Shop.equipped(it["slot"]) == id
+	if it.has("desc"):
+		var dl := _label(it["desc"] + "  ·  %d s recharge" % int(it["cooldown"]), 15, ACCENT, "semibold",
+			HORIZONTAL_ALIGNMENT_LEFT)
+		dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		texts.add_child(dl)
 	var sub: String = "Wearing it now" if equipped else ("Yours – try it on" if Shop.owns(id) else
 		("Trying it on – buy to keep it" if Shop.for_sale(id) else "Earned: " + it.get("hint", "")))
 	texts.add_child(_label(sub, 16, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
