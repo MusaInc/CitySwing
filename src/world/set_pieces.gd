@@ -1,0 +1,505 @@
+class_name SetPieces
+extends RefCounted
+## Hand-designed set pieces that give each district its own way to play,
+## placed where the open-air swinging used to be thin (tools/anchor_audit.gd):
+##  * Docks: container yards to run and leap across, and a cargo ship moored
+##    in a basin under the quay crane (deck, bridge, funnel, derricks).
+##  * Waterfront: an observation wheel by the river – a ring of anchors.
+##  * Old Town (east): a football ground whose four floodlight pylons are the
+##    tallest anchors for blocks around, and a Victorian gasholder frame (a
+##    ring of lattice columns and girders to swing through).
+##  * Midtown: an elevated railway along an avenue, with a parked train.
+##  * Business district: gateway blocks spanning the avenues high up.
+##  * A lighthouse on a pier at the dock entrance (the river's south end).
+## Everything is built as a "kit" (see CityLayout._kit*): boxes, beams and
+## convex prisms that BuildingMesher draws and CityWorld turns into the same
+## collision – what you see is exactly what you hit. Each piece has its own
+## random stream, so adding one never reshuffles the city.
+
+const STADIUM_AT := Vector2(867, 219)
+const GASHOLDER_AT := Vector2(867, -579)
+const WHEEL_AT := Vector2(135, 219)
+const YARDS_AT := [Vector2(135, 526), Vector2(135, 315)]
+const SHIP_AT := Vector2(240, 423)
+const LIGHTHOUSE_AT := Vector2(8, 560)
+const EL_Z := 368.87          # the avenue the elevated railway runs along
+const EL_X := [440.0, 1010.0]
+
+const RED := Color(0.72, 0.12, 0.1)
+const WHITE := Color(0.9, 0.9, 0.87)
+const STEEL := Color(0.22, 0.23, 0.25)
+const IRON_GREEN := Color(0.2, 0.33, 0.28)
+const CONTAINER_COLORS := [Color(0.72, 0.18, 0.12), Color(0.12, 0.32, 0.55), Color(0.85, 0.6, 0.12),
+	Color(0.2, 0.45, 0.3), Color(0.82, 0.82, 0.8), Color(0.45, 0.22, 0.4), Color(0.9, 0.4, 0.12)]
+
+var L: CityLayout
+
+
+func _init(layout: CityLayout) -> void:
+	L = layout
+
+
+## Which set piece (if any) takes over this block instead of buildings.
+func piece_for(rect: Rect2) -> String:
+	if rect.has_point(STADIUM_AT):
+		return "stadium"
+	if rect.has_point(GASHOLDER_AT):
+		return "gasholder"
+	if rect.has_point(WHEEL_AT):
+		return "wheel"
+	for y in YARDS_AT:
+		if rect.has_point(y):
+			return "yard"
+	return ""
+
+
+func build(piece: String, rect: Rect2) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(piece) ^ hash(Vector2i(rect.get_center()))
+	match piece:
+		"stadium":
+			_stadium(rect, rng)
+		"gasholder":
+			_gasholder(rect, rng)
+		"wheel":
+			_wheel(rect, rng)
+		"yard":
+			_container_yard(rect, rng)
+
+
+# ------------------------------------------------------------- stadium
+## A football ground filling the block: red stands on all four sides, a
+## roof over each, and a floodlight pylon at every corner (66 m, lamp heads
+## angled at the pitch – the anchors that make the east swingable).
+func _stadium(r: Rect2, rng: RandomNumberGenerator) -> void:
+	var k := L._kit("stadium")
+	var inner := r.grow(-2.0)
+	var depth := 15.0
+	var pitch := inner.grow(-depth)
+	# Stands: three stepped tiers rising away from the pitch, then a back wall.
+	for side in 4:
+		for step in 3:
+			var d0 := depth * step / 3.0
+			var d1 := depth * (step + 1) / 3.0
+			var y1 := 3.0 + step * 4.0
+			var col := RED if (step + side) % 2 == 0 else RED.darkened(0.12)
+			_band(k, pitch, side, d0, d1, 0.0, y1, col)
+		_band(k, pitch, side, depth - 1.0, depth, 11.0, 19.0, WHITE.darkened(0.1))  # back wall
+		# Roof: a slab cantilevered over the stand on slim columns at the back.
+		_band(k, pitch, side, 3.0, depth, 21.0, 21.8, WHITE)
+		for f: float in [0.2, 0.5, 0.8]:
+			var p := _side_point(pitch, side, f, depth - 0.5)
+			L._ksolid(k, p.x - 0.35, p.y - 0.35, p.x + 0.35, p.y + 0.35, 19.0, 21.0, STEEL)
+		var a := _side_point(pitch, side, 0.0, 3.0)
+		var b := _side_point(pitch, side, 1.0, 3.0)
+		L._anchor(Vector3(a.x, 20.9, a.y), Vector3(b.x, 20.9, b.y))  # roof front edge
+	# Floodlight pylons in the open corners.
+	var corners := [inner.position + Vector2(5, 5), Vector2(inner.end.x - 5, inner.position.y + 5),
+		inner.end - Vector2(5, 5), Vector2(inner.position.x + 5, inner.end.y - 5)]
+	for c: Vector2 in corners:
+		var h := 66.0
+		_lattice_tower(k, Vector3(c.x, 0.0, c.y), h, 3.2, STEEL.lightened(0.25))
+		var to_pitch := (pitch.get_center() - c).normalized()
+		var side := Vector2(-to_pitch.y, to_pitch.x)
+		var hc := Vector3(c.x, h + 2.5, c.y) + Vector3(to_pitch.x, 0.0, to_pitch.y) * 1.5
+		var hs := Vector3(side.x, 0.0, side.y) * 5.0
+		L._kbeam(k, hc - hs, hc + hs, 1.0, 4.5, Color(0.92, 0.92, 0.85))  # lamp bank
+		L._kbeam(k, hc - hs + Vector3.UP * 2.6, hc + hs + Vector3.UP * 2.6, 0.5, 0.5, STEEL)
+		L._anchor(hc - hs + Vector3.DOWN * 2.4, hc + hs + Vector3.DOWN * 2.4)
+	# Goals (posts and crossbars) on the pitch – something to land beside.
+	for e: float in [-1.0, 1.0]:
+		var gx := pitch.get_center().x + e * (pitch.size.x * 0.5 - 3.0)
+		var gz := pitch.get_center().y
+		for s: float in [-1.0, 1.0]:
+			L._kbeam(k, Vector3(gx, 0.15, gz + s * 3.7), Vector3(gx, 2.6, gz + s * 3.7), 0.14, 0.14, WHITE, false)
+		L._kbeam(k, Vector3(gx, 2.6, gz - 3.8), Vector3(gx, 2.6, gz + 3.8), 0.14, 0.14, WHITE, false)
+	L.parks.append(r)  # grass pitch
+	L.reserved.append(r)
+
+
+## A band along one side of `pitch`, `d0`..`d1` metres out from it.
+func _band(k: Dictionary, pitch: Rect2, side: int, d0: float, d1: float, y0: float, y1: float, col: Color) -> void:
+	var x0 := pitch.position.x
+	var z0 := pitch.position.y
+	var x1 := pitch.end.x
+	var z1 := pitch.end.y
+	match side:
+		0: L._ksolid(k, x0, z0 - d1, x1, z0 - d0, y0, y1, col)
+		1: L._ksolid(k, x1 + d0, z0, x1 + d1, z1, y0, y1, col)
+		2: L._ksolid(k, x0, z1 + d0, x1, z1 + d1, y0, y1, col)
+		_: L._ksolid(k, x0 - d1, z0, x0 - d0, z1, y0, y1, col)
+
+
+func _side_point(pitch: Rect2, side: int, f: float, d: float) -> Vector2:
+	match side:
+		0: return Vector2(lerpf(pitch.position.x, pitch.end.x, f), pitch.position.y - d)
+		1: return Vector2(pitch.end.x + d, lerpf(pitch.position.y, pitch.end.y, f))
+		2: return Vector2(lerpf(pitch.position.x, pitch.end.x, f), pitch.end.y + d)
+		_: return Vector2(pitch.position.x - d, lerpf(pitch.position.y, pitch.end.y, f))
+
+
+## Square lattice tower: four solid chords (collide) and cross-bracing (looks).
+func _lattice_tower(k: Dictionary, base: Vector3, h: float, size: float, col: Color) -> void:
+	var hs := size * 0.5
+	var cs := [Vector3(-hs, 0, -hs), Vector3(hs, 0, -hs), Vector3(hs, 0, hs), Vector3(-hs, 0, hs)]
+	for c in cs:
+		L._kbeam(k, base + c, base + c + Vector3.UP * h, 0.5, 0.5, col)
+	var n := int(h / 4.0)
+	for i in n:
+		var y0 := base.y + h * i / n
+		var y1 := base.y + h * (i + 1) / n
+		for j in 4:
+			var a: Vector3 = cs[j]
+			var b: Vector3 = cs[(j + 1) % 4]
+			L._kbeam(k, base + a + Vector3(0, y0 - base.y, 0), base + b + Vector3(0, y1 - base.y, 0), 0.16, 0.16, col, false)
+	L._ksolid(k, base.x - hs - 0.4, base.z - hs - 0.4, base.x + hs + 0.4, base.z + hs + 0.4, base.y, base.y + 0.8,
+		Color(0.6, 0.59, 0.56))
+
+
+# ----------------------------------------------------------- gasholder
+## Victorian gasholder frame: 16 lattice columns on a ring, three ring
+## girders (run along them, swing through the middle) and the gas bell
+## half-raised inside – a big drum to land on.
+func _gasholder(r: Rect2, rng: RandomNumberGenerator) -> void:
+	var k := L._kit("gasholder")
+	var c := r.get_center()
+	var rad := minf(r.size.x, r.size.y) * 0.5 - 7.0
+	var n := 16
+	var h := 46.0
+	var rings := [15.5, 31.0, 46.0]
+	var pts: Array = []
+	for i in n:
+		var a := TAU * i / n
+		pts.append(Vector3(c.x + cos(a) * rad, 0.0, c.y + sin(a) * rad))
+	for i in n:
+		var p: Vector3 = pts[i]
+		var out := Vector3(p.x - c.x, 0, p.z - c.y).normalized()
+		var tang := out.cross(Vector3.UP)
+		# Column: two chords with lacing between them.
+		for s: float in [-0.7, 0.7]:
+			L._kbeam(k, p + tang * s, p + tang * s + Vector3.UP * h, 0.45, 0.45, IRON_GREEN)
+		var m := int(h / 3.0)
+		for j in m:
+			var y0 := h * j / m
+			var y1 := h * (j + 1) / m
+			var sa := -0.7 if j % 2 == 0 else 0.7
+			L._kbeam(k, p + tang * sa + Vector3.UP * y0, p - tang * sa + Vector3.UP * y1, 0.12, 0.12, IRON_GREEN, false)
+		L._ksolid(k, p.x - 1.2, p.z - 1.2, p.x + 1.2, p.z + 1.2, 0.0, 1.2, Color(0.55, 0.5, 0.45))
+	for y: float in rings:
+		for i in n:
+			var a: Vector3 = pts[i]
+			var b: Vector3 = pts[(i + 1) % n]
+			L._kbeam(k, a + Vector3.UP * (y - 0.6), b + Vector3.UP * (y - 0.6), 0.9, 1.2, IRON_GREEN.lightened(0.08))
+			L._anchor(a + Vector3.UP * (y - 1.3), b + Vector3.UP * (y - 1.3))
+		# Decorative cap on each column top.
+	for p: Vector3 in pts:
+		L._ksolid(k, p.x - 0.9, p.z - 0.9, p.x + 0.9, p.z + 0.9, h, h + 1.2, IRON_GREEN.darkened(0.2))
+	# The gas bell: a 24-sided drum, raised to a third of the frame.
+	var bell: PackedVector2Array = []
+	var br := rad - 3.5
+	for i in 24:
+		var a := TAU * (i + 0.5) / 24.0
+		bell.append(Vector2(c.x + cos(a) * br, c.y + sin(a) * br))
+	L._kprism(k, bell, 0.0, 14.0 + rng.randf_range(0.0, 4.0), Color(0.42, 0.45, 0.42))
+	L.reserved.append(r)
+
+
+# --------------------------------------------------------- wheel
+## Observation wheel on a plaza by the river: a ring of 32 rim segments
+## (every one an anchor), spokes to a hub on A-frame legs, 16 gondolas.
+func _wheel(r: Rect2, rng: RandomNumberGenerator) -> void:
+	var k := L._kit("wheel")
+	var c := r.get_center()
+	var rad := 32.0
+	var hub := Vector3(c.x, rad + 5.0, c.y)
+	var n := 32
+	var rim: Array = []
+	for i in n:
+		var a := TAU * i / n
+		rim.append(hub + Vector3(0.0, cos(a), sin(a)) * rad)
+	for side: float in [-1.6, 1.6]:
+		var o := Vector3(side, 0, 0)
+		for i in n:
+			var a: Vector3 = rim[i]
+			var b: Vector3 = rim[(i + 1) % n]
+			L._kbeam(k, a + o, b + o, 0.6, 0.9, WHITE)
+			L._anchor(a + o * 1.5, b + o * 1.5)
+		for i in range(0, n, 2):
+			L._kbeam(k, hub + o * 0.5, rim[i] + o, 0.18, 0.18, WHITE.darkened(0.08), false)
+	for i in range(0, n, 2):
+		L._kbeam(k, rim[i] + Vector3(-1.6, 0, 0), rim[i] + Vector3(1.6, 0, 0), 0.3, 0.3, WHITE.darkened(0.1))
+		# Gondola hanging under the rim point.
+		var g: Vector3 = rim[i] + Vector3(0, -2.2, 0)
+		var gc: Color = [Color(0.9, 0.35, 0.18), Color(0.2, 0.5, 0.75), Color(0.95, 0.75, 0.2)][(i / 2) % 3]
+		L._ksolid(k, g.x - 1.6, g.z - 1.4, g.x + 1.6, g.z + 1.4, g.y - 2.4, g.y, gc)
+		L._ksolid(k, g.x - 1.7, g.z - 1.5, g.x + 1.7, g.z + 1.5, g.y, g.y + 0.3, WHITE)
+	L._ksolid(k, hub.x - 2.6, hub.z - 1.8, hub.x + 2.6, hub.z + 1.8, hub.y - 1.8, hub.y + 1.8, STEEL)
+	# A-frame legs either side, splayed along the ring's plane.
+	for side: float in [-1.0, 1.0]:
+		for s: float in [-1.0, 1.0]:
+			L._kbeam(k, Vector3(c.x + side * 7.0, 0.0, c.y + s * 15.0), hub + Vector3(side * 2.6, 0, 0), 1.1, 1.1, STEEL)
+		L._ksolid(k, c.x + side * 7.0 - 2.0, c.y - 18.0, c.x + side * 7.0 + 2.0, c.y + 18.0, 0.0, 1.0,
+			Color(0.6, 0.59, 0.56))
+	# Boarding platform under the bottom of the ring.
+	L._ksolid(k, c.x - 5.0, c.y - 6.0, c.x + 5.0, c.y + 6.0, 0.0, 1.6, Color(0.55, 0.55, 0.57))
+	L.reserved.append(r)
+
+
+# ------------------------------------------------------ container yard
+## Stacks of shipping containers (1–4 high) in bays with aisles: a low,
+## blocky playground for running, vaulting and short swings.
+func _container_yard(r: Rect2, rng: RandomNumberGenerator) -> void:
+	var k := L._kit("yard")
+	var inner := r.grow(-5.0)
+	var cl := 12.2
+	var cw := 2.44
+	var ch := 2.6
+	var x := inner.position.x
+	while x + cl <= inner.end.x:
+		var z := inner.position.y
+		var bay := 0
+		while z + cw <= inner.end.y:
+			var stack := rng.randi_range(0, 4)
+			if bay == 0 or rng.randf() < 0.2:
+				stack = maxi(stack, 1)
+			for s in stack:
+				var col: Color = CONTAINER_COLORS[rng.randi() % CONTAINER_COLORS.size()]
+				_container(k, x, z, x + cl, z + cw, s * ch, col)
+			z += cw + 0.1
+			bay += 1
+			if bay == 5:
+				bay = 0
+				z += 4.0  # aisle
+		x += cl + 3.5
+	# A straddle carrier parked over one row.
+	var sx := inner.position.x + cl * 0.5 + rng.randi_range(0, 2) * (cl + 3.5)
+	var sz := inner.position.y + 1.2
+	for e: float in [-1.0, 1.0]:
+		for f: float in [-1.0, 1.0]:
+			L._kbeam(k, Vector3(sx + e * 5.0, 0.0, sz + f * 2.2), Vector3(sx + e * 5.0, 12.5, sz + f * 2.2), 0.6, 0.6,
+				Color(0.92, 0.68, 0.12))
+	L._ksolid(k, sx - 5.6, sz - 2.8, sx + 5.6, sz + 2.8, 12.5, 14.0, Color(0.92, 0.68, 0.12))
+	L.reserved.append(r)
+
+
+## One container: the box, plus darker corner posts (looks only).
+func _container(k: Dictionary, x0: float, z0: float, x1: float, z1: float, y0: float, col: Color) -> void:
+	L._ksolid(k, x0, z0, x1, z1, y0 + 0.15, y0 + 2.6 + 0.15, col)
+	var dark := col.darkened(0.35)
+	for p: Vector2 in [Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)]:
+		var q := Vector2(p.x + (0.12 if p.x == x0 else -0.12), p.y + (0.12 if p.y == z0 else -0.12))
+		L._kbeam(k, Vector3(q.x, y0 + 0.15, q.y), Vector3(q.x, y0 + 2.75, q.y), 0.26, 0.26, dark, false)
+	for f: float in [0.25, 0.5, 0.75]:
+		var cx := lerpf(x0, x1, f)
+		L._kbeam(k, Vector3(cx, y0 + 0.3, z0 - 0.01), Vector3(cx, y0 + 2.6, z0 - 0.01), 0.1, 0.04, dark, false)
+		L._kbeam(k, Vector3(cx, y0 + 0.3, z1 + 0.01), Vector3(cx, y0 + 2.6, z1 + 0.01), 0.1, 0.04, dark, false)
+
+
+# ------------------------------------------------------------ ship
+## Cargo ship moored in a dock basin, bow to the east: hull, deck
+## containers (a gap left under the quay crane's hanging load), a stern
+## bridge with wings and funnel, and two derricks whose booms are anchors.
+func ship(basin: Rect2) -> void:
+	if not basin.grow(8.0).has_point(SHIP_AT):
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("ship")
+	var k := L._kit("ship")
+	var c := basin.get_center()
+	var length := basin.size.x - 12.0
+	var beam := 14.0
+	var x0 := c.x - length * 0.5 + 2.0
+	var x1 := c.x + length * 0.5
+	var bow := x1 - 12.0
+	var deck := 6.5
+	var hull := PackedVector2Array([Vector2(x0, c.y - beam * 0.5), Vector2(bow, c.y - beam * 0.5), Vector2(x1, c.y),
+		Vector2(bow, c.y + beam * 0.5), Vector2(x0, c.y + beam * 0.5)])
+	L._kprism(k, hull, -3.5, deck, Color(0.16, 0.2, 0.26))
+	var band := PackedVector2Array([Vector2(x0 - 0.05, c.y - beam * 0.5 - 0.05), Vector2(bow, c.y - beam * 0.5 - 0.05),
+		Vector2(x1 + 0.08, c.y), Vector2(bow, c.y + beam * 0.5 + 0.05), Vector2(x0 - 0.05, c.y + beam * 0.5 + 0.05)])
+	L._kprism(k, band, -1.7, -0.9, Color(0.62, 0.12, 0.1))  # red boot-top at the waterline
+	# Bridge house aft.
+	L._ksolid(k, x0 + 1.0, c.y - 6.0, x0 + 12.0, c.y + 6.0, deck, deck + 9.0, WHITE)
+	L._ksolid(k, x0 + 7.0, c.y - 7.5, x0 + 12.0, c.y + 7.5, deck + 9.0, deck + 12.0, WHITE)  # wheelhouse + wings
+	L._ksolid(k, x0 + 7.4, c.y - 7.0, x0 + 11.6, c.y + 7.0, deck + 9.8, deck + 11.2, Color(0.15, 0.2, 0.25), false)
+	L._ksolid(k, x0 + 2.0, c.y - 1.8, x0 + 5.6, c.y + 1.8, deck + 9.0, deck + 16.0, Color(0.12, 0.12, 0.13))  # funnel
+	L._ksolid(k, x0 + 1.9, c.y - 1.9, x0 + 5.7, c.y + 1.9, deck + 13.0, deck + 14.2, RED, false)
+	# Containers on deck, in rows across the ship; clear under the quay crane's load.
+	var keep_out := []
+	for s in L.structures:
+		if s["type"] == "quay_crane" and absf(float(s["z"]) - c.y) < beam:
+			var tx: float = float(s["x"]) + float(s["reach"]) * 0.6
+			keep_out.append(Vector2(tx - 8.0, tx + 8.0))
+	var x := x0 + 14.0
+	while x + 6.1 < bow - 1.0:
+		var blocked := false
+		for ko in keep_out:
+			if x + 6.1 > ko.x and x < ko.y:
+				blocked = true
+		if not blocked:
+			var z := c.y - 6.1
+			while z + 2.44 <= c.y + 6.1:
+				var tiers := rng.randi_range(1, 3)
+				for t in tiers:
+					_container(k, x, z, x + 6.1, z + 2.44, deck + t * 2.6 - 0.15, CONTAINER_COLORS[rng.randi() % CONTAINER_COLORS.size()])
+				z += 2.44 + 0.05
+		x += 6.1 + 0.6
+	# Derricks: masts with booms angled out over the quay side.
+	for mx: float in [x0 + 20.0, bow - 6.0]:
+		var foot := Vector3(mx, deck, c.y)
+		var top := foot + Vector3.UP * 18.0
+		L._kbeam(k, foot, top, 0.8, 0.8, Color(0.85, 0.65, 0.15))
+		var tip := foot + Vector3(-4.0, 13.0, -11.0)
+		L._kbeam(k, foot + Vector3.UP * 2.0, tip, 0.5, 0.5, Color(0.85, 0.65, 0.15))
+		L._kbeam(k, top, tip, 0.08, 0.08, STEEL, false)
+		L._anchor(foot + Vector3.UP * 2.0 + (tip - foot - Vector3.UP * 2.0) * 0.3, tip)
+	# Bow mast with a light.
+	L._kbeam(k, Vector3(bow + 2.0, deck, c.y), Vector3(bow + 2.0, deck + 8.0, c.y), 0.3, 0.3, WHITE)
+
+
+# -------------------------------------------------------- elevated rail
+## Elevated railway along an avenue: deck on steel bents at the kerbs (never
+## in a traffic lane or a crossing), side girders, rails, and a parked
+## three-car train. Run along it, swing under it, land on the train.
+func elevated_rail() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("el")
+	var k := L._kit("el")
+	var zc := EL_Z
+	var deck := 14.0
+	var x0: float = EL_X[0]
+	var x1: float = EL_X[1]
+	var half := 5.0
+	L._ksolid(k, x0, zc - half, x1, zc + half, deck - 1.0, deck, Color(0.36, 0.37, 0.38))
+	for s: float in [-1.0, 1.0]:
+		var z0 := zc + s * half
+		L._ksolid(k, x0, minf(z0, z0 + s * 0.5), x1, maxf(z0, z0 + s * 0.5), deck - 2.2, deck + 0.25, Color(0.3, 0.4, 0.38))
+		for r: float in [-0.75, 0.75]:
+			var rz := zc + s * 2.0 + r
+			L._kbeam(k, Vector3(x0, deck + 0.08, rz), Vector3(x1, deck + 0.08, rz), 0.12, 0.16, STEEL, false)
+		L._anchor(Vector3(x0, deck - 2.4, z0 + s * 0.3), Vector3(x1, deck - 2.4, z0 + s * 0.3))
+	# Bents every ~24 m, skipping the cross streets.
+	var x := x0 + 6.0
+	while x < x1 - 4.0:
+		var clear := true
+		for st in L.x_streets:
+			if absf(x - float(st[0])) < float(st[1]) * 0.5 + 4.0:
+				clear = false
+		if clear:
+			for s: float in [-1.0, 1.0]:
+				var cz := zc + s * 11.5
+				L._ksolid(k, x - 0.45, cz - 0.45, x + 0.45, cz + 0.45, 0.15, deck - 2.2, Color(0.3, 0.4, 0.38))
+			L._ksolid(k, x - 0.6, zc - 12.0, x + 0.6, zc + 12.0, deck - 3.4, deck - 2.2, Color(0.3, 0.4, 0.38))
+			x += 24.0
+		else:
+			x += 4.0
+	# The train: three cars with a gap, on the south track.
+	var tx := x0 + 150.0 + rng.randf_range(0.0, 60.0)
+	var tz := zc + 2.0
+	for car in 3:
+		var a := tx + car * 19.0
+		L._ksolid(k, a, tz - 1.6, a + 18.0, tz + 1.6, deck + 0.6, deck + 4.2, Color(0.82, 0.8, 0.74))
+		L._ksolid(k, a + 0.1, tz - 1.65, a + 17.9, tz + 1.65, deck + 2.2, deck + 3.4, Color(0.16, 0.2, 0.25), false)
+		L._ksolid(k, a + 0.1, tz - 1.65, a + 17.9, tz + 1.65, deck + 1.1, deck + 1.6, Color(0.85, 0.5, 0.1), false)
+		L._ksolid(k, a + 1.5, tz - 1.3, a + 16.5, tz + 1.3, deck + 0.15, deck + 0.6, STEEL)
+
+
+# ------------------------------------------------------------- gateways
+## Gateway blocks: a four-storey "sky lobby" spanning an avenue between two
+## towers of the business district, high enough to swing under.
+func gateways() -> void:
+	var made := 0
+	for st in L.x_streets:
+		if float(st[1]) < 20.0:
+			continue
+		var west_x: float = float(st[0]) - float(st[1]) * 0.5
+		var east_x: float = float(st[0]) + float(st[1]) * 0.5
+		var best: Array = []
+		var best_s := 0.0
+		for a in L.buildings:
+			if a["kind"] != "normal" or L.district(a["tiers"][0][2], a["tiers"][0][3]) != "cbd":
+				continue
+			var ta: Array = a["tiers"][-1]
+			if absf(float(a["tiers"][0][2]) - west_x) > 5.0 or float(ta[5]) < 120.0:
+				continue
+			for b in L.buildings:
+				if b["kind"] != "normal":
+					continue
+				var tb: Array = b["tiers"][-1]
+				if absf(float(b["tiers"][0][0]) - east_x) > 5.0 or float(tb[5]) < 120.0:
+					continue
+				var ov0 := maxf(ta[1], tb[1])
+				var ov1 := minf(ta[3], tb[3])
+				if ov1 - ov0 < 18.0:
+					continue
+				var s := ov1 - ov0 + minf(ta[5], tb[5]) * 0.05
+				if s > best_s:
+					best_s = s
+					best = [a, b, ov0, ov1]
+		if best.is_empty():
+			continue
+		var a2: Dictionary = best[0]
+		var b2: Dictionary = best[1]
+		var y := minf(float(a2["tiers"][-1][5]), float(b2["tiers"][-1][5])) * 0.42
+		# Spans between the tiers the towers have at that height (setbacks).
+		var ta2 := _tier_at(a2, y + 7.5)
+		var tb2 := _tier_at(b2, y + 7.5)
+		if ta2.is_empty() or tb2.is_empty() or _tier_at(a2, y) != ta2 or _tier_at(b2, y) != tb2 \
+				or _tier_at(a2, y + 15.0) != ta2 or _tier_at(b2, y + 15.0) != tb2:
+			continue
+		var ov0 := maxf(ta2[1], tb2[1])
+		var ov1 := minf(ta2[3], tb2[3])
+		if ov1 - ov0 < 16.0:
+			continue
+		var zc := (ov0 + ov1) * 0.5
+		var hw := minf((ov1 - ov0) * 0.5 - 2.0, 14.0)
+		var xa: float = ta2[2]
+		var xb: float = tb2[0]
+		L._add({"tiers": [[xa - 1.0, zc - hw, xb + 1.0, zc + hw, y, y + 15.0]], "style": CityLayout.Style.DARK_GLASS,
+			"color": Color(0.2, 0.24, 0.28), "kind": "bridge", "seed": 0.37 + made * 0.11})
+		made += 1
+
+
+static func _tier_at(b: Dictionary, y: float) -> Array:
+	for t in b["tiers"]:
+		if y >= float(t[4]) and y <= float(t[5]):
+			return t
+	return []
+
+
+# ---------------------------------------------------------- lighthouse
+## Lighthouse on a stone pier in the river at the dock entrance: a tapering
+## white-and-red tower, a gallery to land on (its rim is an anchor ring)
+## and the lantern. A jetty runs back to the promenade.
+func lighthouse() -> void:
+	var k := L._kit("lighthouse")
+	var c := LIGHTHOUSE_AT
+	L._kprism(k, _ngon(c, 9.0, 12), -4.0, 2.2, Color(0.5, 0.47, 0.42))
+	L._ksolid(k, c.x + 6.0, c.y - 2.2, CityLayout.RIVER_EDGE, c.y + 2.2, 0.6, 1.4, Color(0.42, 0.36, 0.3))  # jetty
+	var y := 2.2
+	var r := 5.2
+	for band in 8:
+		var y1 := y + 5.5
+		var r1 := r - 0.3
+		var col := WHITE if band % 2 == 0 else RED
+		L._kprism(k, _ngon(c, (r + r1) * 0.5, 12), y, y1, col)
+		y = y1
+		r = r1
+	L._kprism(k, _ngon(c, r + 2.2, 12), y, y + 0.6, Color(0.2, 0.22, 0.24))  # gallery floor
+	var ring := _ngon(c, r + 2.0, 12)
+	for i in ring.size():
+		var a: Vector2 = ring[i]
+		var b: Vector2 = ring[(i + 1) % ring.size()]
+		L._kbeam(k, Vector3(a.x, y + 1.6, a.y), Vector3(b.x, y + 1.6, b.y), 0.08, 0.08, STEEL, false)  # railing
+		L._anchor(Vector3(a.x, y - 0.2, a.y), Vector3(b.x, y - 0.2, b.y))
+	L._kprism(k, _ngon(c, r - 0.8, 12), y + 0.6, y + 4.6, Color(0.95, 0.9, 0.6))  # lantern
+	L._kprism(k, _ngon(c, r - 0.4, 12), y + 4.6, y + 5.4, RED.darkened(0.2))
+	L._kprism(k, _ngon(c, 1.2, 8), y + 5.4, y + 7.4, RED.darkened(0.3))
+
+
+static func _ngon(c: Vector2, r: float, n: int) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in n:
+		var a := TAU * (i + 0.5) / n
+		out.append(c + Vector2(cos(a), sin(a)) * r)
+	return out

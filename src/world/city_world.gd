@@ -11,6 +11,9 @@ extends Node3D
 ##    ranges, GPU-animated traffic, and an occluder for occlusion culling.
 
 const CHUNK := CityLayout.CHUNK
+## Street furniture, lamp posts, trunks, roof units and parked cars: solid to
+## the body (and ragdoll), but not web targets and not in the way of webs.
+const PROPS_LAYER := 1 << 4
 const MODEL_DIR := "res://assets/models/"
 const PROP_RANGES := {
 	"streetlight": 260.0, "tree": 320.0, "water_tower": 520.0, "ac_unit": 240.0, "antenna": 700.0, "crane": 1200.0,
@@ -82,7 +85,11 @@ func _ready() -> void:
 	for cx in range(floori(CityLayout.RIVER_EDGE / CHUNK) - 1, ceili((CityLayout.MAX_X + 200.0) / CHUNK)):
 		for cz in range(floori((CityLayout.MIN_Z - 100.0) / CHUNK), ceili((CityLayout.MAX_Z + 100.0) / CHUNK)):
 			_all_keys.append(Vector2i(cx, cz))
+	for key in _by_chunk:
+		if not key in _all_keys:
+			_all_keys.append(key)  # e.g. the far bridge anchorage across the river
 	_build_collision()
+	_build_prop_collision()
 	_build_water()
 	_build_landmarks()
 	_build_structures()
@@ -156,7 +163,7 @@ func rooftop_spawns() -> Array:
 		var spot := _clear_spot(t, roof_props)
 		if spot.is_empty():
 			continue
-		var p := Vector3(spot["x"], h + 0.6 + 0.95, spot["z"])
+		var p := Vector3(spot["x"], BuildingMesher.roof_y(b) + 0.95, spot["z"])
 		_roof_spawns.append({"position": p, "height": h})  # yaw is computed when picked
 	return _roof_spawns
 
@@ -614,18 +621,14 @@ func _street_width_beside(r: Rect2, nrm: Vector2) -> float:
 
 ## Merged furniture arrays for one chunk (worker-thread safe: reads only).
 func _furniture_arrays(key: Vector2i):
-	var items: Array = _furniture_by_chunk.get(key, [])
+	var items: Array = chunk_furniture(key)
 	if items.is_empty() or _furn_src.is_empty():
 		return null
 	var v := PackedVector3Array()
 	var nrm := PackedVector3Array()
 	var col := PackedColorArray()
 	var idx := PackedInt32Array()
-	var n := 0
 	for it in items:
-		n += 1
-		if prop_density < 1.0 and fmod(n * 0.618, 1.0) > prop_density:
-			continue
 		var src: Array = _furn_src.get(it[0], [])
 		if src.is_empty():
 			continue
@@ -650,6 +653,9 @@ func _furniture_arrays(key: Vector2i):
 
 
 # ------------------------------------------------------------- collision
+## Collision mirrors the drawn city exactly (BuildingMesher.collision_boxes):
+## roofs at the height they're drawn, cornices, parapets, plinths and awnings
+## solid, the street at 0 and the raised pavements at their kerb height.
 func _build_collision() -> void:
 	var by_chunk := _by_chunk
 	for key in by_chunk:
@@ -658,27 +664,21 @@ func _build_collision() -> void:
 		body.collision_layer = 1 | (1 << 1)
 		body.collision_mask = 0
 		for b in by_chunk[key]:
-			for t in b["tiers"]:
-				var shape := CollisionShape3D.new()
-				var box := BoxShape3D.new()
-				var lip := 0.6 if b["kind"] in ["normal", "landmark"] else 0.0
-				box.size = Vector3(t[2] - t[0], t[5] - t[4] + lip, t[3] - t[1])
-				shape.shape = box
-				shape.position = Vector3((t[0] + t[2]) * 0.5, (t[4] + t[5] + lip) * 0.5, (t[1] + t[3]) * 0.5)
-				body.add_child(shape)
+			for box in BuildingMesher.collision_boxes(b):
+				_add_box(body, box)
 		add_child(body)
 	var street := StaticBody3D.new()
 	street.name = "Street"
 	street.collision_layer = 1 << 3
 	street.collision_mask = 0
 	street.add_to_group("street")
-	for r in layout.land:
-		var shape := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(r.size.x, 2.0, r.size.y)
-		shape.shape = box
-		shape.position = Vector3(r.get_center().x, -0.9, r.get_center().y)
-		street.add_child(shape)
+	for r in ground_rects():
+		_add_box(street, AABB(Vector3(r.position.x, -2.0, r.position.y), Vector3(r.size.x, 2.0, r.size.y)))
+	for r in pavement_rects():
+		_add_box(street, AABB(Vector3(r.position.x, 0.0, r.position.y), Vector3(r.size.x, BuildingMesher.KERB, r.size.y)))
+	# River wall along the promenade (the parapet drawn by add_ground).
+	_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, CityLayout.MIN_Z - 200.0),
+		Vector3(0.6, 5.1, CityLayout.MAX_Z - CityLayout.MIN_Z + 400.0)))
 	add_child(street)
 	var water_floor := StaticBody3D.new()
 	water_floor.name = "WaterFloor"
@@ -693,6 +693,143 @@ func _build_collision() -> void:
 		shape.position = Vector3(w.get_center().x, -4.0, w.get_center().y)
 		water_floor.add_child(shape)
 	add_child(water_floor)
+	# Set pieces: oriented beams and convex prisms (their boxes are buildings).
+	var kit := StaticBody3D.new()
+	kit.name = "SetPieceCol"
+	kit.collision_layer = 1 | (1 << 1)
+	kit.collision_mask = 0
+	for ob in layout.kit_obbs:
+		var cs := CollisionShape3D.new()
+		var bs := BoxShape3D.new()
+		bs.size = ob[1]
+		cs.shape = bs
+		cs.transform = ob[0]
+		kit.add_child(cs)
+	for hull in layout.kit_hulls:
+		var cs2 := CollisionShape3D.new()
+		var cv := ConvexPolygonShape3D.new()
+		cv.points = hull
+		cs2.shape = cv
+		kit.add_child(cs2)
+	add_child(kit)
+
+
+## Solid shapes for every drawn prop, in the prop's own frame:
+## [size, centre] boxes (poles, trunks, units, furniture, cars).
+func _prop_boxes(kind: String) -> Array:
+	match kind:
+		"streetlight":
+			return [[Vector3(0.24, 7.0, 0.24), Vector3(0, 3.5, 0)]]
+		"traffic_light":
+			return [[Vector3(0.3, 6.2, 0.3), Vector3(0, 2.8, 0)]]
+		"sign_post":
+			return [[Vector3(0.14, 2.9, 0.14), Vector3(0, 1.45, 0)]]
+		"tree", "tree_tall":
+			return [[Vector3(0.36, 2.6, 0.36), Vector3(0, 1.3, 0)]]
+		"antenna":
+			return [[Vector3(0.3, 14.3, 0.3), Vector3(0, 7.15, 0)]]
+		"roof_hut", "crane":
+			return []  # the layout's own boxes
+	var m: Mesh = prop_meshes.get(kind)
+	if m == null:
+		var src: Array = _furn_src.get(kind, [])
+		if src.is_empty():
+			return []
+		var bb := AABB((src[0] as PackedVector3Array)[0], Vector3.ZERO)
+		for v in src[0]:
+			bb = bb.expand(v)
+		return [[bb.size, bb.get_center()]]
+	var a := m.get_aabb()
+	return [[a.size, a.get_center()]]
+
+
+func _build_prop_collision() -> void:
+	var car_boxes: Array = []
+	for k in CAR_KINDS:
+		var cm := _load_mesh(k[0])
+		var a := cm.get_aabb() if cm else AABB(Vector3(-1, 0, -2.3), Vector3(2, 1.45, 4.6))
+		car_boxes.append([a.size, a.get_center()])
+	var cache := {}
+	var keys := {}
+	for k in _props_by_chunk:
+		keys[k] = true
+	for k in _furniture_by_chunk:
+		keys[k] = true
+	for k in _all_keys:
+		keys[k] = true
+	for key in keys:
+		var body := StaticBody3D.new()
+		body.name = "Props_%d_%d" % [key.x, key.y]
+		body.collision_layer = PROPS_LAYER
+		body.collision_mask = 0
+		var items: Array = chunk_props(key) + chunk_furniture(key)
+		for it in items:
+			var kind: String = it[0]
+			if not cache.has(kind):
+				cache[kind] = _prop_boxes(kind)
+			for bx in cache[kind]:
+				_add_oriented_box(body, it[1], bx[0], bx[1])
+		for pc in parked_cars(key):
+			var bx: Array = car_boxes[int(pc[1])]
+			_add_oriented_box(body, pc[0], bx[0], bx[1])
+		if body.get_child_count() > 0:
+			add_child(body)
+		else:
+			body.free()
+
+
+## A box of `size` at `centre` in the frame `xf` (uniform scale baked into the size).
+static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3, centre: Vector3) -> void:
+	var sc := xf.basis.get_scale()
+	var shape := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size * sc
+	shape.shape = bs
+	shape.transform = Transform3D(xf.basis.orthonormalized(), xf * centre)
+	body.add_child(shape)
+
+
+static func _add_box(body: StaticBody3D, box: AABB) -> void:
+	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
+		return
+	var shape := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = box.size
+	shape.shape = bs
+	shape.position = box.get_center()
+	body.add_child(shape)
+
+
+## Every piece of street-level ground that is drawn (the playable city, the
+## outskirts round it and the far shore), minus the dock basins.
+func ground_rects() -> Array:
+	var rects: Array = [Rect2(CityLayout.RIVER_EDGE, CityLayout.MIN_Z - 1000.0,
+		CityLayout.MAX_X + 1000.0 - CityLayout.RIVER_EDGE, CityLayout.MAX_Z - CityLayout.MIN_Z + 2000.0)]
+	for w in layout.water:
+		if (w as Rect2).position.x < 0.0:
+			continue
+		var next: Array = []
+		for r in rects:
+			next.append_array(CityLayout._subtract(r, w))
+		rects = next
+	rects.append(Rect2(-2600.0, -2600.0, CityLayout.FAR_SHORE + 2600.0, 5200.0))
+	return rects
+
+
+## Raised pavement blocks (kerb height) as drawn by BuildingMesher.add_ground:
+## whole blocks, or just the quay ring round a dock basin.
+func pavement_rects() -> Array:
+	var out: Array = []
+	for blk in layout.blocks:
+		var basin := false
+		for w in layout.water:
+			if (w as Rect2).encloses((blk as Rect2).grow(-7.0)) and (w as Rect2).position.x > 0.0:
+				basin = true
+		if basin:
+			out.append_array(CityLayout._subtract(blk, (blk as Rect2).grow(-6.0)))
+		else:
+			out.append(blk)
+	return out
 
 
 func _build_water() -> void:
@@ -730,6 +867,20 @@ func _build_landmarks() -> void:
 		mmi.name = "Landmark_" + k
 		mmi.multimesh = mm
 		add_child(mmi)
+		# Landmarks collide with their exact surface (domes, crowns, the
+		# viaduct's arches), not a box round them.
+		var body := StaticBody3D.new()
+		body.name = "LandmarkCol_" + k
+		body.collision_layer = 1 | (1 << 1)
+		body.collision_mask = 0
+		var shape := ConcavePolygonShape3D.new()
+		shape.set_faces(mesh.get_faces())
+		for xf in groups[k]:
+			var cs := CollisionShape3D.new()
+			cs.shape = shape
+			cs.transform = xf
+			body.add_child(cs)
+		add_child(body)
 
 
 ## Cranes and the bridge: one mesh per structure (own culling box), detailed
@@ -817,6 +968,12 @@ func _build_outskirts() -> void:
 	var col_body := StaticBody3D.new()
 	col_body.name = "OutskirtsCol"
 	col_body.collision_layer = 1 | (1 << 1)
+	col_body.collision_mask = 0
+	var pave_body := StaticBody3D.new()  # outer pavements: street, not a web target
+	pave_body.name = "OutskirtsPavements"
+	pave_body.collision_layer = 1 << 3
+	pave_body.collision_mask = 0
+	pave_body.add_to_group("street")
 	var styles := [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE,
 		CityLayout.Style.BRICK]
 	var near_m := BuildingMesher.new()  # detailed, close to the playable grid
@@ -845,6 +1002,8 @@ func _build_outskirts() -> void:
 			var brng := RandomNumberGenerator.new()
 			brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ layout.seed
 			var park := brng.randf() < 0.1
+			_add_box(pave_body, AABB(Vector3(blk.position.x, 0.0, blk.position.y),
+				Vector3(blk.size.x, BuildingMesher.KERB, blk.size.y)))
 			blocks_m.top(blk.position.x, blk.position.y, blk.end.x, blk.end.y, 0.15,
 				Color(0.32, 0.45, 0.24) if park else Color(0.58, 0.57, 0.55), BuildingMesher.KIND_ROOF, 0, 0)
 			blocks_m.walls(blk.position.x, blk.position.y, blk.end.x, blk.end.y, 0.0, 0.15, Color(0.7, 0.69, 0.66),
@@ -874,16 +1033,15 @@ func _build_outskirts() -> void:
 				var bd := {"tiers": [[r.position.x, r.position.y, r.end.x, r.end.y, 0.0, h]], "style": st,
 					"color": (cols[brng.randi() % cols.size()] as Color).lightened(brng.randf_range(-0.05, 0.05)),
 					"kind": "normal", "seed": brng.randf()}
+				# Everything drawn out here is solid too: the outskirts are part
+				# of the city you can swing into, not a painted backdrop.
 				if near:
 					near_m.add_building(bd, true)
-					var shape := CollisionShape3D.new()
-					var box := BoxShape3D.new()
-					box.size = Vector3(r.size.x, h + 0.6, r.size.y)
-					shape.shape = box
-					shape.position = Vector3(r.get_center().x, (h + 0.6) * 0.5, r.get_center().y)
-					col_body.add_child(shape)
+					for box in BuildingMesher.collision_boxes(bd):
+						_add_box(col_body, box)
 				else:
 					m.add_building(bd, false)
+					_add_box(col_body, AABB(Vector3(r.position.x, 0.0, r.position.y), Vector3(r.size.x, h, r.size.y)))
 	# Far shore across the river (where the bridge lands): a quay road, then
 	# terraces and a few towers. Near the bridge they collide, so it's a place
 	# to land, not a painted backdrop.
@@ -904,15 +1062,14 @@ func _build_outskirts() -> void:
 				"color": cols2[rng.randi() % cols2.size()], "kind": "normal", "seed": rng.randf()}
 			m.add_building(b2, near_bridge)
 			if near_bridge:
-				var shape2 := CollisionShape3D.new()
-				var box2 := BoxShape3D.new()
-				box2.size = Vector3(w2, h2, d2)
-				shape2.shape = box2
-				shape2.position = Vector3(bx + w2 * 0.5, h2 * 0.5, z2 + d2 * 0.5)
-				col_body.add_child(shape2)
+				for box in BuildingMesher.collision_boxes(b2):
+					_add_box(col_body, box)
+			else:
+				_add_box(col_body, AABB(Vector3(bx, 0.0, z2), Vector3(w2, h2, d2)))
 			bx -= w2 + rng.randf_range(14.0, 24.0)
 		z2 += d2 + rng.randf_range(14.0, 24.0)
 	m.top(-2600.0, -2600.0, CityLayout.FAR_SHORE, 2600.0, 0.0, Color(0.33, 0.33, 0.34), BuildingMesher.KIND_ROOF, 0, 0)
+	_add_box(pave_body, AABB(Vector3(CityLayout.FAR_SHORE - 0.6, -4.0, -2600.0), Vector3(0.6, 5.1, 5200.0)))
 	m.walls(CityLayout.FAR_SHORE - 0.6, -2600.0, CityLayout.FAR_SHORE, 2600.0, -4.0, 1.1, Color(0.42, 0.38, 0.33),
 		BuildingMesher.KIND_TRIM, 0, 0)
 	var mesh := ArrayMesh.new()
@@ -957,6 +1114,7 @@ func _build_outskirts() -> void:
 		ni.material_override = building_mat
 		add_child(ni)
 	add_child(col_body)
+	add_child(pave_body)
 
 
 ## [start, end] of each block between consecutive streets ([centre, width] list).
@@ -1192,8 +1350,10 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 	chunks_built += 1
 
 
-func _add_props(root: Node3D, key: Vector2i) -> void:
-	var by_kind := {}
+## The props drawn in a chunk at the current density: [kind, Transform3D].
+## Collision is built from the same list, so a prop you can't see never blocks you.
+func chunk_props(key: Vector2i) -> Array:
+	var out: Array = []
 	var i := 0
 	for p in _props_by_chunk.get(key, []):
 		i += 1
@@ -1209,6 +1369,27 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 			if h % 5 < 2 and prop_meshes.has("tree_tall"):
 				kind = "tree_tall"
 			xf.basis = xf.basis * Basis(Vector3.UP, (h % 628) * 0.01)
+		out.append([kind, xf])
+	return out
+
+
+## Furniture drawn in a chunk at the current density: [kind, Transform3D].
+func chunk_furniture(key: Vector2i) -> Array:
+	var out: Array = []
+	var n := 0
+	for it in _furniture_by_chunk.get(key, []):
+		n += 1
+		if prop_density < 1.0 and fmod(n * 0.618, 1.0) > prop_density:
+			continue
+		out.append(it)
+	return out
+
+
+func _add_props(root: Node3D, key: Vector2i) -> void:
+	var by_kind := {}
+	for p in chunk_props(key):
+		var kind: String = p[0]
+		var xf: Transform3D = p[1]
 		if not by_kind.has(kind):
 			by_kind[kind] = []
 		by_kind[kind].append(xf)
@@ -1258,7 +1439,12 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		for c in n:
 			xf.append(Transform3D(basis, s0 + Vector3.UP * 0.02))
 			custom.append(Color(rng.randf_range(9.0, 15.0), rng.randf_range(0.0, length), length, 0.0))
-	_parked_cars(rect, rng, xf, custom)
+	var moving := xf.size()
+	var parked := parked_cars(key)
+	for pc in parked:
+		var m: Transform3D = pc[0]
+		xf.append(Transform3D(m.basis, m.origin + m.basis.z * 5.0))  # the shader's 5 m phase
+		custom.append(Color(0.0, 5.0, 10.0, 0.0))
 	if xf.is_empty():
 		return
 	# Sort the cars into one MultiMesh per model (own RNG: the colour draws
@@ -1269,11 +1455,7 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 	for k in CAR_KINDS.size():
 		groups.append([])
 	for i in xf.size():
-		var r := kind_rng.randf()
-		var k := 0
-		while k < CAR_KINDS.size() - 1 and r > CAR_KINDS[k][1]:
-			r -= CAR_KINDS[k][1]
-			k += 1
+		var k := _car_kind(kind_rng.randf()) if i < moving else int(parked[i - moving][1])
 		if car_meshes[k] == null:
 			k = 0
 		var col: Color = CAR_COLORS[rng.randi() % CAR_COLORS.size()]
@@ -1404,6 +1586,32 @@ func _add_walkers(root: Node3D, key: Vector2i) -> void:
 ## Cars parked along both kerbs of the ordinary streets (not the avenues,
 ## not near junctions), with gaps. Same MultiMesh as traffic: speed 0 and a
 ## phase in the middle of a short "segment", the transform offset to match.
+static func _car_kind(r: float) -> int:
+	var k := 0
+	while k < CAR_KINDS.size() - 1 and r > CAR_KINDS[k][1]:
+		r -= CAR_KINDS[k][1]
+		k += 1
+	return k
+
+
+## Parked cars in a chunk: [Transform3D of the model, CAR_KINDS index]. Own
+## random stream per chunk, independent of the traffic density, so the
+## collision built up front matches what the chunk later draws.
+func parked_cars(key: Vector2i) -> Array:
+	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key) ^ 0x9a4c
+	var xf: Array = []
+	var custom: Array = []
+	_parked_cars(rect, rng, xf, custom)
+	var out: Array = []
+	for t in xf:
+		# The shader shifts a parked car 5 m back along its segment (see below).
+		out.append([Transform3D((t as Transform3D).basis, (t as Transform3D).origin - (t as Transform3D).basis.z * 5.0),
+			_car_kind(rng.randf())])
+	return out
+
+
 func _parked_cars(rect: Rect2, rng: RandomNumberGenerator, xf: Array, custom: Array) -> void:
 	for axis in 2:
 		var mains: Array = layout.x_streets if axis == 0 else layout.z_streets

@@ -58,6 +58,11 @@ var reserved: Array = []      # Rect2 footprints owned by landmarks
 var structures: Array = []    # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
 var anchor_lines: Array = []  # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
 var crossings: Array = []     # [x, z] street intersection centres
+## Set-piece collision that isn't an axis-aligned box: [Transform3D, size]
+## oriented boxes (beams) and convex hulls (PackedVector3Array).
+var kit_obbs: Array = []
+var kit_hulls: Array = []
+var pieces: SetPieces
 var _sites: Array = []        # [Rect2, district] construction lots, built after the blocks
 
 
@@ -67,10 +72,14 @@ func generate(p_seed := 1207) -> CityLayout:
 	_streets()
 	_landmarks()
 	_bridge()
+	pieces = SetPieces.new(self)
 	_blocks()
 	_construction()
 	_viaduct()
 	_skybridges()
+	pieces.elevated_rail()
+	pieces.gateways()
+	pieces.lighthouse()
 	_traffic()
 	_land()
 	return self
@@ -184,10 +193,17 @@ func _blocks() -> void:
 				_park_props(rect, brng)
 				cbd_plaza_done = true
 				continue
+			var piece := pieces.piece_for(rect)
+			if piece != "":
+				pieces.build(piece, rect)
+				if piece in ["wheel", "yard"]:
+					_street_props(rect, brng)
+				continue
 			if dist == "docks" and brng.randf() < 0.4 and c.x < 470.0:
 				var basin := rect.grow(-6.0)
 				water.append(basin)
 				_quay_cranes(basin, brng)
+				pieces.ship(basin)
 				continue
 			if dist == "georgian" and brng.randf() < 0.12 or dist == "midtown" and brng.randf() < 0.06:
 				parks.append(rect)
@@ -339,13 +355,13 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	var top_t: Array = tiers[-1]
 	var rx: float = (top_t[0] + top_t[2]) * 0.5
 	var rz: float = (top_t[1] + top_t[3]) * 0.5
-	var ry: float = top_t[5]
+	var ry: float = BuildingMesher.roof_y(b)  # the drawn roof (over the cornice), not the wall top
 	var tw: float = top_t[2] - top_t[0]
 	var td: float = top_t[3] - top_t[1]
 	# Stair / lift housing tucked into a corner (solid: you land on it). Own
 	# random stream, so adding it didn't reshuffle the rest of the city.
 	var hrng := RandomNumberGenerator.new()
-	hrng.seed = hash(Vector3i(int(rx * 10.0), int(rz * 10.0), int(ry))) ^ seed
+	hrng.seed = hash(Vector3i(int(rx * 10.0), int(rz * 10.0), int(top_t[5]))) ^ seed
 	if tw > 15.0 and td > 15.0 and hrng.randf() < 0.65:
 		var sx := 1.0 if hrng.randf() < 0.5 else -1.0
 		var sz := 1.0 if hrng.randf() < 0.5 else -1.0
@@ -366,7 +382,7 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	elif h > 100.0 and brng.randf() < 0.55:
 		props.append(["antenna", Transform3D(Basis(), Vector3(rx, ry, rz))])
 	if h > 14.0 and h < 75.0 and tiers.size() == 1 and minf(tw, td) > 16.0 and brng.randf() < 0.16:
-		_billboard(tiers[0], brng)
+		_billboard(tiers[0], ry, brng)
 	for i in brng.randi_range(0, 3):
 		if tw > 10.0 and td > 10.0:
 			props.append(["ac_unit", Transform3D(Basis(Vector3.UP, (brng.randi() % 2) * PI * 0.5),
@@ -395,6 +411,39 @@ func _anchor(a: Vector3, b: Vector3) -> void:
 	anchor_lines.append([a, b])
 
 
+# ------------------------------------------------------------- set-piece kit
+## A kit: one structure spec the mesher draws ("solids", "beams", "prisms")
+## whose collision is made from the very same list.
+func _kit(name: String) -> Dictionary:
+	var k := {"type": "kit", "name": name, "solids": [], "beams": [], "prisms": []}
+	structures.append(k)
+	return k
+
+
+func _ksolid(k: Dictionary, x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color,
+		collide := true) -> void:
+	k["solids"].append([minf(x0, x1), minf(z0, z1), maxf(x0, x1), maxf(z0, z1), y0, y1, col])
+	if collide:
+		_box(x0, z0, x1, z1, y0, y1)
+
+
+## Beam of cross-section w×h from a to b (BuildingMesher.beam's frame).
+func _kbeam(k: Dictionary, a: Vector3, b: Vector3, w: float, h: float, col: Color, collide := true) -> void:
+	k["beams"].append([a, b, w, h, col])
+	if collide and a.distance_to(b) > 0.01:
+		kit_obbs.append([Transform3D(BuildingMesher.beam_basis(a, b), (a + b) * 0.5), Vector3(w, h, a.distance_to(b))])
+
+
+## Vertical prism over a convex polygon (x, z) from y0 to y1.
+func _kprism(k: Dictionary, pts: PackedVector2Array, y0: float, y1: float, col: Color) -> void:
+	k["prisms"].append([pts, y0, y1, col])
+	var hull := PackedVector3Array()
+	for p in pts:
+		hull.append(Vector3(p.x, y0, p.y))
+		hull.append(Vector3(p.x, y1, p.y))
+	kit_hulls.append(hull)
+
+
 ## Container cranes on the west quay of a dock basin, booms out over the water.
 func _quay_cranes(basin: Rect2, brng: RandomNumberGenerator) -> void:
 	var n := 2 if basin.size.y > 72.0 else 1
@@ -408,21 +457,32 @@ func _quay_cranes(basin: Rect2, brng: RandomNumberGenerator) -> void:
 				_box(lx - 0.8, lz - 0.8, lx + 0.8, lz + 0.8, -2.0, top)
 		for lz: float in [z - 6.0, z + 6.0]:
 			_box(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, top - 4.0, top)
-		_box(qx - 11.0, z - 1.8, qx + reach, z + 1.8, top, top + 3.0)
+		_box(qx - 11.2, z - 2.0, qx + reach + 0.2, z + 2.0, top - 0.2, top + 3.0)
 		_box(qx + 3.5, z - 1.0, qx + 5.5, z + 1.0, top + 3.0, top + 22.0)
-		_anchor(Vector3(qx + 4.0, top - 0.1, z), Vector3(qx + reach - 1.0, top - 0.1, z))
+		for lz: float in [z - 6.0, z + 6.0]:
+			_box(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, 7.0, 8.4)  # lower portal beams
+		for lx: float in [qx - 3.0, qx + 13.0]:  # diagonal leg braces (BuildingMesher._quay_crane)
+			for e: Array in [[Vector3(lx, 4.0, z - 6.0), Vector3(lx, top - 4.0, z + 6.0)],
+					[Vector3(lx, 4.0, z + 6.0), Vector3(lx, top - 4.0, z - 6.0)]]:
+				kit_obbs.append([Transform3D(BuildingMesher.beam_basis(e[0], e[1]), (e[0] + e[1]) * 0.5),
+					Vector3(0.4, 0.4, (e[0] as Vector3).distance_to(e[1]))])
+		_box(qx - 11.0, z - 2.6, qx - 3.0, z + 2.6, top + 3.0, top + 7.0)  # machinery house
+		var tx := qx + reach * 0.6
+		_box(tx - 1.5, z - 2.0, tx + 1.5, z + 2.0, top - 1.0, top)  # trolley
+		_box(tx - 6.0, z - 1.3, tx + 6.0, z + 1.3, 11.4, 14.0)  # container on the spreader
+		_anchor(Vector3(qx + 4.0, top - 0.3, z), Vector3(qx + reach - 1.0, top - 0.3, z))
 		structures.append({"type": "quay_crane", "x": qx, "z": z, "top": top, "reach": reach,
 			"color": [Color(0.16, 0.36, 0.58), Color(0.78, 0.2, 0.14), Color(0.92, 0.68, 0.12)][brng.randi() % 3]})
 
 
 ## A rooftop billboard on one roof edge: a low, grappleable panel on legs.
-func _billboard(t: Array, brng: RandomNumberGenerator) -> void:
+func _billboard(t: Array, roof: float, brng: RandomNumberGenerator) -> void:
 	var side := brng.randi() % 4
 	var along_x := side < 2
 	var len := minf((t[2] - t[0]) if along_x else (t[3] - t[1]), 18.0) - 4.0
 	var cx: float = (t[0] + t[2]) * 0.5
 	var cz: float = (t[1] + t[3]) * 0.5
-	var y0: float = t[5] + 2.6
+	var y0: float = roof + 2.6
 	var y1 := y0 + brng.randf_range(5.5, 7.5)
 	var r: Array
 	match side:
@@ -433,7 +493,7 @@ func _billboard(t: Array, brng: RandomNumberGenerator) -> void:
 	var cols := [Color(0.95, 0.75, 0.15), Color(0.85, 0.2, 0.18), Color(0.15, 0.6, 0.62), Color(0.95, 0.95, 0.92),
 		Color(0.25, 0.32, 0.75), Color(0.9, 0.45, 0.6)]
 	var b := _building([[r[0], r[1], r[2], r[3], y0, y1]], Style.MODERN, cols[brng.randi() % cols.size()], "sign")
-	b["roof"] = t[5]
+	b["roof"] = roof
 	b["seed"] = brng.randf()
 	_add(b)
 
@@ -490,22 +550,34 @@ func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> v
 	var d: Vector2 = best["d"]
 	var tip := m + d * jib
 	var back := m - d * counter
-	_box(m.x - 1.3, m.y - 1.3, m.x + 1.3, m.y + 1.3, 0.0, mh)
+	_box(m.x - 3.0, m.y - 3.0, m.x + 3.0, m.y + 3.0, 0.0, 1.2)  # concrete base
+	_box(m.x - 1.6, m.y - 1.6, m.x + 1.6, m.y + 1.6, 1.2, mh)  # lattice mast (chords included)
+	_box(m.x - 1.8, m.y - 1.8, m.x + 1.8, m.y + 1.8, mh, mh + 1.2)  # slewing unit
 	var side := Vector2(-d.y, d.x)
-	var j0 := m - side * 1.0
-	var j1 := tip + side * 1.0
-	_box(j0.x, j0.y, j1.x, j1.y, mh + 1.2, mh + 3.4)
-	var c0 := m - side * 1.6
-	var c1 := back + side * 1.6
-	_box(c0.x, c0.y, c1.x, c1.y, mh + 1.2, mh + 3.0)
+	var j0 := m - side * 1.2
+	var j1 := tip + side * 1.2
+	_box(j0.x, j0.y, j1.x, j1.y, mh + 1.0, mh + 3.6)
+	var c0 := m - side * 1.8
+	var c1 := back + side * 1.8
+	_box(c0.x, c0.y, c1.x, c1.y, mh + 1.0, mh + 3.2)
 	var w0 := back + d * 4.0 - side * 1.8
 	var w1 := back + side * 1.8
 	_box(w0.x, w0.y, w1.x, w1.y, mh - 2.6, mh + 1.2)
-	_box(m.x - 0.8, m.y - 0.8, m.x + 0.8, m.y + 0.8, mh + 3.4, mh + 13.0)
-	_anchor(Vector3(m.x + d.x * 4.0, mh + 1.1, m.y + d.y * 4.0), Vector3(tip.x, mh + 1.1, tip.y))
-	_anchor(Vector3(m.x - d.x * 3.0, mh + 1.1, m.y - d.y * 3.0), Vector3(back.x + d.x * 4.0, mh + 1.1, back.y + d.y * 4.0))
+	_box(m.x - 1.0, m.y - 1.0, m.x + 1.0, m.y + 1.0, mh + 3.4, mh + 13.0)
+	_anchor(Vector3(m.x + d.x * 4.0, mh + 0.9, m.y + d.y * 4.0), Vector3(tip.x, mh + 0.9, tip.y))
+	_anchor(Vector3(m.x - d.x * 3.0, mh + 0.9, m.y - d.y * 3.0), Vector3(back.x + d.x * 4.0, mh + 0.9, back.y + d.y * 4.0))
+	var trolley := brng.randf_range(0.35, 0.85)
+	var hook := brng.randf_range(0.25, 0.6)
+	# Trolley, hook block and its load of beams (BuildingMesher._tower_crane).
+	var tr := m + d * jib * trolley
+	_box(tr.x - 0.8, tr.y - 0.8, tr.x + 0.8, tr.y + 0.8, mh + 0.7, mh + 1.2)
+	var hook_y := lerpf(8.0, mh - 6.0, hook)
+	_box(tr.x - 0.5, tr.y - 0.5, tr.x + 0.5, tr.y + 0.5, hook_y + 0.4, hook_y + 1.4)
+	var load_a := tr - d * 3.2 - side * 0.7
+	var load_b := tr + d * 3.2 + side * 0.7
+	_box(load_a.x, load_a.y, load_b.x, load_b.y, hook_y - 0.75, hook_y - 0.25)
 	structures.append({"type": "tower_crane", "x": m.x, "z": m.y, "h": mh, "dir": d, "jib": jib, "counter": counter,
-		"trolley": brng.randf_range(0.35, 0.85), "hook": brng.randf_range(0.25, 0.6)})
+		"trolley": trolley, "hook": hook})
 
 
 ## Tallest building/structure top whose footprint touches the strip a→b (width w).
@@ -528,9 +600,14 @@ func _bridge() -> void:
 	var x_east := 56.0
 	var x_west := FAR_SHORE + 14.0
 	_box(x_west, zc - 10.0, x_east, zc + 10.0, deck - 2.0, deck)
+	for sz: float in [-1.0, 1.0]:
+		_box(x_west, zc + sz * 10.0, x_east, zc + sz * 8.8, deck - 2.4, deck + 0.4)  # side girders
 	for tx: float in BRIDGE_TOWERS:
 		for sz: float in [-1.0, 1.0]:
 			_box(tx - 3.0, zc + sz * 15.0, tx + 3.0, zc + sz * 9.5, -2.0, top)
+		for sz: float in [-1.0, 1.0]:
+			_box(tx - 3.5, zc + sz * 15.5, tx + 3.5, zc + sz * 9.0, top, top + 2.5)  # tower caps
+		_box(tx - 5.0, zc - 18.0, tx + 5.0, zc + 18.0, -3.0, 1.0)  # footing in the river
 		for yy in [[deck - 6.0, deck - 2.0], [88.0, 92.0], [top - 6.0, top - 2.0]]:
 			_box(tx - 2.5, zc - 9.5, tx + 2.5, zc + 9.5, yy[0], yy[1])
 			_anchor(Vector3(tx, yy[0] - 0.1, zc - 9.0), Vector3(tx, yy[0] - 0.1, zc + 9.0))

@@ -68,6 +68,13 @@ func _process(dt: float) -> void:
 		var s := player.s
 		var slack := maxf(0.0, s.rope_length - s.position.distance_to(s.anchor))
 		sag = sqrt(slack * maxf(start.distance_to(s.anchor), 0.1)) * 0.45
+	# Never through the world: the animated hand isn't the physics pivot, so an
+	# edge can sit between it and the first pivot – bend the drawn line round it.
+	pts = _clear_path(pts)
+	if sag > 0.0:
+		sag = _clear_sag(pts[0], pts[1], sag)
+	if player.line_state == Player.Line.FLYING and pts.size() == 2:
+		amp = minf(amp, _clear_sag(pts[0], pts[1], amp))
 	_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
 	var cam_pos := cam.global_position
 	for seg_i in pts.size() - 1:
@@ -96,3 +103,52 @@ func _process(dt: float) -> void:
 			_mesh.surface_add_vertex(p - w)
 			_mesh.surface_add_vertex(p + w)
 	_mesh.surface_end()
+
+
+const MASK := 1 | (1 << 1) | (1 << 3) | (1 << 4)
+
+
+## Inserts corner points where the straight hand → pivot segment meets geometry.
+func _clear_path(pts: PackedVector3Array) -> PackedVector3Array:
+	if not is_inside_tree() or pts.size() < 2:
+		return pts
+	var space := get_world_3d().direct_space_state
+	var out := PackedVector3Array([pts[0]])
+	var a := pts[0]
+	var b := pts[1]
+	for i in 3:
+		var d := b - a
+		if d.length() < 0.5:
+			break
+		var q := PhysicsRayQueryParameters3D.create(a, b - d.normalized() * 0.35, MASK, [player.get_rid()])
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			break
+		# Slide the corner to the edge: step out along the normal until the
+		# line to the pivot is clear.
+		var n: Vector3 = hit["normal"]
+		var c: Vector3 = hit["position"] + n * 0.05
+		for k in 6:
+			q.from = c
+			q.to = b - (b - c).normalized() * 0.35
+			if space.intersect_ray(q).is_empty():
+				break
+			c += (n + (b - c).normalized()).normalized() * 0.25
+		out.append(c)
+		a = c
+	for j in range(1, pts.size()):
+		out.append(pts[j])
+	return out
+
+
+## Largest sag (≤ want) whose curve stays clear of anything below the segment.
+func _clear_sag(a: Vector3, b: Vector3, want: float) -> float:
+	if not is_inside_tree():
+		return want
+	var space := get_world_3d().direct_space_state
+	var mid := (a + b) * 0.5
+	var q := PhysicsRayQueryParameters3D.create(mid, mid + Vector3.DOWN * (want + 0.1), MASK, [player.get_rid()])
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return want
+	return maxf(mid.y - (hit["position"] as Vector3).y - 0.1, 0.0)

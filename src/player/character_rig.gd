@@ -118,6 +118,11 @@ var _swan_peak := 0.0      # how deep the current dive got (drives the pull-out 
 var _bump_t := 0.0         # wall-contact reaction remaining (s)
 var _bump_n := Vector3.ZERO
 var _bump_k := 0.0         # its strength 0..1
+var _stagger_t := 0.0      # knocked back off a wall on foot (s left)
+var _stagger_n := Vector3.ZERO
+var _press := 0.0          # leaning on a wall, hands flat on it 0..1
+var _press_n := Vector3.ZERO
+var _guard_off := {}       # limb root bone -> [upper offset, ang vel, lower offset, ang vel]
 var _brace := 0.0          # arms coming up before an impact 0..1
 var _brace_n := Vector3.ZERO
 var _brace_probe := 0.0
@@ -294,6 +299,7 @@ func _connect_player() -> void:
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)
 	player.bumped.connect(_on_bumped)
+	player.staggered.connect(_on_staggered)
 	player.attached.connect(func(_a) -> void:
 		_swing_lead = "r" if _swing_lead == "l" else "l"
 		_jolt(0.6))
@@ -459,6 +465,24 @@ func _on_bumped(speed: float, n: Vector3) -> void:
 		_bump_n = n
 		_bump_k = maxf(k, _bump_k if _bump_t > 0.0 else 0.0)
 		_land_squash = maxf(_land_squash, 0.25 * k) if player.is_on_floor() else _land_squash
+
+
+## Ran into a wall on foot: the head and chest are thrown back off it, the
+## arms come up to take it, and the legs back-pedal (Player bounces the body
+## back; facing stays on the wall while it does).
+func _on_staggered(speed: float, n: Vector3) -> void:
+	if ragdolling:
+		return
+	_stagger_t = Player.STAGGER_TIME + 0.2
+	_stagger_n = Vector3(n.x, 0.0, n.z).normalized()
+	var k := clampf(speed / 10.0, 0.4, 1.0)
+	_angvel["chest"] += Vector3(5.0, 0, 0) * k
+	_angvel["head"] += Vector3(9.0, 0, 0) * k
+	_angvel["neck"] += Vector3(4.0, 0, 0) * k
+	_land_squash = maxf(_land_squash, 0.35 * k)
+	_bump_t = 0.5
+	_bump_n = n
+	_bump_k = 1.0
 
 
 ## Looks ahead along the motion a few times a second: a facade coming up
@@ -649,6 +673,9 @@ func _on_respawned() -> void:
 	_takeoff_t = 0.0
 	_land_squash = 0.0
 	_wall_time = 0.0
+	_stagger_t = 0.0
+	_press = 0.0
+	_guard_off.clear()
 	_plant.clear()
 	_foot_last.clear()
 	_foot_mode.clear()
@@ -705,6 +732,7 @@ func _process(dt: float) -> void:
 		_update_ragdoll(dt)
 	else:
 		_update_animated(dt)
+	_guard_limbs()
 	_update_scarf(dt)
 	_sync_skeleton()
 	# Closed hands on the line, and loose fists when running or flying (open
@@ -784,8 +812,11 @@ func _update_animated(dt: float) -> void:
 		_heel[sd] = 0.0
 
 	# --- facing & turn rate -----------------------------------------------
+	_stagger_t = maxf(_stagger_t - dt, 0.0)
 	if wall_run:
 		_facing = _facing.slerp(-_wall_n, 1.0 - exp(-14.0 * dt)).normalized()
+	elif _stagger_t > 0.0 and grounded:
+		_facing = _facing.slerp(-_stagger_n, 1.0 - exp(-10.0 * dt)).normalized()  # still facing the wall
 	elif hs > 1.0:
 		# Walking turns follow the path closely (feet and hips stay lined up
 		# with where the body is going); at a run the body swings round more.
@@ -958,6 +989,18 @@ func _update_animated(dt: float) -> void:
 		_pose_wall_run(q, dt)
 	elif grounded:
 		bob = _pose_ground(q, dt, hs, la)
+		if _stagger_t > 0.0:
+			# Thrown back off the wall: chest and head go back, knees give.
+			var sk := smoothstep(0.0, 0.12, Player.STAGGER_TIME + 0.2 - _stagger_t) * clampf(_stagger_t / 0.35, 0.0, 1.0)
+			q["spine"] = (q["spine"] as Quaternion) * _rx(0.22 * sk)
+			q["chest"] = (q["chest"] as Quaternion) * _rx(0.28 * sk)
+			q["head"] = (q["head"] as Quaternion) * _rx(0.2 * sk)
+			bob -= 0.05 * sk
+		if _press > 0.01:
+			# Leaning into the wall: the body tips toward it from the ankles.
+			q["spine"] = (q["spine"] as Quaternion) * _rx(-0.12 * _press)
+			q["chest"] = (q["chest"] as Quaternion) * _rx(-0.1 * _press)
+			q["head"] = (q["head"] as Quaternion) * _rx(0.15 * _press)
 	elif on_rope:
 		_pose_rope(q, dt, body, la, twist, speed)
 	else:
@@ -996,19 +1039,37 @@ func _update_animated(dt: float) -> void:
 	# Reacting to the world: arms come up toward a wall about to be hit
 	# (brace), and after any contact they push off it with bent elbows.
 	_update_brace(dt, v, speed, wall_run)
+	# Pushing on into a wall while standing at it: hands flat on the wall.
+	var mv_in := player.controls.move
+	var pressing := grounded and player.is_on_wall() and hs < 2.0 and _stagger_t <= 0.0 \
+		and mv_in.length() > 0.3 and mv_in.normalized().dot(-player.get_wall_normal()) > 0.45
+	if pressing:
+		_press_n = Vector3(player.get_wall_normal().x, 0.0, player.get_wall_normal().z).normalized()
+		_facing = _facing.slerp(-_press_n, 1.0 - exp(-10.0 * dt)).normalized()
+	_press = move_toward(_press, 1.0 if pressing else 0.0, dt * (7.0 if pressing else 4.0))
 	var bw := 0.0
 	if _bump_t > 0.0:
 		bw = _bump_k * smoothstep(0.0, 0.05, 0.4 - _bump_t) * (_bump_t / 0.4)
-	var react_w := maxf(bw, _brace)
+	var react_w := maxf(maxf(bw, _brace), _press)
 	if react_w > 0.01 and not ragdolling:
 		var n := _brace_n if _brace > bw else _bump_n
+		if _press >= maxf(bw, _brace):
+			n = _press_n
 		var into := (-n + Vector3.UP * 0.25).normalized()
 		var chest_b := (bones["chest"] as Node3D).global_basis.orthonormalized()
+		# Reach as far as the wall actually is (the guard pass keeps palms on it).
+		var reach := 0.42
+		if _press > 0.01:
+			var sh := (bones["chest"] as Node3D).global_position
+			var wq := PhysicsRayQueryParameters3D.create(sh, sh - n * 1.0, GUARD_MASK, [player.get_rid()])
+			var wh := get_world_3d().direct_space_state.intersect_ray(wq)
+			reach = clampf(sh.distance_to(wh["position"]) - 0.02, 0.2, 0.53) if not wh.is_empty() else 0.5
 		for sd in ["l", "r"]:
 			if (sd == "r" and on_rope) or (sd == "l" and _lgrip > 0.5):
 				continue
 			var sgn := -1.0 if sd == "l" else 1.0
-			var ik := _two_bone(chest_b, into, 0.42, Vector3(0.75 * sgn, -0.2, 0.6))
+			var ik := _two_bone(chest_b, (into - chest_b.x * sgn * -0.25 * _press).normalized(), reach,
+				Vector3(0.75 * sgn, -0.2, 0.6))
 			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(ik[0], react_w)
 			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(ik[1], react_w)
 		q["head"] = (q["head"] as Quaternion).slerp(_rx(-0.25), react_w * 0.6)  # chin tucks
@@ -1516,6 +1577,165 @@ static func _roll(ankle: Vector3, f: Vector3, n: Vector3, toe: float) -> Vector3
 	if toe <= 0.0:
 		return ankle
 	return ankle + n * sin(toe) * BALL + f * (1.0 - cos(toe)) * BALL
+
+
+const GUARD_MASK := 1 | (1 << 1) | (1 << 3) | (1 << 4)  # buildings, street, props
+const LIMB_MARGIN := 0.045  # m kept between a limb's surface and the world
+const GUARD_W := 18.0  # 1/s: how briskly a fold comes in and eases off
+
+
+## The last word on every pose (animated or ragdoll): no hand, elbow, foot,
+## knee or the head may end a frame inside the world. A limb that would is
+## folded back with two-bone IK so its end rests on the surface it met, the
+## joint bending away from it – a hand meeting a wall lands flat on it.
+func _guard_limbs() -> void:
+	if player == null or not is_inside_tree():
+		return
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.new()
+	q.collision_mask = GUARD_MASK
+	q.exclude = [player.get_rid()]
+	var chest := bones["chest"] as Node3D
+	var hips := bones["hips"] as Node3D
+	var dt := get_process_delta_time()
+	for sd in ["l", "r"]:
+		var sgn := -1.0 if sd == "l" else 1.0
+		# The web hand stays on the line (the drawn web bends round edges instead).
+		if not (sd == "r" and player.line_state != Player.Line.IDLE and not ragdolling):
+			_guard_chain(space, q, chest, "upper_arm_" + sd, "forearm_" + sd, "hand_" + sd, 0.29, 0.26,
+				Vector3(0, -0.12, 0), 1.0, false, Vector3(0.75 * sgn, -0.2, 0.6), dt)
+		# Feet stand on floors (foot IK owns that): legs are only kept out of
+		# walls, and a planted leg is left to the foot IK.
+		if (_contact < 0.5 and _getup_t <= 0.0) or ragdolling:
+			_guard_chain(space, q, hips, "thigh_" + sd, "shin_" + sd, "foot_" + sd, 0.45, 0.44,
+				Vector3(0, -0.04, -0.17), -1.0, true, Vector3(0.12 * sgn, 0.0, -1.0), dt)
+	# The head: tipped back toward the chest if it would go through something.
+	var neck := (bones["neck"] as Node3D).global_position
+	var head := bones["head"] as Node3D
+	var top := head.global_position + head.global_basis.y.normalized() * 0.24
+	q.from = chest.global_position
+	q.to = neck
+	if space.intersect_ray(q).is_empty():
+		q.from = neck
+		q.to = top + (top - neck).normalized() * LIMB_MARGIN
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty():
+			var n: Vector3 = hit["normal"]
+			var axis := (top - neck).cross(n).normalized()
+			if axis.length_squared() > 0.5:
+				var lb := (bones["neck"] as Node3D).global_basis.orthonormalized()
+				_set_bone("head", Quaternion(lb.inverse() * axis, 0.6) * (_rot["head"] as Quaternion))
+
+
+## One limb chain root → mid → end (+ `tip`, the hand/toe in the end bone's
+## frame). The limb keeps the direction its pose gives it; only its reach is
+## capped by the distance to whatever lies that way, so the joint bends
+## smoothly as a wall gets closer (no frame-to-frame jumps) and the end rests
+## on the surface. `walls_only` ignores floors.
+func _guard_chain(space: PhysicsDirectSpaceState3D, q: PhysicsRayQueryParameters3D, parent: Node3D, a: String,
+		b: String, c: String, la: float, lb: float, tip_local: Vector3, bend: float, walls_only: bool,
+		pole: Vector3, _dt: float) -> void:
+	var root := (bones[a] as Node3D).global_position
+	q.from = parent.global_position
+	q.to = root
+	if not space.intersect_ray(q).is_empty():
+		return  # the root itself is past a surface: nothing a limb fold can do
+	var end_n := bones[c] as Node3D
+	var tip_p := end_n.global_position + end_n.global_basis.orthonormalized() * tip_local
+	var tip := tip_local.length()
+	var pb := parent.global_basis.orthonormalized()
+	var d := tip_p - root
+	var length := d.length()
+	if length < 0.05:
+		return
+	var dir := d / length
+	# Along the limb's line (a little past its end, for the margin).
+	var hit := _seg_hit(space, q, root, tip_p, walls_only)
+	var reach := length
+	var n := Vector3.ZERO
+	if not hit.is_empty():
+		n = hit["normal"]
+		var along := ((hit["position"] as Vector3) - root).dot(dir)
+		reach = along - LIMB_MARGIN / maxf(-n.dot(dir), 0.25)
+	# The bent joint can poke out sideways even when the line is clear.
+	var mid := (bones[b] as Node3D).global_position
+	var mh := _seg_hit(space, q, root, mid, walls_only)
+	if mh.is_empty():
+		mh = _seg_hit(space, q, mid, end_n.global_position, walls_only)
+	if hit.is_empty() and mh.is_empty():
+		_ease_guard(a, b, Quaternion.IDENTITY, Quaternion.IDENTITY, 0.0, _dt)
+		return
+	if n == Vector3.ZERO:
+		n = mh["normal"]
+	var min_reach := (0.16 if bend > 0.0 else 0.28) + tip
+	reach = clampf(reach, min_reach, length)
+	var fold := 1.0 - (reach - min_reach) / maxf(length - min_reach, 0.01)
+	var ik := _two_bone(pb, dir, maxf(reach - tip, 0.06), pole + pb.inverse() * n * (0.3 + 0.5 * fold), la, lb, bend)
+	_ease_guard(a, b, ik[0], ik[1], 1.0, _dt)
+
+
+## Shows a fold (want 1) or the plain pose (want 0). The fold is an offset
+## on top of the pose, driven by a critically damped spring: a limb swung
+## fast into a wall folds within a few frames and eases back out the same
+## way, with no jolt in its motion. Display only – the animation and its
+## springs carry on from the clean pose.
+func _ease_guard(a: String, b: String, ia: Quaternion, ib: Quaternion, want: float, dt: float) -> void:
+	var st: Array = _guard_off.get(a, [])
+	if st.is_empty():
+		if want <= 0.0:
+			return
+		st = [Quaternion.IDENTITY, Vector3.ZERO, Quaternion.IDENTITY, Vector3.ZERO]
+	var idle := true
+	for k in 2:
+		var bone := a if k == 0 else b
+		var pose: Quaternion = _rot[bone]
+		var goal := ((ia if k == 0 else ib) * pose.inverse()) if want > 0.0 else Quaternion.IDENTITY
+		var off: Quaternion = st[k * 2]
+		var vel: Vector3 = st[k * 2 + 1]
+		var dq := goal * off.inverse()
+		if dq.w < 0.0:
+			dq = -dq
+		var ang := dq.get_angle()
+		var err := dq.get_axis() * ang if ang > 1e-5 else Vector3.ZERO
+		vel += (err * GUARD_W * GUARD_W - vel * 2.0 * GUARD_W) * dt
+		if vel.length() > 1e-6:
+			off = (Quaternion(vel.normalized(), vel.length() * dt) * off).normalized()
+		st[k * 2] = off
+		st[k * 2 + 1] = vel
+		(bones[bone] as Node3D).quaternion = off * pose
+		if off.get_angle() > 0.005 or vel.length() > 0.05:
+			idle = false
+	if want <= 0.0 and idle:
+		_guard_off.erase(a)
+	else:
+		_guard_off[a] = st
+
+
+func _chain_hit(space: PhysicsDirectSpaceState3D, q: PhysicsRayQueryParameters3D, a: String, b: String, c: String,
+		tip_local: Vector3, walls_only: bool) -> Dictionary:
+	var root := (bones[a] as Node3D).global_position
+	var mid := (bones[b] as Node3D).global_position
+	var en := bones[c] as Node3D
+	var tip_p := en.global_position + en.global_basis.orthonormalized() * tip_local
+	var h := _seg_hit(space, q, root, mid, walls_only)
+	if h.is_empty():
+		h = _seg_hit(space, q, mid, en.global_position, walls_only)
+	if h.is_empty():
+		h = _seg_hit(space, q, en.global_position, tip_p, walls_only)
+	return h
+
+
+func _seg_hit(space: PhysicsDirectSpaceState3D, q: PhysicsRayQueryParameters3D, from: Vector3, to: Vector3,
+		walls_only := false) -> Dictionary:
+	var d := to - from
+	if d.length_squared() < 1e-8:
+		return {}
+	q.from = from
+	q.to = to + d.normalized() * LIMB_MARGIN
+	var hit := space.intersect_ray(q)
+	if walls_only and not hit.is_empty() and (hit["normal"] as Vector3).y > 0.6:
+		return {}
+	return hit
 
 
 func _set_bone(b: String, qq: Quaternion) -> void:

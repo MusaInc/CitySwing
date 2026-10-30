@@ -8,7 +8,7 @@ extends SceneTree
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 ##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb"]
 
 var player: Player
 var rig: CharacterRig
@@ -162,6 +162,16 @@ func _sc_swing() -> void:
 	await _film("swing", 3.0, [0.1, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 2.9])
 
 
+## Webbing from the street beside a tower: the launch hop, the zip up and
+## the swing along its face (the web must never cut through the corner).
+func _sc_groundweb() -> void:
+	_reset(Vector3(-12, 0.95, -22), Vector3.ZERO)
+	_cam_off = Vector3(-3.5, 0.8, 4.0)
+	await _film("groundweb_idle", 0.4, [0.3])
+	player.fire_at(Vector3(-4, 50, -32.0), 1)
+	await _film("groundweb", 2.4, [0.05, 0.15, 0.3, 0.45, 0.6, 0.8, 1.0, 1.3, 1.6, 2.0, 2.3])
+
+
 ## Same swing, close three-quarter view (arm/leg depth reads), fewer frames.
 func _sc_swing34() -> void:
 	_reset(Vector3(-25, 48, -20), Vector3(14, 0, 0))
@@ -213,7 +223,7 @@ func _sc_bump() -> void:
 	var sc := _reset(Vector3(0, 1.0, -18))
 	sc.move = Vector3.FORWARD
 	_cam_off = Vector3(3.5, 0.6, 1.0)
-	await _film("bump_run", 1.6, [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.5])
+	await _film("bump_run", 3.0, [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.75, 1.9, 2.1, 2.4, 2.7, 2.95])
 	sc.move = Vector3.ZERO
 	_reset(Vector3(-14, 40, -24), Vector3(10, 0, -6))
 	_cam_off = Vector3(-2.0, 0.6, 4.5)

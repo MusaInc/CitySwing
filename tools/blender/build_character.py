@@ -211,9 +211,9 @@ def build():
     # High suit collar: hides most of the neck, the head sits on the shoulders.
     src.append(K.paint(tube("collar", [((0, 0.0, 1.5), 0.098, 0.094), ((0, 0.004, 1.55), 0.09, 0.086),
                                        ((0, 0.008, 1.6), 0.083, 0.08), ((0, 0.01, 1.615), 0.08, 0.077)], segs=18), jacket_dk))
-    # Neck.
+    # Neck: covered by the mask's cowl.
     src.append(K.paint(tube("neck", [((0, 0.0, 1.52), 0.074, 0.07), ((0, 0.008, 1.59), 0.064, 0.064),
-                                     ((0, 0.012, 1.65), 0.058, 0.06)], segs=16), skin))
+                                     ((0, 0.012, 1.65), 0.058, 0.06)], segs=16), jacket_dk))
     # Chest emblem (gold disc with an ink swing-arc; it becomes colour on the skin).
     emb = K.cyl("emblem", 0.048, 0.02, (0, 0, 0), emblem, 22)
     emb.rotation_euler = (math.pi / 2 + 0.1, 0, 0)
@@ -369,35 +369,40 @@ def build():
         ob.location = (0, 0, 0)  # exported at the origin; Godot parents it to the pivot
         parts.append(ob)
 
-    # ---- head: skull, jaw, cheekbones, brow ridge, eyes, nose, mouth, ears, hair
+    # ---- head: always masked. A smooth cowl over skull, jaw and cheekbones
+    # (in the suit's dark shade, so it recolours with every suit), a soft
+    # nose ridge under the fabric, and two angled eye lenses that glow in the
+    # web colour, each set in an ink outline. No skin, hair or ears showing.
     hc = J["head"]
     o = lambda x, y, z: hc + Vector((x, y, z - 0.028))  # noqa: E731  (head sits a little lower on the neck)
+    mask = jacket_dk
     head = []
-    head.append(K.sphere("cranium", 0.097, o(0, -0.012, 0.135), skin, 22, 14, (0.9, 1.04, 1.0)))
+    head.append(K.sphere("cranium", 0.099, o(0, -0.012, 0.135), mask, 22, 14, (0.9, 1.04, 1.0)))
     for pl in head[-1].data.polygons:
         pl.use_smooth = True
     head.append(K.smooth(K.paint(tube("face", [(o(0, 0.03, 0.03), 0.045, 0.045), (o(0, 0.025, 0.055), 0.074, 0.072),
-                                                (o(0, 0.018, 0.1), 0.082, 0.086), (o(0, 0.01, 0.14), 0.086, 0.09)], segs=20), skin), 1))
-    head.append(K.smooth(K.paint(tube("chin", [(o(0, 0.06, 0.02), 0.026, 0.02), (o(0, 0.07, 0.04), 0.03, 0.02)], segs=12), skin), 1))
-    for sx in (-1, 1):
-        head.append(K.sphere("cheek", 0.03, o(sx * 0.045, 0.06, 0.1), skin, 10, 8, (1.0, 0.7, 0.8)))
-        head.append(K.sphere("eye", 0.0135, o(sx * 0.034, 0.083, 0.127), eye_w, 10, 8))
-        head.append(K.sphere("iris", 0.0072, o(sx * 0.034, 0.0955, 0.127), iris, 8, 6, (1.0, 0.5, 1.0)))
-        head.append(K.box("lid", (0.03, 0.016, 0.006), o(sx * 0.034, 0.088, 0.139), skin, bevel=0.003))
-        head.append(K.box("brow", (0.034, 0.012, 0.009), o(sx * 0.034, 0.09, 0.148), brow, bevel=0.003))
-        head.append(K.sphere("ear", 0.024, o(sx * 0.091, -0.006, 0.118), skin, 10, 8, (0.42, 0.85, 1.3)))
-    head.append(K.box("brow_ridge", (0.09, 0.02, 0.016), o(0, 0.084, 0.142), skin, bevel=0.007))
-    nose = K.paint(tube("nose", [(o(0, 0.09, 0.14), 0.011, 0.009), (o(0, 0.108, 0.106), 0.016, 0.014),
-                                 (o(0, 0.112, 0.095), 0.021, 0.013), (o(0, 0.098, 0.088), 0.017, 0.008)], segs=10), skin)
+                                                (o(0, 0.018, 0.1), 0.082, 0.086), (o(0, 0.01, 0.14), 0.086, 0.09)], segs=20), mask), 1))
+    nose = K.paint(tube("nose", [(o(0, 0.088, 0.138), 0.01, 0.007), (o(0, 0.102, 0.108), 0.014, 0.01),
+                                 (o(0, 0.104, 0.098), 0.017, 0.009), (o(0, 0.094, 0.09), 0.014, 0.006)], segs=10), mask)
     head.append(K.smooth(nose, 1))
-    head.append(K.box("lips", (0.042, 0.012, 0.012), o(0, 0.09, 0.07), lip, bevel=0.005))
-    cap = K.sphere("hair_cap", 0.102, o(0, -0.022, 0.15), hair, 20, 12, (0.93, 1.05, 0.98))
-    for pl in cap.data.polygons:
-        pl.use_smooth = True
-    for v in cap.data.vertices:  # hairline above the forehead and ears
-        if v.co.y - hc.y > 0.03 and v.co.z - hc.z < 0.17:
-            v.co.y = hc.y + 0.03 - (v.co.y - hc.y - 0.03) * 0.3
-    head.append(cap)
+    for sx in (-1, 1):
+        # Lens: a flattened teardrop tilted up at the outer corner, on the
+        # mask's surface; the ink rim sits just behind it and shows round it.
+        for nm, mat_, sc, dy in (("lens_rim", ink, (0.039, 0.012, 0.027), 0.093), ("eye_lens", glow, (0.032, 0.01, 0.02), 0.097)):
+            e = K.sphere(nm, 1.0, (0, 0, 0), mat_, 16, 10, sc)
+            for v in e.data.vertices:
+                # Teardrop: the outer corner sweeps up and to a point, the
+                # inner edge is flat along the nose, the lower edge straight.
+                u = v.co.x * sx / sc[0]
+                if u > 0:
+                    v.co.z += u * u * sc[2] * 0.7
+                    v.co.x *= 1.0 + 0.25 * u
+                if v.co.z < 0:
+                    v.co.z *= 0.6
+            e.rotation_euler = (0.15, -sx * 0.2, sx * -0.18)  # outer corner up
+            e.location = o(sx * 0.037, dy, 0.124)
+            bpy.context.view_layer.update()
+            head.append(e)
     part("head", head, hc)
     # The hood is its own part (same origin) so shop headwear can replace it.
     part("hood", [hood(o, jacket)], hc)

@@ -36,6 +36,9 @@ signal stepped_up(height: float)
 ## Any contact with a wall or obstacle worth a visible reaction (visual only):
 ## speed into the surface and its normal.
 signal bumped(speed: float, normal: Vector3)
+## Ran into a wall on foot too slowly to run up it: the body is bounced back
+## off it and staggers (the stick is ignored for STAGGER_TIME).
+signal staggered(speed: float, normal: Vector3)
 ## Let go inside the sweet spot (see SwingParams "Release"). streak counts
 ## consecutive perfect releases without touching the ground.
 signal perfect_release(streak: int)
@@ -47,6 +50,11 @@ const BUILDINGS_MASK := 1 | (1 << 1)
 const GRAPPLE_LAYER := 1 << 1
 const MAX_WRAPS := 4
 const STEP_MAX := 0.35  # kerbs, stairs and rooftop lips climbed while running
+## Wall hit on foot: at least this fast into the wall (and mostly head-on)
+## knocks the body back a step; one stagger per STAGGER_COOL.
+const STAGGER_SPEED := 4.5
+const STAGGER_TIME := 0.42
+const STAGGER_COOL := 1.4
 ## Input smoothing time constant: the body can't redirect itself instantly.
 const MOVE_SMOOTH := 0.09
 
@@ -114,6 +122,8 @@ var _launch_pending := false
 var _armed_touch := -1
 var _prev_pos := Vector3.ZERO
 var _bump_cool := 0.0
+var stagger_t := 0.0  # > 0 while staggering back off a wall (no stick)
+var _stagger_cool := 0.0
 
 
 func _ready() -> void:
@@ -121,7 +131,7 @@ func _ready() -> void:
 		var settings := get_node_or_null("/root/Settings")
 		params = settings.swing_params() if settings else load("res://config/swing_params.tres")
 	collision_layer = 1 << 2
-	collision_mask = 1 | (1 << 1) | (1 << 3)
+	collision_mask = 1 | (1 << 1) | (1 << 3) | CityWorld.PROPS_LAYER
 	floor_max_angle = deg_to_rad(50.0)
 	floor_snap_length = 0.4
 	safe_margin = 0.02
@@ -257,6 +267,10 @@ func _physics_process(dt: float) -> void:
 		_update_stun(dt)
 	var inp := _read_input(dt)
 	var move: Vector3 = inp.get("move", Vector3.ZERO)
+	stagger_t = maxf(stagger_t - dt, 0.0)
+	_stagger_cool = maxf(_stagger_cool - dt, 0.0)
+	if stagger_t > 0.0:
+		move = Vector3.ZERO  # knocked back: the legs catch the body first
 	_move_smooth = _move_smooth.lerp(move, 1.0 - exp(-dt / MOVE_SMOOTH))
 	controls.move = _move_smooth
 	# Human steering turns the travel; bots/courses keep the raw model (a
@@ -463,6 +477,17 @@ func _resolve_contacts(dt: float) -> void:
 		s.velocity.y = clampf(worst_into * params.wall_run_up, 10.0, 22.0)
 		impact.emit(params.hard_impact_speed)  # a firm thud, no ragdoll
 		wall_kicked.emit()
+	elif wall_n != Vector3.ZERO and was_on_floor and not stunned and worst_into >= STAGGER_SPEED \
+			and wall_ratio > 0.55 and _stagger_cool <= 0.0 and line_state != Line.ATTACHED:
+		# On foot, head-on into a wall: knocked back a step off it.
+		var out := Vector3(wall_n.x, 0.0, wall_n.z).normalized()
+		var along := s.velocity - out * s.velocity.dot(out)
+		along.y = 0.0
+		s.velocity = along * 0.35 + out * clampf(worst_into * 0.28, 1.6, 3.4)
+		s.velocity.y = maxf(s.velocity.y, 1.6)
+		stagger_t = STAGGER_TIME
+		_stagger_cool = STAGGER_COOL
+		staggered.emit(worst_into, wall_n)
 	elif worst_into > params.hard_impact_speed:
 		impact.emit(worst_into)
 		if worst_into > params.ragdoll_impact_speed:
@@ -608,6 +633,29 @@ func _advance_line(dt: float, _origin: Vector3) -> void:
 		return
 	var to := line_target - line_tip
 	var step := params.line_speed * dt
+	# A web is a straight line from the hand: if the body has moved so that
+	# something now stands between the hand and the tip's next position, the
+	# web sticks to what it meets (or misses) – it never passes through it.
+	var hand := hand_position()
+	var next := line_tip + to.normalized() * minf(step, to.length())
+	var q := PhysicsRayQueryParameters3D.create(hand, next, BUILDINGS_MASK | (1 << 3), [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty() and (hit["position"] as Vector3).distance_to(line_target) > 0.6:
+		var col: Object = hit["collider"]
+		var grappleable := col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & GRAPPLE_LAYER) != 0
+		line_tip = hit["position"]
+		if line_will_hit and grappleable and hand.distance_to(line_tip) <= params.grapple_range \
+				and SwingPhysics.attach(s, line_tip, _range_tolerant()):
+			line_target = line_tip
+			wraps.clear()
+			_attach_length = s.rope_length
+			line_state = Line.ATTACHED
+			attached.emit(line_target)
+		else:
+			line_state = Line.IDLE
+			web_owner = ""
+			grapple_missed.emit()
+		return
 	if to.length() > step:
 		line_tip += to.normalized() * step
 		return
@@ -751,6 +799,8 @@ func respawn(at: Variant = null) -> void:
 	s.velocity = Vector3.ZERO
 	velocity = Vector3.ZERO
 	_move_smooth = Vector3.ZERO
+	stagger_t = 0.0
+	_stagger_cool = 0.0
 	s.position = global_position
 	was_on_floor = false
 	chain = 0

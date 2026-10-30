@@ -22,7 +22,14 @@ const BRIDGE_RED := Color(0.66, 0.17, 0.12)
 const AWNING_COLORS := [Color(0.72, 0.16, 0.14), Color(0.13, 0.36, 0.3), Color(0.15, 0.22, 0.42),
 	Color(0.85, 0.62, 0.18), Color(0.86, 0.82, 0.72), Color(0.42, 0.18, 0.36)]
 const LEDGE_EVERY := 14.4   # m: a stone ledge every four floors on masonry facades
-const PARAPET := 0.45      # m: roof-edge lip (low, so feet don't clip much)
+const KERB := 0.15        # m: pavement blocks stand this far above the road
+const PARAPET := 0.3       # m: roof-edge lip; under Player.STEP_MAX, so a run steps onto it
+const PARAPET_T := 0.3     # m: its thickness
+const LEDGE_OUT := 0.08    # m: stone courses stand this far proud of the wall (visual only)
+const PLINTH_OUT := 0.15   # m: ground-floor plinth band
+const PLINTH_H := 0.9
+const AWNING_Y := 3.25
+const AWNING_OUT := 1.3
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -87,6 +94,16 @@ func top(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, kind:
 func bottom(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, kind: float, style: float, seed: float) -> void:
 	quad(Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0), Vector3(x0, y, z0), Vector3.DOWN,
 		Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0), Vector2(x0, z0), col, kind, style, seed)
+
+
+## The frame beam() builds a box in: x across (w), y up-ish (h), z along
+## (negated, so the basis is right-handed for collision shapes).
+static func beam_basis(a: Vector3, b: Vector3) -> Basis:
+	var f := (b - a).normalized()
+	var up := Vector3.UP if absf(f.y) < 0.95 else Vector3.RIGHT
+	var s := f.cross(up).normalized()
+	var u := s.cross(f).normalized()
+	return Basis(s, u, -f)
 
 
 ## Box of cross-section w x h from a to b (any direction), four sides + caps.
@@ -225,8 +242,8 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 		if b["kind"] == "bridge":
 			bottom(x0, z0, x1, z1, y0, trim, KIND_TRIM, style, seed)
 		if detailed:
-			var o := 0.25 if glassy else 0.6
-			var ch := 0.6 if glassy else 1.2
+			var o := cornice_out(b)
+			var ch := cornice_h(b)
 			walls(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
 			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim, KIND_TRIM, style, seed)
 			top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, KIND_ROOF, style, seed)
@@ -235,18 +252,119 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 				if not glassy:
 					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed)
 			# Ground-floor plinth band on the base tier.
-			if i == 0 and y0 == 0.0 and not glassy and b["kind"] != "bridge":
-				walls(x0 - 0.15, z0 - 0.15, x1 + 0.15, z1 + 0.15, 0.0, 0.9, col.darkened(0.3), KIND_TRIM, style, seed)
-				if int(style) in [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.SANDSTONE,
-						CityLayout.Style.DECO]:
-					_awnings(x0, z0, x1, z1, seed)
+			if _has_plinth(b, i):
+				var po := PLINTH_OUT
+				walls(x0 - po, z0 - po, x1 + po, z1 + po, 0.0, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x0 - po, z0 - po, x1 + po, z0, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x0 - po, z1, x1 + po, z1 + po, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x0 - po, z0, x0, z1, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x1, z0, x1 + po, z1, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+				for aw in awning_runs(b):
+					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
 			top(x0, z0, x1, z1, y1, roof, KIND_ROOF, style, seed)
 
 
+## Cornice: how far the roof slab overhangs the walls, and its depth (it
+## straddles the tier top, so the roof surface is half of it above t[5]).
+static func cornice_out(b: Dictionary) -> float:
+	return 0.25 if _glassy(b) else 0.3
+
+
+static func cornice_h(b: Dictionary) -> float:
+	return 0.6 if _glassy(b) else 1.0
+
+
+static func _glassy(b: Dictionary) -> bool:
+	return int(b["style"]) == CityLayout.Style.GLASS or int(b["style"]) == CityLayout.Style.DARK_GLASS
+
+
+static func _parapeted(b: Dictionary) -> bool:
+	return b["kind"] in ["normal", "landmark", "spire"]
+
+
+static func _has_plinth(b: Dictionary, tier: int) -> bool:
+	return tier == 0 and float(b["tiers"][0][4]) == 0.0 and not _glassy(b) and b["kind"] != "bridge"
+
+
+## Height of the walkable roof of the top tier as drawn in the detailed LOD
+## (props stand on it, collision matches it).
+static func roof_y(b: Dictionary) -> float:
+	var top: float = b["tiers"][-1][5]
+	if _parapeted(b) or b["kind"] == "bridge":
+		return top + cornice_h(b) * 0.5
+	return top
+
+
+## The solid boxes of a building exactly as the detailed LOD draws it:
+## walls, the cornice/roof slab with its overhang, the parapet ring, the
+## ground-floor plinth and shop awnings; construction frames with their
+## columns, hoarding and edge barrier. Collision is built from this, so what
+## you see is what you stand on and bump into.
+static func collision_boxes(b: Dictionary) -> Array[AABB]:
+	var out: Array[AABB] = []
+	var kind: String = b["kind"]
+	var tiers: Array = b["tiers"]
+	match kind:
+		"invisible":
+			return out  # stand-ins for landmark models, which collide with their own mesh
+		"structure", "sign", "plain":
+			for t in tiers:
+				out.append(_aabb(t[0], t[1], t[2], t[3], t[4], t[5]))
+			return out
+		"frame":
+			for t in tiers:
+				out.append(_aabb(t[0], t[1], t[2], t[3], t[4], t[5]))
+			var t0: Array = tiers[0]
+			var ytop: float = tiers[-1][5]
+			var nx := maxi(2, int((t0[2] - t0[0]) / 8.0) + 1)
+			var nz := maxi(2, int((t0[3] - t0[1]) / 8.0) + 1)
+			for i in nx:
+				for j in nz:
+					if i != 0 and i != nx - 1 and j != 0 and j != nz - 1:
+						continue
+					var x: float = lerpf(t0[0] + 0.5, t0[2] - 0.5, i / float(nx - 1))
+					var z: float = lerpf(t0[1] + 0.5, t0[3] - 0.5, j / float(nz - 1))
+					out.append(_aabb(x - 0.3, z - 0.3, x + 0.3, z + 0.3, 0.0, ytop + 3.0))
+			_ring(out, t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, 0.0, 2.6, 0.12)
+			_ring(out, t0[0] - 0.2, t0[1] - 0.2, t0[2] + 0.2, t0[3] + 0.2, ytop + 0.1, ytop + 1.2, 0.12)
+			return out
+	var o := cornice_out(b)
+	var ch := cornice_h(b)
+	for i in tiers.size():
+		var t: Array = tiers[i]
+		var y1: float = t[5]
+		out.append(_aabb(t[0], t[1], t[2], t[3], t[4], y1 - ch * 0.5))
+		out.append(_aabb(t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 - ch * 0.5, y1 + ch * 0.5))
+		if kind != "bridge":
+			_ring(out, t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 + ch * 0.5, y1 + ch * 0.5 + PARAPET, PARAPET_T)
+		if _has_plinth(b, i):
+			out.append(_aabb(t[0] - PLINTH_OUT, t[1] - PLINTH_OUT, t[2] + PLINTH_OUT, t[3] + PLINTH_OUT, 0.0, PLINTH_H))
+	for aw in awning_runs(b):
+		var a: Vector3 = aw[0]
+		var e: Vector3 = aw[1]
+		var far: Vector3 = e + (aw[2] as Vector3)
+		var lo := Vector3(minf(a.x, far.x), AWNING_Y - 0.38, minf(a.z, far.z))
+		var hi := Vector3(maxf(a.x, far.x), AWNING_Y + 0.18, maxf(a.z, far.z))
+		out.append(AABB(lo, hi - lo))
+	return out
+
+
+static func _aabb(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float) -> AABB:
+	return AABB(Vector3(x0, y0, z0), Vector3(x1 - x0, y1 - y0, z1 - z0))
+
+
+## Four thin walls of thickness t just inside the rectangle.
+static func _ring(out: Array[AABB], x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, t: float) -> void:
+	out.append(_aabb(x0, z0, x1, z0 + t, y0, y1))
+	out.append(_aabb(x0, z1 - t, x1, z1, y0, y1))
+	out.append(_aabb(x0, z0 + t, x0 + t, z1 - t, y0, y1))
+	out.append(_aabb(x1 - t, z0 + t, x1, z1 - t, y0, y1))
+
+
 ## Low lip round a roof edge: outer and inner faces plus a top ring.
 func _parapet(x0: float, z0: float, x1: float, z1: float, y: float, col: Color) -> void:
-	var t := 0.3
+	var t := PARAPET_T
 	var y1 := y + PARAPET
 	walls(x0, z0, x1, z1, y, y1, col, KIND_TRIM, 0, 0)
 	_inner_walls(Rect2(x0 + t, z0 + t, x1 - x0 - t * 2.0, z1 - z0 - t * 2.0), y, y1, col.darkened(0.15), KIND_TRIM)
@@ -261,37 +379,47 @@ func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, c
 		seed: float) -> void:
 	var y := (floorf(y0 / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
 	while y < y1 - 4.0:
-		var o := 0.28
+		var o := LEDGE_OUT
 		walls(x0 - o, z0 - o, x1 + o, z1 + o, y, y + 0.32, col, KIND_TRIM, style, seed)
 		bottom(x0 - o, z0 - o, x1 + o, z1 + o, y, col.darkened(0.25), KIND_TRIM, style, seed)
 		top(x0 - o, z0 - o, x1 + o, z1 + o, y + 0.32, col.lightened(0.1), KIND_TRIM, style, seed)
 		y += LEDGE_EVERY
 
 
-## Shop awnings along the ground floor: canopy + front valance, in runs
-## with gaps, colours per shop. Visual only (no collision).
-func _awnings(x0: float, z0: float, x1: float, z1: float, seed: float) -> void:
+## Shop awnings along the ground floor of masonry buildings, in runs with
+## gaps, colours per shop: [a, b, out, colour] (a on the left looking out).
+## Solid: collision_boxes() makes a slab of each, so you can land on them.
+static func awning_runs(b: Dictionary) -> Array:
+	var out_runs: Array = []
+	if not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
+			CityLayout.Style.STONE, CityLayout.Style.SANDSTONE, CityLayout.Style.DECO]:
+		return out_runs
+	var t: Array = b["tiers"][0]
+	var x0: float = t[0]
+	var z0: float = t[1]
+	var x1: float = t[2]
+	var z1: float = t[3]
 	var rng := RandomNumberGenerator.new()
-	rng.seed = int(seed * 1000003.0) ^ 0xa3
-	var out := 1.3
-	var y := 3.25
+	rng.seed = int(float(b["seed"]) * 1000003.0) ^ 0xa3
+	var out := AWNING_OUT
+	var y := AWNING_Y
 	for side in 4:
 		var along_x := side % 2 == 0
 		var a := x0 if along_x else z0
-		var b := x1 if along_x else z1
+		var bb := x1 if along_x else z1
 		var d := a + 1.5
-		while d + 4.0 < b - 1.5:
+		while d + 4.0 < bb - 1.5:
 			var w := rng.randf_range(3.5, 6.0)
-			if rng.randf() < 0.55 and d + w < b - 1.5:
+			if rng.randf() < 0.55 and d + w < bb - 1.5:
 				var col: Color = AWNING_COLORS[rng.randi() % AWNING_COLORS.size()]
 				var e := d + w
-				var drop := col.darkened(0.15)
 				match side:
-					0: _awning(Vector3(d, y, z0), Vector3(e, y, z0), Vector3.FORWARD * out, col, drop)
-					1: _awning(Vector3(x1, y, d), Vector3(x1, y, e), Vector3.RIGHT * out, col, drop)
-					2: _awning(Vector3(e, y, z1), Vector3(d, y, z1), Vector3.BACK * out, col, drop)
-					3: _awning(Vector3(x0, y, e), Vector3(x0, y, d), Vector3.LEFT * out, col, drop)
+					0: out_runs.append([Vector3(d, y, z0), Vector3(e, y, z0), Vector3.FORWARD * out, col])
+					1: out_runs.append([Vector3(x1, y, d), Vector3(x1, y, e), Vector3.RIGHT * out, col])
+					2: out_runs.append([Vector3(e, y, z1), Vector3(d, y, z1), Vector3.BACK * out, col])
+					3: out_runs.append([Vector3(x0, y, e), Vector3(x0, y, d), Vector3.LEFT * out, col])
 			d += w + rng.randf_range(0.6, 2.5)
+	return out_runs
 
 
 ## One awning from wall points a→b (a on the left looking out), sticking out
@@ -372,6 +500,65 @@ func add_structure(s: Dictionary, detailed: bool) -> void:
 			_quay_crane(s, detailed)
 		"bridge":
 			_bridge(s, detailed)
+		"kit":
+			_kit(s, detailed)
+
+
+## Set pieces (SetPieces): boxes, beams and prisms; the far LOD drops thin beams.
+func _kit(s: Dictionary, detailed: bool) -> void:
+	for v in s["solids"]:
+		solid(v[0], v[1], v[2], v[3], v[4], v[5], v[6])
+	for v in s["beams"]:
+		if detailed or minf(v[2], v[3]) >= 0.45:
+			beam(v[0], v[1], v[2], v[3], v[4], KIND_TRIM, true)
+	for v in s["prisms"]:
+		prism(v[0], v[1], v[2], v[3])
+
+
+## Vertical prism over a convex polygon given counter-clockwise or clockwise
+## in (x, z): side walls, top and bottom.
+func prism(pts: PackedVector2Array, y0: float, y1: float, col: Color) -> void:
+	var n := pts.size()
+	var c := Vector2.ZERO
+	for p in pts:
+		c += p
+	c /= n
+	for i in n:
+		var a := pts[i]
+		var b := pts[(i + 1) % n]
+		var mid := (a + b) * 0.5
+		var nrm := Vector3(b.y - a.y, 0.0, -(b.x - a.x)).normalized()
+		if Vector2(nrm.x, nrm.z).dot(mid - c) < 0.0:
+			nrm = -nrm
+		var qa := Vector3(a.x, y1, a.y)
+		var qb := Vector3(b.x, y1, b.y)
+		var qc := Vector3(b.x, y0, b.y)
+		var qd := Vector3(a.x, y0, a.y)
+		var w := a.distance_to(b)
+		if (qb - qa).cross(qc - qa).dot(nrm) > 0.0:
+			quad(qa, qd, qc, qb, nrm, Vector2.ZERO, Vector2(0, y1 - y0), Vector2(w, y1 - y0), Vector2(w, 0), col, KIND_TRIM, 0, 0)
+		else:
+			quad(qa, qb, qc, qd, nrm, Vector2.ZERO, Vector2(w, 0), Vector2(w, y1 - y0), Vector2(0, y1 - y0), col, KIND_TRIM, 0, 0)
+		# Top and bottom as fans from the centre.
+		var ct := Vector3(c.x, y1, c.y)
+		var cb := Vector3(c.x, y0, c.y)
+		_tri(ct, qa, qb, Vector3.UP, col)
+		_tri(cb, qd, qc, Vector3.DOWN, col.darkened(0.25))
+
+
+func _tri(a: Vector3, b: Vector3, c: Vector3, n: Vector3, col: Color) -> void:
+	if (b - a).cross(c - a).dot(n) > 0.0:
+		var t := b
+		b = c
+		c = t
+	var i := verts.size()
+	verts.append_array([a, b, c])
+	normals.append_array([n, n, n])
+	var cc := Color(col.r, col.g, col.b, KIND_TRIM / 8.0)
+	colors.append_array([cc, cc, cc])
+	uvs.append_array([Vector2(a.x, a.z), Vector2(b.x, b.z), Vector2(c.x, c.z)])
+	uv2s.append_array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+	indices.append_array([i, i + 1, i + 2])
 
 
 func _tower_crane(s: Dictionary, detailed: bool) -> void:
@@ -409,11 +596,11 @@ func _tower_crane(s: Dictionary, detailed: bool) -> void:
 	var hook_y: float = lerpf(8.0, h - 6.0, float(s["hook"]))
 	beam(tr, Vector3(tr.x, hook_y + 1.4, tr.z), 0.07, 0.07, STEEL)
 	solid(tr.x - 0.5, tr.z - 0.5, tr.x + 0.5, tr.z + 0.5, hook_y + 0.4, hook_y + 1.4, CRANE_YELLOW)
-	if detailed:
-		for k in 3:
-			var o := side * (k - 1) * 0.5
-			beam(Vector3(tr.x, hook_y - 0.5, tr.z) + o - d * 3.0, Vector3(tr.x, hook_y - 0.5, tr.z) + o + d * 3.0,
-				0.35, 0.5, Color(0.5, 0.24, 0.16))
+	# The load of beams (drawn at every distance: it collides at every distance).
+	for k in 3:
+		var o := side * (k - 1) * 0.5
+		beam(Vector3(tr.x, hook_y - 0.5, tr.z) + o - d * 3.0, Vector3(tr.x, hook_y - 0.5, tr.z) + o + d * 3.0,
+			0.35, 0.5, Color(0.5, 0.24, 0.16))
 	# Red warning light on the head.
 	solid(apex.x - 0.3, apex.z - 0.3, apex.x + 0.3, apex.z + 0.3, apex.y, apex.y + 0.5, Color(1.0, 0.15, 0.1))
 
@@ -427,9 +614,8 @@ func _quay_crane(s: Dictionary, detailed: bool) -> void:
 	for lx: float in [qx - 3.0, qx + 13.0]:
 		for lz: float in [z - 6.0, z + 6.0]:
 			solid(lx - 0.8, lz - 0.8, lx + 0.8, lz + 0.8, -2.0, ytop, col)
-		if detailed:
-			beam(Vector3(lx, 4.0, z - 6.0), Vector3(lx, ytop - 4.0, z + 6.0), 0.4, 0.4, col)
-			beam(Vector3(lx, 4.0, z + 6.0), Vector3(lx, ytop - 4.0, z - 6.0), 0.4, 0.4, col)
+		beam(Vector3(lx, 4.0, z - 6.0), Vector3(lx, ytop - 4.0, z + 6.0), 0.4, 0.4, col)  # solid: drawn at every distance
+		beam(Vector3(lx, 4.0, z + 6.0), Vector3(lx, ytop - 4.0, z - 6.0), 0.4, 0.4, col)
 	for lz: float in [z - 6.0, z + 6.0]:
 		solid(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, ytop - 4.0, ytop, col)
 		solid(qx - 3.8, lz - 0.9, qx + 13.8, lz + 0.9, 7.0, 8.4, col)
@@ -541,7 +727,7 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		var x := CityLayout.RIVER_EDGE
 		quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
 			Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
-		walls(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33), KIND_TRIM, 0, 0)
+		solid(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33))
 
 
 func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL) -> void:

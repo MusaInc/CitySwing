@@ -1,5 +1,22 @@
 # Status: 2026-10-30 (shop, coins, gadgets)
 
+# Status: 2026-10-30 (map set pieces, exact collision, mask, wall reactions)
+
+## Map, collision and contact pass (latest)
+
+- **Collision = what's drawn.** `BuildingMesher.collision_boxes(b)` builds every building's collision from the same numbers the mesher draws with: walls, the cornice/roof slab (roofs used to float 30 cm above glass roofs, and feet sank into masonry ones), parapet ring (now 0.3 m, under STEP_MAX, so a run steps onto it), plinth band, shop awnings (solid: you can land on them), construction frames with columns, hoarding and edge barrier. Ledges stand 8 cm proud (visual only). Roof props sit on the drawn roof (`BuildingMesher.roof_y`).
+- **No more falling through the ground**: the street collision now covers all the drawn ground (city, outskirts to +1 km, far shore). Previously it stopped ~200–400 m out while the outskirts' ground went on ~760 m. All outskirt and far-shore buildings collide. Pavements (kerb 0.15 m), quay rings and the river wall collide; the street sits exactly at 0.
+- **Landmarks** collide with their own mesh (trimesh); the old "invisible" stand-in boxes no longer collide. The far bridge anchorage (outside the chunk grid, never drawn) is drawn now. Crane bases, slewing units, jib widths, hook blocks and loads, quay-crane braces/machinery houses/trolleys, bridge girders, tower caps and footings all collide.
+- **Props collide** on a new layer (`CityWorld.PROPS_LAYER`, 1<<4: body, ragdoll and limb guard, not webs): lamp posts, traffic lights, sign posts, tree trunks, roof AC units, water towers, antennas, all street furniture and parked cars (parked cars now have their own random stream, so collision built up front matches what streams in). Moving traffic still has no collision.
+- `tools/collision_audit.gd` (xvfb) mirrors the drawn meshes and ray-compares them with collision over the whole map: before ≈ 37k float/sink samples, 251 holes, 6k wall mismatches; after: 0 holes, ~1 float/sink sample, remaining flags are roof huts (props aren't mirrored) and thin cables.
+- **Set pieces** (`src/world/set_pieces.gd`, "kit" = boxes/beams/convex prisms drawn and collided from one list; own RNGs): football ground with four 66 m floodlight pylons (Old Town), Victorian gasholder frame with raised bell (Old Town NE), observation wheel (waterfront), two container yards + straddle carrier (docks), cargo ship in a basin (clear under the quay crane's load), elevated railway with a parked train along the z=369 avenue (midtown), two gateway sky-lobbies spanning CBD avenues, lighthouse on a pier at the dock entrance. `tools/anchor_audit.gd` maps web-anchor coverage: Old Town mid-air "good" 68% → 77%; remaining thin spots are the map edges.
+- Startup layout+collision 204 → ~750 ms on the VPS (more shapes). Not measured on a device.
+- **Mask**: the face is always covered – a cowl in the suit's dark shade (recolours with suits) with angled lenses in the web glow colour; no skin, hair or ears. Neck covered.
+- **Wall reactions**: running head-on into a wall at 4.5–14 m/s knocks the body back a step (`Player.staggered`, STAGGER_TIME 0.42 s without stick, cooldown 1.4 s): head/chest thrown back, arms brace, back-pedal facing the wall. Faster (sprint) still runs up the wall. Pushing on into a wall: hands-flat lean (`_press`).
+- **Limb guard** (`CharacterRig._guard_limbs`, last pass every frame incl. ragdoll): each arm/leg keeps its pose direction but its reach is capped by the distance to what's in that direction (joint bends away, anatomical pole); the fold is a display-only offset on a critically damped spring (GUARD_W 18), so a limb swung fast into a wall folds over ~0.1–0.2 s rather than popping – a brief partial overlap is possible in that window. Web hand on the line and planted feet are left to their own IK. Ragdoll: after constraints the torso is shifted out of walls rigidly (bone lengths/hinges exact).
+- **Webs**: a flying web that something comes between sticks to it (or misses) instead of passing through; the drawn rope bends round any edge between the animated hand and the pivot and its sag never dips into geometry. pose_lab `groundweb` scenario.
+- Courses re-recorded (all 8 OK). Not deployed to web/TestFlight; not tried on a device.
+
 ## Gadgets (latest)
 
 - New **Gadgets** shop tab (`Shop` slot "gadget", `src/player/gadgets.gd`): one equipped, used with GADGET (E, pad X, or the touch button above SWING with a recharge ring that turns gold when ready). Players only, never the title autopilot; timers run on real time.

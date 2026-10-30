@@ -12,7 +12,7 @@ extends RefCounted
 const STEP := 1.0 / 60.0
 const ITERATIONS := 8
 const GRAVITY := Vector3(0, -19.0, 0)
-const MASK := 1 | (1 << 1) | (1 << 3)
+const MASK := 1 | (1 << 1) | (1 << 3) | (1 << 4)  # buildings, street, props
 
 const NAMES := ["pelvis", "chest", "neck", "head", "sh_l", "sh_r", "el_l", "el_r", "wr_l", "wr_r",
 	"hip_l", "hip_r", "kn_l", "kn_r", "an_l", "an_r"]
@@ -124,6 +124,40 @@ func _step(anchor: Vector3) -> void:
 	for sd in ["l", "r"]:
 		_hinge("hip_" + sd, "kn_" + sd, "an_" + sd, fw)
 		_hinge("sh_" + sd, "el_" + sd, "wr_" + sd, -fw)
+	_project_out(anchor)
+
+
+## Body thickness: how far each joint's surface reaches past its particle.
+const RADIUS := {"pelvis": 0.13, "chest": 0.15, "neck": 0.07, "head": 0.13, "sh_l": 0.08, "sh_r": 0.08}
+const LIMB_RADIUS := 0.06
+
+
+## Last step: constraints, joint limits and hinges move particles after
+## their swept collision, so the torso (with its thickness) can end up in a
+## wall. The whole body is shifted out rigidly – bone lengths and hinges stay
+## exact; limbs are kept out of the world by CharacterRig._guard_limbs.
+func _project_out(anchor: Vector3) -> void:
+	if space == null:
+		return
+	var push := Vector3.ZERO
+	for n in TORSO:
+		var p: Vector3 = (pos[n] as Vector3) + push
+		var r: float = RADIUS.get(n, LIMB_RADIUS)
+		var d := p - anchor
+		if d.length_squared() < 1e-6:
+			continue
+		var q := PhysicsRayQueryParameters3D.create(anchor, p + d.normalized() * r, MASK, exclude)
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			continue
+		var target: Vector3 = (hit["position"] as Vector3) + (hit["normal"] as Vector3) * r
+		var nrm: Vector3 = hit["normal"]
+		push += nrm * maxf((target - p).dot(nrm), 0.0)
+	if push == Vector3.ZERO:
+		return
+	for n in NAMES:
+		pos[n] = (pos[n] as Vector3) + push
+		prev[n] = (prev[n] as Vector3) + push * 0.7  # most of the push is not new velocity
 
 
 ## Hip/shoulder cones, in the torso frame
