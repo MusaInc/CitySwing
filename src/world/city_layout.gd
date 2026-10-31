@@ -90,6 +90,7 @@ var is_mainland := false
 ## The mainland's layout, on the island's (CityWorld sets it): is_water and
 ## ground_y answer for both lands.
 var mainland: CityLayout
+var _plant_candidates: Array = []  # rooftop cooling towers, placed last (_place_plant)
 var _sites: Array = []         # [Rect2 (local), district, rot, pivot] construction lots, built after the blocks
 var _block_grid := {}          # Vector2i (BLOCK_CELL cells) -> block indices
 const BLOCK_CELL := 40.0
@@ -126,7 +127,40 @@ func generate(p_seed := 1207) -> CityLayout:
 	pieces.lighthouse()
 	_traffic()
 	_sea()
+	_place_plant()
 	return self
+
+
+## Rooftop cooling towers, appended after every other prop (so a density
+## setting keeps the same streetlights, trees and roof kit as before), each
+## clear of the props already on its roof.
+func _place_plant() -> void:
+	var near := {}
+	for p in props:
+		var o: Vector3 = p[1].origin
+		var k := Vector2i(floori(o.x / 8.0), floori(o.z / 8.0))
+		if not near.has(k):
+			near[k] = []
+		near[k].append(o)
+	for cand in _plant_candidates:
+		# (In the building's frame when chosen: turn and lift it with the
+		# building, which may have been rotated onto its lot and terraced.)
+		var b: Dictionary = cand[0]
+		var lp: Vector2 = cand[1]
+		var X := CityLayout.bxf(b)
+		var c: Vector3 = X * Vector3(lp.x, 0.0, lp.y)
+		c.y = BuildingMesher.roof_y(b)
+		var xf := Transform3D(X.basis * Basis(Vector3.UP, float(cand[2])), c)
+		var clear := true
+		var k0 := Vector2i(floori(c.x / 8.0), floori(c.z / 8.0))
+		for dx in range(-1, 2):
+			for dz in range(-1, 2):
+				for o: Vector3 in near.get(k0 + Vector2i(dx, dz), []):
+					if absf(o.y - c.y) < 3.0 and Vector2(o.x - c.x, o.z - c.z).length() < 3.6:
+						clear = false
+		if clear:
+			props.append(["cooling_tower", xf])
+	_plant_candidates.clear()
 
 
 ## Westbank, the mainland across the strait: the same city machinery (organic
@@ -192,6 +226,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	_construction()
 	_skybridges()
 	_traffic()
+	_place_plant()
 	return self
 
 
@@ -1485,6 +1520,26 @@ func _roof_furniture(b: Dictionary, tiers: Array, style: int, h: float, col: Col
 			props.append(["roof_hut", Transform3D(Basis(Vector3.UP, yaw), Vector3(hx, ry, hz))])
 			buildings.append({"tiers": [[hx - 1.7, hz - 2.1, hx + 1.7, hz + 2.1, ry, ry + 3.1]], "style": Style.MODERN,
 				"color": Color.WHITE, "kind": "structure", "seed": 0.0})
+	# Mechanical plant on office towers: a row of cooling towers off to one
+	# side of the roof (own random stream: nothing else reshuffles; solid for
+	# people only, see CityWorld.HUMAN_LAYER).
+	var prng := RandomNumberGenerator.new()
+	prng.seed = hash(Vector3i(int(rx * 7.0), int(rz * 7.0), int(top_t[5] * 3.0))) ^ (seed * 5 + 1)
+	if style in [Style.GLASS, Style.DARK_GLASS, Style.MODERN, Style.DECO, Style.STONE] and h > 50.0 \
+			and tw > 18.0 and td > 18.0 and prng.randf() < 0.75:
+		var along_x := tw >= td
+		var n_ct := 2 + int(maxf(tw, td) > 30.0)
+		var side := 1.0 if prng.randf() < 0.5 else -1.0
+		var ox := rx + (0.0 if along_x else side * (tw * 0.5 - 4.5))
+		var oz := rz + (side * (td * 0.5 - 4.0) if along_x else 0.0)
+		for k in n_ct:
+			var off := (float(k) - (n_ct - 1) * 0.5) * 4.4
+			var cx := ox + (off if along_x else 0.0)
+			var cz := oz + (0.0 if along_x else off)
+			if free.call(cx, cz) and Vector2(cx, cz).distance_to(Vector2(rx, rz)) > 3.0:
+				# (Placed at the end of generate(): appending mid-list would
+				# shift which props a density setting keeps.)
+				_plant_candidates.append([b, Vector2(cx, cz), 0.0 if along_x else PI * 0.5])
 	if (style == Style.BRICK or style == Style.STONE or style == Style.SANDSTONE) and h < 80.0 and brng.randf() < 0.55:
 		var wx := rx + brng.randf_range(-tw, tw) * 0.25
 		var wz := rz + brng.randf_range(-td, td) * 0.25

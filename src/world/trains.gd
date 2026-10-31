@@ -10,7 +10,7 @@ extends Node3D
 ## Collision is on TRAIN_LAYER, which only human players collide with (bots
 ## and recorded courses are unaffected by where the trains happen to be).
 
-const TRAIN_LAYER := 1 << 5
+const TRAIN_LAYER := CityWorld.HUMAN_LAYER
 const CAR_LEN := 17.6
 const CAR_PITCH := 18.0          # car + gap
 const BOGIE := 6.2               # bogie centres from the car's centre

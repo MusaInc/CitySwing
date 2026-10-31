@@ -745,6 +745,7 @@ func _process(dt: float) -> void:
 	else:
 		_update_animated(dt)
 	_guard_limbs()
+	_no_pops(dt)
 	_update_scarf(dt)
 	_sync_skeleton()
 	# Closed hands on the line, and loose fists when running or flying (open
@@ -755,6 +756,50 @@ func _process(dt: float) -> void:
 	_set_grip("r", player.line_state != Player.Line.IDLE or (fists and not wing))
 	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
 	posed.emit()
+
+
+## Pop guard: no joint's rotation speed may change faster than POP_ACCEL, so
+## a pose that jumps between states (a rushed step, a stop against a wall,
+## getting up) turns into a quick 2–3 frame move instead of a one-frame snap.
+## Upper body only: the legs follow their IK exactly (feet stay planted).
+## Motion inside the limit passes through exactly; the ragdoll is physics,
+## so it only seeds the state.
+const POP_ACCEL := deg_to_rad(80000.0)  # rad/s² (~1330°/s of change per 60 fps frame)
+var _pq := {}
+var _pw := {}
+
+
+func _no_pops(dt: float) -> void:
+	if dt <= 0.0:
+		return
+	var lim := POP_ACCEL * dt
+	for b in bones:
+		if String(b).begins_with("thigh") or String(b).begins_with("shin") or String(b).begins_with("foot") \
+				or String(b).begins_with("toe") or b == "hips":
+			continue  # (legs follow their IK exactly: feet must stay planted)
+		var node := bones[b] as Node3D
+		var qt := node.quaternion
+		if ragdolling or not _pq.has(b):
+			_pq[b] = qt
+			_pw[b] = Vector3.ZERO
+			continue
+		var qp: Quaternion = _pq[b]
+		var d := qt * qp.inverse()
+		if d.w < 0.0:
+			d = -d
+		var ang := d.get_angle()
+		var wt := d.get_axis() * (ang / dt) if ang > 1e-6 else Vector3.ZERO
+		var wp: Vector3 = _pw[b]
+		var dw := wt - wp
+		if dw.length() > lim:
+			var w := wp + dw.normalized() * lim
+			var q := (Quaternion(w.normalized(), w.length() * dt) * qp).normalized() if w.length() > 1e-6 else qp
+			node.quaternion = q
+			_pq[b] = q
+			_pw[b] = w
+		else:
+			_pq[b] = qt
+			_pw[b] = wt
 
 
 func _set_grip(side: String, on: bool) -> void:

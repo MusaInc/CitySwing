@@ -14,10 +14,14 @@ const CHUNK := CityLayout.CHUNK
 ## Street furniture, lamp posts, trunks, roof units and parked cars: solid to
 ## the body (and ragdoll), but not web targets and not in the way of webs.
 const PROPS_LAYER := 1 << 4
+## Solid for people only (Player sets mask bit 6 for humans): trains,
+## balconies, rooftop plant – detail bots and recorded courses ignore.
+const HUMAN_LAYER := 1 << 5
+const HUMAN_ONLY_PROPS := ["cooling_tower"]
 const MODEL_DIR := "res://assets/models/"
 const PROP_RANGES := {
 	"streetlight": 260.0, "tree": 320.0, "water_tower": 520.0, "ac_unit": 240.0, "antenna": 700.0, "crane": 1200.0,
-	"traffic_light": 220.0, "roof_hut": 650.0, "tree_tall": 320.0,
+	"traffic_light": 220.0, "roof_hut": 650.0, "tree_tall": 320.0, "cooling_tower": 450.0,
 }
 ## Street furniture (tools/blender/build_street.py), merged into one mesh per
 ## chunk: [kind, inset from the kerb line (m)].
@@ -178,7 +182,7 @@ func spawn_point() -> Vector3:
 
 
 ## Clearance (m) to keep from each kind of rooftop prop when standing.
-const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0, "roof_hut": 5.5}
+const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0, "roof_hut": 5.5, "cooling_tower": 5.0}
 const ROOF_EDGE_CLEARANCE := 4.5
 
 var _roof_spawns: Array = []
@@ -571,7 +575,7 @@ func _load_mesh(name: String) -> Mesh:
 
 func _load_props() -> void:
 	for k in ["streetlight", "tree", "tree_tall", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
-			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut"]:
+			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut", "cooling_tower"]:
 		var m := _load_mesh(k)
 		if m:
 			if k == "streetlight":
@@ -816,6 +820,10 @@ func _build_collision() -> void:
 		body.name = "Col_%d_%d" % [key.x, key.y]
 		body.collision_layer = 1 | (1 << 1)
 		body.collision_mask = 0
+		var soft := StaticBody3D.new()
+		soft.name = "ColHuman_%d_%d" % [key.x, key.y]
+		soft.collision_layer = HUMAN_LAYER
+		soft.collision_mask = 0
 		for b in by_chunk[key]:
 			var X := CityLayout.bxf(b)
 			var turned := float(b.get("rot", 0.0)) != 0.0
@@ -824,7 +832,14 @@ func _build_collision() -> void:
 					_add_box_xf(body, box, X)
 				else:
 					_add_box(body, box)
+			if b["kind"] == "normal":
+				for box: AABB in BuildingMesher.features(b)["col_human"]:
+					_add_box_xf(soft, box, X)
 		add_child(body)
+		if soft.get_child_count() > 0:
+			add_child(soft)
+		else:
+			soft.free()
 	var street := StaticBody3D.new()
 	street.name = "Street"
 	street.collision_layer = 1 << 3
@@ -934,13 +949,21 @@ func _build_prop_collision() -> void:
 		body.name = "Props_%d_%d" % [key.x, key.y]
 		body.collision_layer = PROPS_LAYER
 		body.collision_mask = 0
+		var soft := StaticBody3D.new()
+		soft.name = "PropsHuman_%d_%d" % [key.x, key.y]
+		soft.collision_layer = HUMAN_LAYER
+		soft.collision_mask = 0
 		var items: Array = chunk_props(key) + chunk_furniture(key)
 		for it in items:
 			var kind: String = it[0]
 			if not cache.has(kind):
 				cache[kind] = _prop_boxes(kind)
 			for bx in cache[kind]:
-				_add_oriented_box(body, it[1], bx[0], bx[1])
+				_add_oriented_box(soft if kind in HUMAN_ONLY_PROPS else body, it[1], bx[0], bx[1])
+		if soft.get_child_count() > 0:
+			add_child(soft)
+		else:
+			soft.free()
 		for pc in parked_cars(key):
 			var bx: Array = car_boxes[int(pc[1])]
 			_add_oriented_box(body, pc[0], bx[0], bx[1])

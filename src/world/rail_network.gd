@@ -27,6 +27,8 @@ const RAIL_STEEL := Color(0.3, 0.3, 0.31)
 const CANOPY := Color(0.18, 0.22, 0.24)
 const PLATFORM := Color(0.7, 0.69, 0.66)
 const STATION_LEN := 64.0
+## Platform edge from the track centre: half the car (1.5 m) + a 10 cm gap.
+const PLATFORM_GAP := 1.6
 
 var lines: Array = []
 var L: CityLayout
@@ -231,7 +233,7 @@ func _station(line: Dictionary, s0: float) -> void:
 	var c := _at(pts, s0)
 	var brick := c.x < VIADUCT_X + 0.5
 	for sgn: float in [-1.0, 1.0]:
-		var off := side * sgn * (TRACK + 1.45 + 1.75)
+		var off := side * sgn * (TRACK + PLATFORM_GAP + 1.75)
 		var pa := a + off
 		var pb := b + off
 		# Platform at car-floor height, its edge along the track.

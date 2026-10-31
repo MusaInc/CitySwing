@@ -405,6 +405,29 @@ def train_car(cab):
     export("train_cab.glb" if cab else "train_car.glb", [join("train_cab" if cab else "train_car", p)])
 
 
+def cooling_tower():
+    """Rooftop cooling tower / chiller: louvred box, fan shrouds, pipework.
+    3.6 x 2.4 x 2.6 m, origin at the base centre."""
+    reset()
+    body = mat("hvac", (0.72, 0.73, 0.72), 0.5, 0.2)
+    louvre = mat("hvac_louvre", (0.42, 0.44, 0.45), 0.6, 0.3)
+    dark = mat("steel_dark", (0.12, 0.12, 0.13), 0.5, 0.5)
+    pipe = mat("pipe", (0.55, 0.5, 0.42), 0.5, 0.6)
+    p = [box("frame", (3.6, 2.4, 0.3), (0, 0, 0.15), dark)]
+    p.append(box("body", (3.5, 2.3, 1.9), (0, 0, 1.25), body, bevel=0.04))
+    for sx in (-1, 1):  # louvre panels on the long sides
+        for i in range(7):
+            p.append(box("louvre", (3.2, 0.05, 0.08), (0, sx * 1.17, 0.55 + i * 0.22), louvre))
+    for x in (-0.85, 0.85):
+        p.append(cyl("shroud", 0.72, 0.42, (x, 0, 2.2), body, 20))
+        p.append(cyl("fan", 0.66, 0.05, (x, 0, 2.55), dark, 20))
+        p.append(box("hub", (0.18, 0.18, 0.12), (x, 0, 2.6), dark))
+    for z in (0.5, 0.9):  # pipes out of one end, down to the roof
+        p.append(box("pipe", (0.6, 0.16, 0.16), (2.05, 0.6, z), pipe))
+        p.append(box("pipe", (0.16, 0.16, z), (2.3, 0.6, z / 2), pipe))
+    export("cooling_tower.glb", [join("cooling_tower", p)])
+
+
 def crane():
     reset()
     paint = mat("crane_paint", (0.86, 0.6, 0.16), 0.6, 0.3)
@@ -693,6 +716,6 @@ if __name__ == "__main__":
     # tools/blender/build_street.py
     for fn in (water_tower, ac_unit, antenna, streetlight, clock_crown, harbour_dome, beacon,
                cathedral_tower_top, viaduct, crane, traffic_light, roof_hut,
-               lambda: train_car(False), lambda: train_car(True)):
+               lambda: train_car(False), lambda: train_car(True), cooling_tower):
         fn()
     print("KIT DONE")

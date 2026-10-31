@@ -35,7 +35,7 @@ const IRON := [Color(0.11, 0.12, 0.12), Color(0.1, 0.16, 0.13), Color(0.3, 0.12,
 const ESCAPE_DEPTH := 1.35   # m: fire-escape platforms stand this far out
 const FIN_OUT := 0.24        # m: glass-tower fins
 ## Outskirt backdrop blocks opt out of features (drawn plain, collide plain).
-const NO_FEATURES := {"draw": [], "beams": [], "col": []}
+const NO_FEATURES := {"draw": [], "beams": [], "col": [], "col_human": []}
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -560,7 +560,10 @@ static func features(b: Dictionary) -> Dictionary:
 
 
 static func _features(b: Dictionary) -> Dictionary:
-	var out := {"draw": [], "beams": [], "col": []}
+	# col: collides for everyone; col_human: solid for people only
+	# (CityWorld.HUMAN_LAYER) – detail added after the courses were recorded,
+	# so bots and recorded flights don't depend on it.
+	var out := {"draw": [], "beams": [], "col": [], "col_human": []}
 	if not _parapeted(b) or b["kind"] != "normal":
 		return out
 	var rng := RandomNumberGenerator.new()
@@ -581,6 +584,15 @@ static func _features(b: Dictionary) -> Dictionary:
 		for i in n:
 			var k := (first + i * 2) % 4
 			_fire_escape(out, _face(t0, k), style, h0, iron, rng, base)
+	# Balconies on blocks of flats: stacks in front of every other window
+	# bay up the longest face (and its opposite if long), slab + railing,
+	# from the first floor over the shops to below the cornice.
+	var flats := style in [CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE] \
+		or style == CityLayout.Style.BRICK and h0 >= 75.0
+	var brng := RandomNumberGenerator.new()
+	brng.seed = int(float(b["seed"]) * 4099.0 * 1000.0) ^ 0xba1c
+	if flats and _on_ground(b, t0) and h0 > 14.0 and h0 < 120.0 and brng.randf() < 0.55:
+		_balconies(out, b, t0, style, h0, base, brng)
 	# Entrances: a stone portal on masonry, a steel canopy on modern/glass.
 	if _on_ground(b, t0) and h0 > 24.0 and style != CityLayout.Style.WAREHOUSE:
 		var k := 0
@@ -679,6 +691,51 @@ static func _raise_into(out: Dictionary, part: Dictionary, dy: float) -> void:
 		out["beams"].append([bm[0] + up, bm[1] + up, bm[2], bm[3], bm[4]])
 	for bx: AABB in part["col"]:
 		out["col"].append(AABB(bx.position + up, bx.size))
+
+
+const BALCONY_CELLS := {CityLayout.Style.BRICK: Vector2(3.2, 3.0), CityLayout.Style.MODERN: Vector2(2.6, 3.6),
+	CityLayout.Style.SANDSTONE: Vector2(3.6, 4.2)}
+
+
+static func _balconies(out: Dictionary, b: Dictionary, t0: Array, style: int, h0: float, base: float,
+		rng: RandomNumberGenerator) -> void:
+	var cell: Vector2 = BALCONY_CELLS[style]
+	var depth := 1.25 if style == CityLayout.Style.MODERN else 1.05
+	var slab_c := Color(0.68, 0.67, 0.64) if style != CityLayout.Style.BRICK else Color(0.6, 0.58, 0.55)
+	var rail_c := Color(0.32, 0.38, 0.42) if style == CityLayout.Style.MODERN else Color(0.14, 0.15, 0.16)
+	var first_floor := ceilf(5.0 / cell.y)
+	var top := h0 - cornice_h(b) - 1.4
+	var best := 0
+	for k in 4:
+		if float(_face(t0, k)[3]) > float(_face(t0, best)[3]):
+			best = k
+	var faces: Array = [best]
+	if float(_face(t0, (best + 2) % 4)[3]) > 24.0 and rng.randf() < 0.6:
+		faces.append((best + 2) % 4)
+	var phase := rng.randi() % 2
+	var wb := cell.x * 0.86
+	for k in faces:
+		var f := _face(t0, k)
+		var L: float = f[3]
+		var u0: float = f[4]
+		var m := ceili(u0 / cell.x)
+		while m * cell.x - u0 < L:
+			var a := (m + 0.5) * cell.x - u0  # a window bay's centre on this face
+			if (m + phase) % 2 == 0 and a - wb * 0.5 > 1.2 and a + wb * 0.5 < L - 1.2:
+				var fl := first_floor
+				var y_first := -1.0
+				var y_last := -1.0
+				while fl * cell.y + 1.2 < top:
+					var y := base + fl * cell.y
+					out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y - 0.16, y), slab_c])
+					out["draw"].append([_fbox(f, a - wb * 0.5, a + wb * 0.5, depth - 0.06, depth, y, y + 1.05), rail_c])
+					if y_first < 0.0:
+						y_first = y
+					y_last = y
+					fl += 1.0
+				if y_first > 0.0:
+					out["col_human"].append(_fbox(f, a - wb * 0.5, a + wb * 0.5, 0.0, depth, y_first - 0.16, y_last + 1.05))
+			m += 1
 
 
 static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: Color,
