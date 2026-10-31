@@ -92,8 +92,12 @@ void fragment() {
 		// Metres from the nearest kerb line (negative on the road).
 		float kerb = min(a - hw, other);
 		if (asphalt) {
-			// Darker, slightly cool tarmac so paint and kerbs read in full sun.
-			albedo = c * (0.95 + 0.08 * n) * vec3(0.54, 0.56, 0.6);  // flatter mottling: the cel pass bands noise into blotches
+			// Aged tarmac: neutral grey (not blue), with a broad tone drift
+			// (resurfaced stretches, sun-bleached runs) and fine aggregate
+			// mottling up close, so shaded streets still read as a surface.
+			float drift = vnoise(p * 0.022 + 31.0) * 0.6 + vnoise(p * 0.09) * 0.4;
+			float grain = vnoise(p * 3.1) * near;
+			albedo = c * vec3(0.66, 0.66, 0.67) * (0.84 + 0.3 * drift) * (0.94 + 0.12 * grain);
 			// Large-scale tone drift + patch repairs (sharp-edged, slightly off-tone).
 			vec2 pc = floor(p / vec2(5.0, 3.0));
 			float patch = step(0.86, hash12(pc + 17.0));
@@ -194,5 +198,5 @@ void fragment() {
 	}
 	ALBEDO = albedo;
 	ROUGHNESS = rough;
-	SPECULAR = 0.5 + 0.3 * wetness;
+	SPECULAR = 0.25 + 0.55 * wetness;  // (dry tarmac and stone barely mirror the sky)
 }

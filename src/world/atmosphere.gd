@@ -90,14 +90,16 @@ func _ready() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.62
 	env.ambient_light_color = Color(0.56, 0.66, 0.9)
-	env.ambient_light_sky_contribution = 0.55
+	# Half sky, half "bounce": shaded streets read as cool grey stone and
+	# asphalt lit by the sunlit facades around them, not a flat blue.
+	env.ambient_light_sky_contribution = 0.15
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
 	env.tonemap_white = 8.0
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
-	env.fog_depth_curve = 1.6
+	env.fog_depth_curve = 1.45
 	env.fog_sun_scatter = 0.3
 	env.fog_aerial_perspective = 0.4
 	env.fog_sky_affect = 0.15
@@ -106,8 +108,8 @@ func _ready() -> void:
 	env.glow_bloom = 0.05
 	env.glow_hdr_threshold = 1.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.12
-	env.adjustment_contrast = 1.1
+	env.adjustment_saturation = 1.04
+	env.adjustment_contrast = 1.05
 	env.adjustment_color_correction = grade_lut()
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -241,7 +243,7 @@ func _apply(dt: float, instant: bool) -> void:
 	else:
 		# Moon: high in the south-east, cool and dim.
 		sun.rotation_degrees = Vector3(-42.0, 150.0, 0.0)
-		sun.light_color = Color(0.62, 0.72, 1.0)
+		sun.light_color = Color(0.7, 0.76, 0.95)
 		sun.light_energy = 0.45 * smoothstep(-3.0, -12.0, el)
 		sky_mat.set_shader_parameter("sun_glow", 0.25)
 		sky_mat.set_shader_parameter("disc_size", 0.99955)
@@ -286,12 +288,14 @@ func _apply(dt: float, instant: bool) -> void:
 		sky_mat.set_shader_parameter("flash", fl)
 
 	# --- ambient, exposure, fog.
-	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.48], [2.0, 0.52], [20.0, 0.62]]) \
-		* (1.0 + 0.3 * overcast) + fl * 2.0
-	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.32, 0.42, 0.8)], [2.0, Color(0.6, 0.55, 0.75)],
-		[20.0, Color(0.56, 0.66, 0.9)]]).lerp(Color(0.7, 0.72, 0.76), overcast * 0.6)
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.5], [2.0, 0.58], [20.0, 0.72]]) \
+		* (1.0 + 0.25 * overcast) + fl * 2.0
+	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
+	# dusky at sunset, moonlit blue at night).
+	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
+		[15.0, Color(0.8, 0.76, 0.72)], [40.0, Color(0.8, 0.79, 0.78)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
 	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast)
-	env.fog_depth_begin = lerpf(180.0, 12.0, fog)
+	env.fog_depth_begin = lerpf(130.0, 12.0, fog)
 	env.fog_depth_end = lerpf(2600.0, 520.0, fog)
 	env.fog_density = lerpf(0.62, 0.97, fog)
 	env.fog_light_color = hor.lerp(Color(0.68, 0.77, 0.9), 0.35 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
@@ -360,7 +364,7 @@ static func grade(c: Color) -> Color:
 	# Split tone: shadows towards blue-violet, highlights towards warm gold.
 	var sh := clampf(1.0 - s * 2.2, 0.0, 1.0)
 	var hi := clampf((s - 0.55) * 2.2, 0.0, 1.0)
-	o += Color(-0.012, 0.004, 0.035) * sh + Color(0.03, 0.012, -0.03) * hi
+	o += Color(-0.004, 0.0, 0.012) * sh + Color(0.025, 0.01, -0.025) * hi
 	# Mid saturation boost (fades out in deep shadow and near-white).
 	var ol := 0.2126 * o.r + 0.7152 * o.g + 0.0722 * o.b
 	var sat := 1.0 + 0.12 * (1.0 - absf(ol * 2.0 - 1.0))

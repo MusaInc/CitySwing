@@ -47,7 +47,7 @@ void vertex() {
 // style: 0 stone office, 1 brick flats, 2 glass curtain, 3 warehouse,
 //        4 modern grid, 5 sandstone, 6 dark glass, 7 deco bands
 void window_layout(float style, vec2 uv, out float glass, out vec2 cell, out float frame, out vec2 wpos,
-		out vec2 whalf) {
+		out vec2 whalf, out vec2 csize) {
 	vec2 size = vec2(3.0, 3.6);
 	vec2 win = vec2(0.55, 0.6);
 	if (style == 1.0) { size = vec2(3.2, 3.0); win = vec2(0.42, 0.55); }
@@ -65,6 +65,69 @@ void window_layout(float style, vec2 uv, out float glass, out vec2 cell, out flo
 	wpos = f * size;
 	whalf = win * size * 0.5;
 	frame = 1.0 - smoothstep(-aa * 2.0, aa, max(edge.x, edge.y) + 0.04);
+	csize = size;
+}
+
+// What you see through a window: the room behind it as a box (interior
+// mapping). o = point on the glass in the room's frame (x across, y up, from
+// the cell centre), d = view ray into the building in the same frame, room =
+// (width, height, depth). Back wall with a desk/sofa line and the odd
+// picture, side walls, floor and ceiling, darker with depth; lit rooms glow
+// from the ceiling.
+vec3 room(vec2 o, vec3 d, vec3 rsize, float rnd, float lit, vec3 lamp, float daylight) {
+	vec3 lo = vec3(-rsize.x * 0.5, -rsize.y * 0.5, 0.0);
+	vec3 hi = vec3(rsize.x * 0.5, rsize.y * 0.5, rsize.z);
+	vec3 p0 = vec3(o, 0.0);
+	vec3 inv = 1.0 / max(abs(d), vec3(1e-4)) * sign(d + 1e-6);
+	vec3 tf = ((step(0.0, d) * hi + (1.0 - step(0.0, d)) * lo) - p0) * inv;
+	float t = min(tf.x, min(tf.y, tf.z));
+	vec3 h = p0 + d * t;
+	vec3 wallc = rnd < 0.3 ? vec3(0.72, 0.7, 0.64) : (rnd < 0.55 ? vec3(0.6, 0.62, 0.63)
+		: (rnd < 0.8 ? vec3(0.68, 0.6, 0.5) : vec3(0.56, 0.6, 0.66)));
+	vec3 c;
+	if (t == tf.z) {
+		c = wallc;
+		// Furniture line along the back (desks, sofas) and a picture/screen.
+		float desk = step(h.y, lo.y + 0.85 + 0.3 * fract(rnd * 7.0));
+		c = mix(c, vec3(0.2, 0.18, 0.17) * (0.8 + 0.6 * fract(rnd * 13.0)), desk * 0.85);
+		float pic = step(abs(h.x - (fract(rnd * 3.3) - 0.5) * rsize.x * 0.5), 0.45) * step(abs(h.y - 0.25), 0.3);
+		c = mix(c, vec3(0.15, 0.2, 0.28) + vec3(fract(rnd * 5.1), fract(rnd * 9.7), 0.3) * 0.3, pic * step(0.5, fract(rnd * 17.0)));
+	} else if (t == tf.y) {
+		c = d.y > 0.0 ? vec3(0.8, 0.79, 0.76) : (fract(rnd * 2.9) < 0.5 ? vec3(0.3, 0.22, 0.16) : vec3(0.32, 0.33, 0.35));
+		if (d.y > 0.0) {
+			// Ceiling light panel.
+			float panel = step(abs(h.x), 0.5) * step(abs(h.z - rsize.z * 0.5), 0.6);
+			c += lamp * panel * lit * 3.0;
+		}
+	} else {
+		c = wallc * 0.78;
+	}
+	float depth_k = mix(1.0, 0.45, h.z / rsize.z);
+	// Daylight falls off into the room; lamps light it evenly.
+	vec3 light = vec3(daylight) * depth_k + lamp * lit * 0.55 * mix(1.0, 0.75, h.z / rsize.z);
+	return c * light;
+}
+
+// Reflection of the world in glass: sky above, a hazy band of city skyline
+// (with window specks, lit at night) round the horizon, the ground below.
+vec3 world_reflection(vec3 r) {
+	vec3 sky = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
+	float az = atan(r.x, r.z) / 6.2832 + 0.5;
+	float col = floor(az * 70.0);
+	float hb = hash12(vec2(col, 7.0));
+	float hs = 0.02 + 0.22 * hb * hb * (0.5 + 0.5 * hash12(vec2(floor(az * 9.0), 3.0)));
+	float in_city = 1.0 - smoothstep(hs - 0.004, hs + 0.004, r.y);
+	vec3 bld = mix(vec3(0.2, 0.22, 0.25), sky_horizon * 0.75, 0.45 + 0.35 * clamp(r.y / max(hs, 0.01), 0.0, 1.0));
+	bld *= 0.8 + 0.4 * hash12(vec2(col, 2.0));
+	// Window rows in the reflected towers: soft bands, not per-pixel specks
+	// (those shimmer as the camera moves).
+	float rows = smoothstep(0.35, 0.5, abs(fract(r.y * 140.0) - 0.5));
+	float lit_w = step(0.7, hash12(vec2(floor(az * 260.0), floor(r.y * 140.0))));
+	bld *= 1.0 - 0.18 * rows;
+	bld += lit_w * (1.0 - rows) * mix(sky_horizon * 0.08, vec3(1.0, 0.75, 0.45) * 1.1, night);
+	vec3 ground = mix(vec3(0.16, 0.17, 0.18), sky_horizon * 0.3, 0.3);
+	vec3 c = mix(sky, bld, in_city);
+	return r.y < 0.0 ? mix(bld, ground, smoothstep(0.0, -0.15, r.y)) : c;
 }
 
 void fragment() {
@@ -81,6 +144,8 @@ void fragment() {
 	vec3 albedo = base;
 	vec3 emit = vec3(0.0);
 	float detail = 1.0 - smoothstep(detail_fade_start, detail_fade_end, v_dist);
+	vec3 bend_n = vec3(0.0);  // world-space relief normal (reveals, sills), when relief > 0
+	float relief = 0.0;
 
 	if (v_kind == KIND_ROOF) {
 		// Roof membrane panels, softly varied (no per-pixel noise: it shimmers).
@@ -127,7 +192,8 @@ void fragment() {
 		float frame;
 		vec2 wpos;
 		vec2 whalf;
-		window_layout(style, uv, glass, cell, frame, wpos, whalf);
+		vec2 csize;
+		window_layout(style, uv, glass, cell, frame, wpos, whalf, csize);
 		// Ground floor: tall shopfront glazing + fascia band.
 		bool shop = uv.y < 4.6 && style != 3.0;
 		if (shop) {
@@ -164,20 +230,24 @@ void fragment() {
 		}
 		vec3 wall = base * tex;
 
-		// Glass: sky reflection by view-reflected normal + interior + rare lit rooms.
+		// Glass: the world reflected (each pane a hair off true, so
+		// reflections break up pane by pane like real glazing) over the room
+		// behind it (interior mapping), blended by Fresnel.
 		vec3 view_w = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
-		vec3 r = reflect(-view_w, normalize(v_world_normal));
-		float fres = pow(1.0 - clamp(dot(view_w, normalize(v_world_normal)), 0.0, 1.0), 3.0);
-		vec3 refl = mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
+		vec3 n_w = normalize(v_world_normal);
+		vec3 tang = normalize(cross(vec3(0.0, 1.0, 0.0), n_w));
+		bool curtain = style == 2.0 || style == 6.0 || v_kind == KIND_GLASS;
+		vec2 jt = vec2(hash12(cell * 1.7 + seed * 5.0), hash12(cell * 2.3 + seed * 3.0)) - 0.5;
+		vec3 n_g = normalize(n_w + (tang * jt.x + vec3(0.0, 1.0, 0.0) * jt.y) * (curtain ? 0.05 : 0.02) * detail);
+		vec3 r = reflect(-view_w, n_g);
+		float fres = pow(1.0 - clamp(dot(view_w, n_w), 0.0, 1.0), 3.0);
+		vec3 refl = detail > 0.0 ? world_reflection(r) : mix(sky_horizon, sky_top, clamp(r.y * 1.6, 0.0, 1.0));
 		float rnd = hash12(cell + seed * 113.0);
 		vec3 tint = style == 6.0 ? vec3(0.12, 0.16, 0.2) : (style == 2.0 ? vec3(0.2, 0.32, 0.38) : vec3(0.1, 0.11, 0.12));
 		// Curtain-wall towers pick a glass colour per building (teal, bronze,
-		// green, blue) so the skyline isn't one sky-blue mass; reflections are
-		// seen through that tint like real coated glass.
+		// green, blue, champagne, silver) so the skyline isn't one blue mass;
+		// reflections are seen through that coating like real glass.
 		float pick = fract(seed * 7.31);
-		// (Blue-sky reflections made every tower read the same blue: the
-		// coating colour now dominates, with warm champagne/bronze/silver
-		// towers among the teal, green and blue.)
 		if (style == 2.0) {
 			tint = pick < 0.18 ? vec3(0.16, 0.34, 0.36) : (pick < 0.36 ? vec3(0.42, 0.28, 0.15)
 				: (pick < 0.5 ? vec3(0.17, 0.33, 0.24) : (pick < 0.64 ? vec3(0.18, 0.27, 0.42)
@@ -185,28 +255,42 @@ void fragment() {
 		} else if (style == 6.0) {
 			tint = pick < 0.4 ? vec3(0.1, 0.14, 0.2) : (pick < 0.75 ? vec3(0.22, 0.15, 0.09) : vec3(0.13, 0.13, 0.12));
 		}
-		if (style == 2.0 || style == 6.0) {
+		if (curtain) {
 			float lum = dot(refl, vec3(0.3, 0.55, 0.15));
-			refl = mix(refl, clamp(tint * 2.4, 0.0, 1.3) * lum * 1.6, 0.75);
+			refl = mix(refl, clamp(tint * 2.4, 0.0, 1.3) * lum * 1.6, 0.6);
 		}
-		vec3 interior = tint * (0.75 + 0.35 * rnd);
 		// Blinds half-drawn in some windows (offices and flats, not shops).
 		float blind_h = step(0.86, hash12(cell * 2.7 + seed * 17.0)) * (shop ? 0.0 : 1.0);
 		float in_blind = blind_h * step(1.0 - hash12(cell + 5.1) * 0.6, fract(uv.y / (style == 1.0 ? 3.0 : 3.6)) + 0.3);
 		// Lit rooms: a few by day; after dusk they come on one by one (each
 		// window has its own threshold) up to a per-building share, in warm
 		// tungsten, cool office white or the odd blue TV glow.
-		float lit_share = mix(lit_fraction, 0.08 + 0.2 * fract(seed * 3.7), night);
+		// (Offices keep plenty of lights on by day too; homes hardly any.)
+		bool office = style == 0.0 || style == 2.0 || style == 4.0 || style == 6.0 || style == 7.0;
+		float day_share = office ? 0.25 + 0.2 * fract(seed * 5.3) : lit_fraction;
+		float lit_share = mix(day_share, 0.08 + 0.2 * fract(seed * 3.7), night);
 		float lit = step(1.0 - lit_share, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
 		float lk = hash12(cell * 3.17 + seed * 11.0);
 		vec3 lamp_col = lk < 0.55 ? interior_warm : (lk < 0.88 ? vec3(0.86, 0.9, 1.0) : vec3(0.5, 0.66, 1.0));
-		lamp_col = mix(interior_warm, lamp_col, night);
+		lamp_col = mix(office ? vec3(0.95, 0.95, 0.9) : interior_warm, lamp_col, night);
 		float lit_k = mix(lit_strength, 1.3, night) * (0.45 + 0.75 * hash12(cell * 0.71 + seed));
-		vec3 gcol = mix(interior, refl, 0.25 + 0.6 * fres);
+		vec3 interior = tint * (0.75 + 0.35 * rnd);
+		if (detail > 0.0) {
+			vec3 d_in = -view_w;
+			vec3 dl = vec3(dot(d_in, tang), d_in.y, dot(d_in, -n_w));
+			vec2 o = shop ? vec2(fract(uv.x / 6.0) * 6.0 - 3.0, uv.y - 2.3) : wpos;
+			vec3 rs = shop ? vec3(6.0, 4.6, 7.0) : vec3(csize.x * (curtain ? 2.0 : 1.0), csize.y, curtain ? 6.0 : 4.2);
+			float daylight = dot(sky_horizon, vec3(0.3, 0.55, 0.15)) * 0.5 * (1.0 - 0.85 * night);
+			vec3 rm = room(o, dl, rs, rnd, lit, lamp_col * mix(0.7, lit_k, night), daylight);
+			// Seen through the glass's own tint (strongly for coated curtain walls).
+			rm *= curtain ? (tint * 2.2 + 0.15) : vec3(0.85, 0.88, 0.9);
+			interior = mix(interior, rm, detail);
+		}
+		vec3 gcol = mix(interior, refl, curtain ? 0.45 + 0.45 * fres : 0.12 + 0.6 * fres);
 		// Blinds: a paler band in the glass's own colour, not a beige patch.
 		gcol = mix(gcol, mix(gcol, vec3(0.78, 0.76, 0.72), 0.45) * (0.85 + 0.15 * rnd), in_blind * 0.8 * detail);
-		gcol += lamp_col * lit * lit_k * 0.35 * (1.0 - night * 0.6);
-		emit = lamp_col * lit * lit_k * glass * 0.5;
+		gcol += lamp_col * lit * lit_k * 0.12 * (1.0 - detail * 0.7);
+		emit = (detail > 0.0 ? interior * 0.9 * lit : lamp_col * lit * lit_k * 0.5) * glass;
 		// Window reveal: slightly darker frame around each opening.
 		vec3 framed = mix(wall, wall * 0.72, (1.0 - glass) * frame * detail);
 		bool punched = !shop && style != 2.0 && style != 6.0 && v_kind != KIND_GLASS;
@@ -224,8 +308,6 @@ void fragment() {
 		// Recessed glazing: the reveal casts a sun shadow across the top and
 		// the sun-side edge of the glass (a deep punched window on masonry,
 		// a shallow one on curtain walls), and the frame inside darkens.
-		vec3 n_w = normalize(v_world_normal);
-		vec3 tang = normalize(cross(vec3(0.0, 1.0, 0.0), n_w));
 		float lit_face = dot(n_w, sun_dir);
 		float depth = punched ? 0.26 : 0.07;
 		float reveal = 0.0;
@@ -244,6 +326,30 @@ void fragment() {
 		albedo = mix(framed, gcol, glass);
 		rough = mix(0.88, 0.08, glass);
 		metal = mix(0.0, 0.2, glass);
+		// Real relief for the light: the inner 15 cm round a punched window is
+		// its reveal (wall facing into the opening), the sill below tilts up
+		// to catch the sun, the lintel tilts down – so as the sun moves round
+		// (and the moon at night) each side lights or falls into shade.
+		if (punched && detail > 0.0) {
+			float dx = whalf.x - abs(wpos.x);
+			float dy = whalf.y - abs(wpos.y);
+			float band = 0.15;
+			vec3 up = vec3(0.0, 1.0, 0.0);
+			if (glass > 0.5 && min(dx, dy) < band) {
+				vec3 into = dx < dy ? -sign(wpos.x) * tang : -sign(wpos.y) * up;
+				bend_n = normalize(into * 0.92 + n_w * 0.4);
+				albedo = mix(albedo, wall * 0.9, 0.85 * detail);
+				rough = 0.85;
+				metal = 0.0;
+				relief = detail;
+			} else if (abs(wpos.x) < whalf.x + 0.12 && wpos.y < -whalf.y && wpos.y > -whalf.y - 0.16) {
+				bend_n = normalize(n_w * 0.55 + up * 0.85);
+				relief = detail;
+			} else if (abs(wpos.x) < whalf.x + 0.12 && wpos.y > whalf.y && wpos.y < whalf.y + 0.12) {
+				bend_n = normalize(n_w * 0.8 - up * 0.6);
+				relief = detail;
+			}
+		}
 		if (shop) {
 			// Shopfront: stall riser, central door, mullions, lit interior and
 			// a signage fascia coloured per shop.
@@ -287,10 +393,14 @@ void fragment() {
 		// Contact shading: walls darken toward the street (light blocked by
 		// the canyon), so buildings sit on the ground instead of floating;
 		// and a long gradient up the facade (tops catch more sky).
-		albedo *= mix(vec3(0.5, 0.54, 0.62), vec3(1.0), smoothstep(0.0, 12.0, uv.y));
+		albedo *= mix(vec3(0.56, 0.57, 0.6), vec3(1.0), smoothstep(0.0, 12.0, uv.y));
 		albedo *= mix(0.86, 1.04, smoothstep(6.0, 80.0, uv.y));
 	}
 	// Rain: surfaces darken and gloss (glass is already glossy).
+	if (relief > 0.0) {
+		vec3 nv = normalize((VIEW_MATRIX * vec4(bend_n, 0.0)).xyz);
+		NORMAL = normalize(mix(NORMAL, nv, relief));
+	}
 	ALBEDO = albedo * (1.0 - 0.16 * wetness);
 	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);
 	METALLIC = metal;
