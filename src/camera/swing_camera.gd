@@ -186,7 +186,7 @@ func _process(dt: float) -> void:
 		else:
 			# Flying out of a release: look up toward where the next web goes.
 			want_pitch += deg_to_rad(9.0) * clampf(v.y / 18.0, 0.0, 1.0)
-	if target.global_position.y < 15.0 and not target.s.attached:
+	if target.height_above_ground() < 15.0 and not target.s.attached:
 		# Down at street level: look up at the facades you can swing from.
 		want_pitch = deg_to_rad(6.0)
 	pitch = move_toward(pitch, want_pitch, deg_to_rad(25.0) * dt)

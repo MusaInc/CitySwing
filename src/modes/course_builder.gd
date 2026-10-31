@@ -171,7 +171,7 @@ static func start_roof(layout: CityLayout, first: Vector3, second: Vector3) -> V
 		var d := c.distance_to(want)
 		if d > 90.0:
 			continue
-		var s: float = -absf(t[5] - 70.0) * 0.7 - d
+		var s: float = -absf(t[5] - BuildingMesher.base_of(b) - 70.0) * 0.7 - d
 		if s > best_s:
 			best_s = s
 			best = Vector3(c.x, t[5] + 2.0, c.y)
@@ -195,9 +195,11 @@ static func gates_from_path(layout: CityLayout, path: Array) -> Array:
 			var mid := (a + b) * 0.5
 			var dir := seg.normalized()
 			# Keep gates in the air even where the flight dipped to the street.
-			var gp := Vector3(mid.x, maxf(mid.y, 18.0), mid.z)
+			var g := layout.ground_y(mid.x, mid.z)
+			var above := mid.y - g
+			var gp := Vector3(mid.x, g + maxf(above, 18.0), mid.z)
 			var hw := street_half_width(layout, gp, dir)
-			gates.append({"pos": gp, "dir": dir, "half_w": hw, "half_h": 16.0 + maxf(0.0, 18.0 - mid.y)})
+			gates.append({"pos": gp, "dir": dir, "half_w": hw, "half_h": 16.0 + maxf(0.0, 18.0 - above)})
 	return gates
 
 

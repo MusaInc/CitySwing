@@ -63,6 +63,8 @@ func _ready() -> void:
 	player = Player.new()
 	player.name = "Player"
 	add_child(player)
+	if world is CityWorld:
+		player.ground_fn = (world as CityWorld).layout.ground_y
 	player.global_position = world.spawn_point()
 	player.last_safe_position = player.global_position
 	if world.has_method("build_all_near"):

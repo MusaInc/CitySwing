@@ -1,0 +1,184 @@
+class_name CityTerrain
+extends RefCounted
+## The city's ground: designed geography, not noise.
+##
+##   * The river, the waterfront and the docks stay at quay level (0 m): the
+##     river wall, the basins, the ship and the bridge landing need it.
+##   * The land rises east from the waterfront towards the Heights, a ridge
+##     in the north-east crowned by the cathedral (~+30 m).
+##   * The business district stands on a raised plateau (~+13 m).
+##   * A broad valley runs east from the docks along the railway (z ≈ 369):
+##     the elevated line crosses it on its viaduct over the valley floor.
+##
+## Streets: the design field is sampled once per junction (street-centre
+## crossing). Between junctions a street runs at a constant grade, like a real
+## street; the road surface is the bilinear interpolation of the junction
+## heights (so it is linear along every street line, gently crowned along
+## street centres). Beyond the street grid the surface carries on level from
+## the edge (clamped), which keeps the outskirts and the far shore continuous.
+##
+## Blocks: each block is a level terrace at its highest corner (+ kerb), with
+## retaining walls down to the sloping streets – buildings stand level on it.
+
+const KERB := 0.15
+## Design elevations (m).
+const RISE := 20.0          # waterfront → east
+const HEIGHTS := 28.0       # the north-east ridge on top of that
+const PLATEAU := 22.0       # business district plateau
+const RAIL_Z := 369.0       # valley axis (the elevated railway)
+
+var xs := PackedFloat32Array()   # junction lines (x street centres), ascending
+var zs := PackedFloat32Array()   # (z street centres)
+var h := PackedFloat32Array()    # junction heights, index i * zs.size() + j
+## Road decks carrying a north-south street over lower ground:
+## [{"x": centre, "half": half width, "za": z, "zb": z, "ya": y, "yb": y}]
+## (traffic on that street rides the deck; cross streets pass under it).
+var decks: Array = []
+
+
+func build(x_streets: Array, z_streets: Array) -> void:
+	xs.clear()
+	zs.clear()
+	for s in x_streets:
+		xs.append(float(s[0]))
+	for s in z_streets:
+		zs.append(float(s[0]))
+	h.resize(xs.size() * zs.size())
+	for i in xs.size():
+		for j in zs.size():
+			h[i * zs.size() + j] = snappedf(design(xs[i], zs[j]), 0.05)
+
+
+## The designed landform, sampled at junctions only (see build()).
+static func design(x: float, z: float) -> float:
+	var y := RISE * smoothstep(210.0, 860.0, x)
+	# The Heights: the cathedral's ridge, north-east.
+	var dx := (x - 900.0) / 260.0
+	var dz := (z + 390.0) / 300.0
+	y += HEIGHTS * exp(-(dx * dx + dz * dz))
+	# Business district plateau: lifted level, eased out at its rim.
+	var c := 1.0 - smoothstep(170.0, 360.0, Vector2(x, z).distance_to(CityLayout.CBD_CENTER))
+	y = lerpf(y, PLATEAU, c)
+	# Rail valley: the docks' low ground running east under the viaduct.
+	y *= smoothstep(95.0, 380.0, absf(z - RAIL_Z))
+	# Docks and waterfront: quay level.
+	var dock := (1.0 - smoothstep(470.0, 600.0, x)) * smoothstep(180.0, 265.0, z)
+	y *= 1.0 - dock
+	return maxf(y, 0.0)
+
+
+func _node(i: int, j: int) -> float:
+	return h[i * zs.size() + j]
+
+
+## Index of the grid interval containing v (clamped), and the 0..1 position in it.
+static func _cell(lines: PackedFloat32Array, v: float) -> Vector2:
+	var n := lines.size()
+	if v <= lines[0]:
+		return Vector2(0, 0.0)
+	if v >= lines[n - 1]:
+		return Vector2(n - 2, 1.0)
+	var lo := 0
+	var hi := n - 1
+	while hi - lo > 1:
+		var mid := (lo + hi) >> 1
+		if lines[mid] <= v:
+			lo = mid
+		else:
+			hi = mid
+	return Vector2(lo, (v - lines[lo]) / (lines[lo + 1] - lines[lo]))
+
+
+## Height of the road surface (and of the ground everywhere a block isn't).
+func road_y(x: float, z: float) -> float:
+	if h.is_empty():
+		return 0.0
+	var cx := _cell(xs, x)
+	var cz := _cell(zs, z)
+	var i := int(cx.x)
+	var j := int(cz.x)
+	var a := lerpf(_node(i, j), _node(i + 1, j), cx.y)
+	var b := lerpf(_node(i, j + 1), _node(i + 1, j + 1), cx.y)
+	return lerpf(a, b, cz.y)
+
+
+## Terrace level of a block (its pavement top): the highest street corner plus
+## the kerb, so every street round it is at or below the pavement.
+func block_level(r: Rect2) -> float:
+	var m := -INF
+	for p in [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]:
+		m = maxf(m, road_y(p.x, p.y))
+	# Bilinear surfaces peak at a corner or along an edge's ends; check the
+	# edge midpoints too (they can't exceed the corners, but be safe).
+	for p in [Vector2(r.get_center().x, r.position.y), Vector2(r.get_center().x, r.end.y),
+			Vector2(r.position.x, r.get_center().y), Vector2(r.end.x, r.get_center().y)]:
+		m = maxf(m, road_y(p.x, p.y))
+	return m + KERB
+
+
+## Sample positions along [a, b] that include every junction line in between
+## and are at most `step` apart, so a mesh through them follows road_y().
+func splits(a: float, b: float, lines: PackedFloat32Array, step: float) -> PackedFloat32Array:
+	var cuts := PackedFloat32Array([a])
+	for l in lines:
+		if l > a + 0.01 and l < b - 0.01:
+			cuts.append(l)
+	cuts.append(b)
+	var out := PackedFloat32Array()
+	for k in cuts.size() - 1:
+		var u0 := cuts[k]
+		var u1 := cuts[k + 1]
+		var n := maxi(1, ceili((u1 - u0) / step))
+		for m in n:
+			out.append(lerpf(u0, u1, float(m) / n))
+	out.append(b)
+	return out
+
+
+## Deck height where (x, z) is on a road deck, else NAN.
+func deck_y(x: float, z: float) -> float:
+	for d in decks:
+		if absf(x - float(d["x"])) <= float(d["half"]) and z >= float(d["za"]) and z <= float(d["zb"]):
+			return lerpf(d["ya"], d["yb"], (z - float(d["za"])) / (float(d["zb"]) - float(d["za"])))
+	return NAN
+
+
+## Bakes the road surface into an RG texture (texel centres on a `cell` m
+## grid) for the traffic / pedestrian shaders: R = what north-south traffic
+## drives on (decks included), G = the ground (east-west traffic, walkers).
+## Sampled with clamping, it continues level beyond the grid like road_y().
+func bake(rect: Rect2, cell: float) -> ImageTexture:
+	var w := int(ceil(rect.size.x / cell)) + 1
+	var hh := int(ceil(rect.size.y / cell)) + 1
+	# Grid cell and fraction per texel column / row, found once.
+	var cxs: Array[Vector2] = []
+	for px in w:
+		cxs.append(_cell(xs, rect.position.x + px * cell))
+	var data := PackedFloat32Array()
+	data.resize(w * hh * 2)
+	var nz := zs.size()
+	for pz in hh:
+		var z := rect.position.y + pz * cell
+		var cz := _cell(zs, z)
+		var j := int(cz.x)
+		for px in w:
+			var cx: Vector2 = cxs[px]
+			var i := int(cx.x)
+			var a := lerpf(h[i * nz + j], h[(i + 1) * nz + j], cx.y)
+			var b := lerpf(h[i * nz + j + 1], h[(i + 1) * nz + j + 1], cx.y)
+			var g := lerpf(a, b, cz.y)
+			var k := (pz * w + px) * 2
+			data[k] = g
+			data[k + 1] = g
+	for d in decks:
+		# North-south traffic drives on the deck (R).
+		for pz in hh:
+			var z := rect.position.y + pz * cell
+			if z < float(d["za"]) or z > float(d["zb"]):
+				continue
+			var y := lerpf(d["ya"], d["yb"], (z - float(d["za"])) / (float(d["zb"]) - float(d["za"])))
+			for px in w:
+				if absf(rect.position.x + px * cell - float(d["x"])) <= float(d["half"]):
+					data[(pz * w + px) * 2] = y
+	var img := Image.create_from_data(w, hh, false, Image.FORMAT_RGF, data.to_byte_array())
+	return ImageTexture.create_from_image(img)

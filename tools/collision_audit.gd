@@ -133,7 +133,7 @@ func _probe_walls(space: PhysicsDirectSpaceState3D, x0: float, x1: float, z0: fl
 			var z := maxf(z0, CityLayout.MIN_Z)
 			while z < minf(z1, CityLayout.MAX_Z):
 				for dir in [1.0, -1.0]:
-					var a := Vector3(cx, h, z)
+					var a := Vector3(cx, h + world.layout.terrain.road_y(cx, z), z)
 					_wall_pair(space, a, a + Vector3(dir * 60.0, 0, 0))
 				z += step
 		for s in world.layout.z_streets:
@@ -141,7 +141,7 @@ func _probe_walls(space: PhysicsDirectSpaceState3D, x0: float, x1: float, z0: fl
 			var x := maxf(x0, CityLayout.RIVER_EDGE)
 			while x < minf(x1, CityLayout.MAX_X):
 				for dir in [1.0, -1.0]:
-					var a := Vector3(x, h, cz)
+					var a := Vector3(x, h + world.layout.terrain.road_y(x, cz), cz)
 					_wall_pair(space, a, a + Vector3(0, 0, dir * 60.0))
 				x += step
 

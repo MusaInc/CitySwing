@@ -11,6 +11,9 @@ shader_type spatial;
 render_mode cull_back, diffuse_burley;
 
 global uniform vec3 player_pos;
+// Pavements follow the road surface (+ kerb, in the instance origin).
+global uniform sampler2D ground_height : filter_linear, repeat_disable;
+global uniform vec4 ground_rect;
 uniform vec3 tint : source_color = vec3(1.0);
 uniform bool use_instance_color = false;
 uniform int part = 0;  // 0 other, 1 skin, 2 trousers, 3 hair
@@ -46,6 +49,8 @@ void vertex() {
 
 	// Reaction to the hero: how close (ground level only), which side, where.
 	vec3 wp = (MODEL_MATRIX * vec4(0.0, 0.0, -d, 1.0)).xyz;
+	float gy = texture(ground_height, (wp.xz - ground_rect.xy) / ground_rect.zw).g;
+	wp.y += gy;
 	vec3 rel = (inverse(MODEL_MATRIX) * vec4(player_pos, 1.0)).xyz - vec3(0.0, 0.0, -d);
 	float k = (1.0 - smoothstep(2.0, 7.0, length((player_pos - wp).xz)))
 		* (1.0 - smoothstep(2.5, 6.0, abs(player_pos.y - wp.y)));
@@ -76,6 +81,7 @@ void vertex() {
 	float s = smoothstep(0.0, 1.5, d) * smoothstep(len, len - 1.5, d);
 	VERTEX *= s;
 	VERTEX.z -= d;
+	VERTEX.y += gy / length(MODEL_MATRIX[1].xyz);  // (instances are scaled)
 }
 
 void fragment() {

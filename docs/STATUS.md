@@ -1,4 +1,26 @@
-# Status: 2026-10-31 (art direction: lighting, architecture, hero, HUD)
+# Status: 2026-10-31 (terrain: a city with geography)
+
+## Terrain overhaul (latest)
+
+**Why it was flat** (audit): every layer assumed y = 0 – `add_ground` drew streets as one quad at 0 and blocks as slabs at 0.15; street collision was flat boxes (−2..0) and pavement boxes; every building tier, prop, crane and set piece was generated from 0; the GPU traffic/pedestrian shaders slid along flat lanes; gameplay used absolute heights for "street level" (camera, audio, title pilot, course gates, tokens).
+
+**Geography** (`src/world/city_terrain.gd`, designed, not noise): river, waterfront and docks at quay level 0 (river wall, basins, ship, bridge landing unchanged); land rising east from the waterfront; the CBD on a raised plateau (+22 m); the Heights, a north-east ridge round the cathedral (+47 m); a rail valley running east from the docks along the elevated railway (0 m). The landform is sampled once per junction; streets run at a constant grade between junctions (bilinear road surface, ≤ 15% on the Heights' west flank, 7–11% plateau ↔ valley); beyond the grid it continues level (outskirts, far shore).
+
+**How things stand on it**
+- Pavements follow their street (constant 15 cm kerb). Each building stands level on its own lot at the lot's highest street corner, with a dressed-stone base course down the slope (`b["base"]`, `b["foot"]`, `BuildingMesher.base_course`). Facade bands (shopfronts, ledges, plinth, awnings, fire escapes, portals) are measured from `base`.
+- Set-piece blocks and dock basins sit on level terraces with retaining walls (`CityLayout.terraces`). Construction sites lift rigidly with their crane.
+- Layout generation is unchanged at street level 0; `CityLayout._lift` / `_lift_on_slope` lift what each block added (buildings, props, structures via `y0`, set-piece collision, anchors, landmark models). Roof props rise with the building they stand on.
+- `CityLayout.ground_y(x, z)` = what you'd stand on; `Player.height_above_ground()` replaces absolute heights in the camera, audio, title pilot and course gates; tokens and spawns measure from the ground.
+
+**Ground and collision**: streets and pavements are tessellated through every junction line (16 m inside the grid; exact and coarse outside it). Ground collision is a trimesh per chunk built from exactly the triangles drawn (plus outskirts). Collision audit: no holes, no float/sink, 1 wall flag (a stadium edge).
+
+**Traffic and pedestrians** ride the terrain on the GPU: global shader uniforms `ground_height` (RG texture, 2 m texels: R = north-south traffic incl. decks, G = ground) and `ground_rect`; cars pitch with the grade. Parked cars and furniture are placed on the ground by the CPU.
+
+**Multi-level**: the Valley Causeway carries the avenue at x ≈ 715 across the rail valley on a road deck (street level at both rim junctions, ~6 m over the valley floor), with traffic on the deck, the valley streets passing under it and the elevated railway (14 m) over it – a three-level crossing. Parapets are web anchors.
+
+**Measured (VPS, Xvfb)**: like-for-like views (cameras at the same height above ground) +7–20% primitives vs the flat city (aerial 185k → 222k, street 417k → 477k); startup layout+collision ≈ 0.84 s. All 8 courses re-recorded; 95/95 tests. Not measured on an iPhone.
+
+**Honest limits**: the relief (0–47 m) reads clearly at street level (streets climbing to the Heights, cresting off the plateau, the causeway underpass) but only weakly from rooftops and the air, where 50–300 m towers dominate. Before/after pairs: `screenshots/work/ba/` (git-ignored).
 
 ## Polish pass 2 (2026-10-31)
 

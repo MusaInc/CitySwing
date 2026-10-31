@@ -51,10 +51,13 @@ static func generate(layout: CityLayout) -> Array[Vector3]:
 			if near.is_empty():
 				continue
 			var cb: Vector3 = near[rng.randi() % near.size()]
-			var h := minf(ca.y, cb.y) * rng.randf_range(0.45, 0.7)
+			var mx := (ca.x + cb.x) * 0.5
+			var mz := (ca.z + cb.z) * 0.5
+			var g := layout.ground_y(mx, mz)
+			var h := (minf(ca.y, cb.y) - g) * rng.randf_range(0.45, 0.7)
 			if h < 14.0:
 				continue
-			p = Vector3((ca.x + cb.x) * 0.5, h, (ca.z + cb.z) * 0.5)
+			p = Vector3(mx, g + h, mz)
 		var ok := not _blocked(grid, p)
 		for q in out:
 			if not ok:

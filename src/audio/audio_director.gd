@@ -140,18 +140,19 @@ func _process(dt: float) -> void:
 	var amb: AudioStreamPlayer = _loops.get("city_ambience")
 	if amb:
 		# The street hum fades as you climb above the rooftops.
-		var height := clampf(player.global_position.y / 120.0, 0.0, 1.0)
+		var height := clampf(player.height_above_ground() / 120.0, 0.0, 1.0)
 		amb.volume_db = lerpf(amb.volume_db, linear_to_db(0.55 - 0.35 * height), k)
 	var traffic: AudioStreamPlayer = _loops.get("traffic_loop")
 	if traffic:
 		# Street-level traffic: loud on the pavement, gone above the rooftops.
-		var low := 1.0 - clampf(player.global_position.y / 60.0, 0.0, 1.0)
+		var low := 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
 		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4, 0.002)), k)
 	_horn_in -= dt
 	if _horn_in <= 0.0:
 		_horn_in = randf_range(8.0, 24.0)
-		if player.global_position.y < 50.0:
-			play("horn", linear_to_db(0.12 + 0.18 * (1.0 - player.global_position.y / 50.0)), randf_range(0.9, 1.12))
+		var above := player.height_above_ground()
+		if above < 50.0:
+			play("horn", linear_to_db(0.12 + 0.18 * (1.0 - above / 50.0)), randf_range(0.9, 1.12))
 	_footsteps(dt)
 	var music: AudioStreamPlayer = _loops.get("music_loop")
 	if music:
@@ -175,7 +176,7 @@ func _footsteps(dt: float) -> void:
 		return
 	_step_dist -= stride
 	var pos := player.global_position
-	var surf := "gravel" if pos.y > 3.0 else "concrete"
+	var surf := "gravel" if player.height_above_ground() > 3.0 else "concrete"
 	var world := get_parent().get_node_or_null("World") if get_parent() else null
 	if surf == "concrete" and world and world.get("layout") and world.layout._in_park(pos):
 		surf = "grass"

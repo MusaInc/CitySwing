@@ -122,6 +122,8 @@ var _launch_pending := false
 var _armed_touch := -1
 var _prev_pos := Vector3.ZERO
 var _bump_cool := 0.0
+## Ground height at (x, z) (the city sets CityLayout.ground_y); flat 0 if unset.
+var ground_fn: Callable
 var stagger_t := 0.0  # > 0 while staggering back off a wall (no stick)
 var _stagger_cool := 0.0
 
@@ -258,6 +260,13 @@ func _read_input(dt: float) -> Dictionary:
 		"jump": Input.is_action_just_pressed("jump"),
 		"respawn": Input.is_action_just_pressed("respawn"),
 	}
+
+
+## Height above the street / pavement below (the terrain isn't flat).
+func height_above_ground() -> float:
+	if ground_fn.is_valid():
+		return global_position.y - float(ground_fn.call(global_position.x, global_position.z))
+	return global_position.y
 
 
 func _physics_process(dt: float) -> void:

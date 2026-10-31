@@ -282,7 +282,9 @@ func test_swing_launches_cleanly_from_the_street_and_rooftops(t) -> void:
 		if st[1] > 20.0 and st[0] > 300.0 and st[0] < 1000.0:
 			avenues.append(st[0])
 	for k in 5:
-		spots.append([Vector3(avenues[k % avenues.size()], 1.2, -400.0 + k * 130.0), Vector3(0, 0, -1), true])
+		var sx: float = avenues[k % avenues.size()]
+		var sz := -400.0 + k * 130.0
+		spots.append([Vector3(sx, world.layout.ground_y(sx, sz) + 1.2, sz), Vector3(0, 0, -1), true])
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 6
 	for k in 3:

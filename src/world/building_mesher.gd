@@ -249,6 +249,13 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 	if roof == ROOF_COLORS[4] and tiers_top(b) > 60.0:
 		roof = ROOF_COLORS[0]  # green roofs on low buildings only
 	var tiers: Array = b["tiers"]
+	var base := base_of(b)
+	var bc := base_course(b)
+	if bc.has_volume():
+		# On a slope the lot is level at its uphill corner; down the hill the
+		# building stands on a dressed-stone base course to the street.
+		var stone := Color(0.56, 0.53, 0.48) if _glassy(b) else trim.darkened(0.18)
+		solid(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_WALL)
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var x0: float = t[0]
@@ -257,7 +264,7 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 		var z1: float = t[3]
 		var y0: float = t[4]
 		var y1: float = t[5]
-		walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed)
+		walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed, y0 - base)
 		if b["kind"] == "bridge":
 			bottom(x0, z0, x1, z1, y0, trim, KIND_TRIM, style, seed)
 		if detailed:
@@ -269,15 +276,16 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 			if b["kind"] != "bridge":
 				_parapet(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, trim)
 				if not glassy:
-					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed)
+					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed, base)
 			# Ground-floor plinth band on the base tier.
 			if _has_plinth(b, i):
 				var po := PLINTH_OUT
-				walls(x0 - po, z0 - po, x1 + po, z1 + po, 0.0, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x0 - po, z0 - po, x1 + po, z0, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x0 - po, z1, x1 + po, z1 + po, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x0 - po, z0, x0, z1, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
-				top(x1, z0, x1 + po, z1, PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+				var ph := base + PLINTH_H
+				walls(x0 - po, z0 - po, x1 + po, z1 + po, base, ph, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x0 - po, z0 - po, x1 + po, z0, ph, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x0 - po, z1, x1 + po, z1 + po, ph, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x0 - po, z0, x0, z1, ph, col.darkened(0.3), KIND_TRIM, style, seed)
+				top(x1, z0, x1 + po, z1, ph, col.darkened(0.3), KIND_TRIM, style, seed)
 				for aw in awning_runs(b):
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
@@ -350,6 +358,30 @@ static func cornice_h(b: Dictionary) -> float:
 	return 0.6 if _glassy(b) else 1.0
 
 
+## Where a building stands: its block's terrace (0 on flat ground). Tiers,
+## roofs and features are absolute; facade bands (shopfronts, ledges, plinth,
+## awnings) are measured from here.
+static func base_of(b: Dictionary) -> float:
+	return float(b.get("base", 0.0))
+
+
+## The stone base a building stands on down a slope: from its lowest street
+## corner (b["foot"]) up to its lot level, a little proud of the walls.
+## Empty when the lot is level.
+static func base_course(b: Dictionary) -> AABB:
+	var foot: float = b.get("foot", base_of(b))
+	var base := base_of(b)
+	if base - foot < 0.05 or b["kind"] not in ["normal", "landmark", "frame"]:
+		return AABB()
+	var t: Array = b["tiers"][0]
+	var o := PLINTH_OUT + 0.05
+	return _aabb(t[0] - o, t[1] - o, t[2] + o, t[3] + o, foot - 0.3, base + CityTerrain.KERB)
+
+
+static func _on_ground(b: Dictionary, t: Array) -> bool:
+	return absf(float(t[4]) - base_of(b)) < 0.01
+
+
 static func _glassy(b: Dictionary) -> bool:
 	return int(b["style"]) == CityLayout.Style.GLASS or int(b["style"]) == CityLayout.Style.DARK_GLASS
 
@@ -359,7 +391,7 @@ static func _parapeted(b: Dictionary) -> bool:
 
 
 static func _has_plinth(b: Dictionary, tier: int) -> bool:
-	return tier == 0 and float(b["tiers"][0][4]) == 0.0 and not _glassy(b) and b["kind"] != "bridge"
+	return tier == 0 and _on_ground(b, b["tiers"][0]) and not _glassy(b) and b["kind"] != "bridge"
 
 
 ## Height of the walkable roof of the top tier as drawn in the detailed LOD
@@ -390,10 +422,13 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 				_sign_boxes(b, out)
 			return out
 		"frame":
+			if base_course(b).has_volume():
+				out.append(base_course(b))
 			for t in tiers:
 				out.append(_aabb(t[0], t[1], t[2], t[3], t[4], t[5]))
 			var t0: Array = tiers[0]
 			var ytop: float = tiers[-1][5]
+			var base: float = b.get("base", 0.0)
 			var nx := maxi(2, int((t0[2] - t0[0]) / 8.0) + 1)
 			var nz := maxi(2, int((t0[3] - t0[1]) / 8.0) + 1)
 			for i in nx:
@@ -402,12 +437,15 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 						continue
 					var x: float = lerpf(t0[0] + 0.5, t0[2] - 0.5, i / float(nx - 1))
 					var z: float = lerpf(t0[1] + 0.5, t0[3] - 0.5, j / float(nz - 1))
-					out.append(_aabb(x - 0.3, z - 0.3, x + 0.3, z + 0.3, 0.0, ytop + 3.0))
-			_ring(out, t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, 0.0, 2.6, 0.12)
+					out.append(_aabb(x - 0.3, z - 0.3, x + 0.3, z + 0.3, base, ytop + 3.0))
+			_ring(out, t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, base, base + 2.6, 0.12)
 			_ring(out, t0[0] - 0.2, t0[1] - 0.2, t0[2] + 0.2, t0[3] + 0.2, ytop + 0.1, ytop + 1.2, 0.12)
 			return out
 	var o := cornice_out(b)
 	var ch := cornice_h(b)
+	var bc := base_course(b)
+	if bc.has_volume():
+		out.append(bc)
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var y1: float = t[5]
@@ -416,13 +454,15 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		if kind != "bridge":
 			_ring(out, t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 + ch * 0.5, y1 + ch * 0.5 + PARAPET, PARAPET_T)
 		if _has_plinth(b, i):
-			out.append(_aabb(t[0] - PLINTH_OUT, t[1] - PLINTH_OUT, t[2] + PLINTH_OUT, t[3] + PLINTH_OUT, 0.0, PLINTH_H))
+			out.append(_aabb(t[0] - PLINTH_OUT, t[1] - PLINTH_OUT, t[2] + PLINTH_OUT, t[3] + PLINTH_OUT, base_of(b),
+				base_of(b) + PLINTH_H))
 	for aw in awning_runs(b):
 		var a: Vector3 = aw[0]
 		var e: Vector3 = aw[1]
 		var far: Vector3 = e + (aw[2] as Vector3)
-		var lo := Vector3(minf(a.x, far.x), AWNING_Y - 0.38, minf(a.z, far.z))
-		var hi := Vector3(maxf(a.x, far.x), AWNING_Y + 0.18, maxf(a.z, far.z))
+		var ay: float = a.y  # awning_runs gives absolute points
+		var lo := Vector3(minf(a.x, far.x), ay - 0.38, minf(a.z, far.z))
+		var hi := Vector3(maxf(a.x, far.x), ay + 0.18, maxf(a.z, far.z))
 		out.append(AABB(lo, hi - lo))
 	out.append_array(features(b)["col"])
 	return out
@@ -481,18 +521,19 @@ static func _features(b: Dictionary) -> Dictionary:
 	var col: Color = b["color"]
 	var trim := trim_color(b)
 	var single := (b["tiers"] as Array).size() == 1
-	var h0: float = t0[5]
+	var base := base_of(b)
+	var h0: float = float(t0[5]) - base  # storeys above the terrace
 	# Fire escapes: brick flats and warehouses, 2nd floor to the top floor.
-	if style in [CityLayout.Style.BRICK, CityLayout.Style.WAREHOUSE] and float(t0[4]) == 0.0 \
+	if style in [CityLayout.Style.BRICK, CityLayout.Style.WAREHOUSE] and _on_ground(b, t0) \
 			and h0 > 13.0 and h0 < 75.0 and rng.randf() < 0.7:
 		var n := 1 + int(rng.randf() < 0.35)
 		var iron: Color = IRON[rng.randi() % IRON.size()]
 		var first := rng.randi() % 4
 		for i in n:
 			var k := (first + i * 2) % 4
-			_fire_escape(out, _face(t0, k), style, h0, iron, rng)
+			_fire_escape(out, _face(t0, k), style, h0, iron, rng, base)
 	# Entrances: a stone portal on masonry, a steel canopy on modern/glass.
-	if float(t0[4]) == 0.0 and h0 > 24.0 and style != CityLayout.Style.WAREHOUSE:
+	if _on_ground(b, t0) and h0 > 24.0 and style != CityLayout.Style.WAREHOUSE:
 		var k := 0
 		var best := 0.0
 		for kk in 4:
@@ -501,14 +542,16 @@ static func _features(b: Dictionary) -> Dictionary:
 				best = L
 				k = kk
 		if best > 18.0:
-			_portal(out, _face(t0, k), style, col, trim, rng)
+			var part := {"draw": [], "beams": [], "col": []}
+			_portal(part, _face(t0, k), style, col, trim, rng)
+			_raise_into(out, part, base)
 	# Fins up the glass towers (a vertical rhythm the shader alone can't give).
 	if _glassy(b) and rng.randf() < 0.6:
 		var fin_col := trim.darkened(rng.randf_range(0.0, 0.5))
 		for t in b["tiers"]:
 			if float(t[5]) - float(t[4]) < 24.0:
 				continue
-			var y0: float = maxf(float(t[4]), 4.6)
+			var y0: float = maxf(float(t[4]), base + 4.6)
 			var y1: float = float(t[5]) - cornice_h(b) * 0.5
 			for k in 4:
 				var f := _face(t, k)
@@ -575,8 +618,22 @@ static func _features(b: Dictionary) -> Dictionary:
 	return out
 
 
+## Appends `part`'s pieces to `out`, raised by dy (pieces built from 0).
+static func _raise_into(out: Dictionary, part: Dictionary, dy: float) -> void:
+	var up := Vector3(0, dy, 0)
+	for d in part["draw"]:
+		var bx: AABB = d[0]
+		var nd: Array = d.duplicate()
+		nd[0] = AABB(bx.position + up, bx.size)
+		out["draw"].append(nd)
+	for bm in part["beams"]:
+		out["beams"].append([bm[0] + up, bm[1] + up, bm[2], bm[3], bm[4]])
+	for bx: AABB in part["col"]:
+		out["col"].append(AABB(bx.position + up, bx.size))
+
+
 static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: Color,
-		rng: RandomNumberGenerator) -> void:
+		rng: RandomNumberGenerator, base := 0.0) -> void:
 	var L: float = f[3]
 	var u0: float = f[4]
 	if L < 12.0:
@@ -593,7 +650,7 @@ static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: 
 	var levels: Array[float] = []
 	var k := 2 if style != CityLayout.Style.WAREHOUSE else 1
 	while k * floor_h + sill < h - 3.2:
-		levels.append(k * floor_h + sill)
+		levels.append(base + k * floor_h + sill)
 		k += 1
 	if levels.size() < 2:
 		return
@@ -719,8 +776,8 @@ func _parapet(x0: float, z0: float, x1: float, z1: float, y: float, col: Color) 
 
 ## Projecting stone courses every few floors (relief the shader can't fake).
 func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color, style: float,
-		seed: float) -> void:
-	var y := (floorf(y0 / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
+		seed: float, base := 0.0) -> void:
+	var y := base + (floorf((y0 - base) / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
 	while y < y1 - 4.0:
 		var o := LEDGE_OUT
 		walls(x0 - o, z0 - o, x1 + o, z1 + o, y, y + 0.32, col, KIND_TRIM, style, seed)
@@ -744,12 +801,12 @@ static func awning_runs(b: Dictionary) -> Array:
 	var z1: float = t[3]
 	var avoid: Array = []  # entrance portals take the ground floor where they stand
 	for bx: AABB in features(b)["col"]:
-		if bx.position.y < AWNING_Y + 1.0:
+		if bx.position.y < base_of(b) + AWNING_Y + 1.0:
 			avoid.append(bx.grow(0.6))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(float(b["seed"]) * 1000003.0) ^ 0xa3
 	var out := AWNING_OUT
-	var y := AWNING_Y
+	var y := base_of(b) + AWNING_Y
 	for side in 4:
 		var along_x := side % 2 == 0
 		var a := x0 if along_x else z0
@@ -762,8 +819,8 @@ static func awning_runs(b: Dictionary) -> Array:
 				var e := d + w
 				var span: AABB
 				match side:
-					0, 2: span = _aabb(d, (z0 if side == 0 else z1) - out, e, (z0 if side == 0 else z1) + out, 2.5, 4.0)
-					_: span = _aabb((x1 if side == 1 else x0) - out, d, (x1 if side == 1 else x0) + out, e, 2.5, 4.0)
+					0, 2: span = _aabb(d, (z0 if side == 0 else z1) - out, e, (z0 if side == 0 else z1) + out, y - 0.75, y + 0.75)
+					_: span = _aabb((x1 if side == 1 else x0) - out, d, (x1 if side == 1 else x0) + out, e, y - 0.75, y + 0.75)
 				if avoid.any(func(a2: AABB) -> bool: return a2.intersects(span)):
 					d += w + rng.randf_range(0.6, 2.5)
 					continue
@@ -824,11 +881,15 @@ func _add_sign(b: Dictionary, detailed: bool) -> void:
 func _add_frame(b: Dictionary, detailed: bool) -> void:
 	var tiers: Array = b["tiers"]
 	var t0: Array = tiers[0]
+	var bc := base_course(b)
+	if bc.has_volume():
+		solid(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, CONCRETE.darkened(0.2))
 	for t in tiers:
 		solid(t[0], t[1], t[2], t[3], t[4], t[5], CONCRETE)
 	if not detailed:
 		return
 	var ytop: float = tiers[-1][5]
+	var base: float = b.get("base", 0.0)
 	var nx := maxi(2, int((t0[2] - t0[0]) / 8.0) + 1)
 	var nz := maxi(2, int((t0[3] - t0[1]) / 8.0) + 1)
 	for i in nx:
@@ -837,9 +898,9 @@ func _add_frame(b: Dictionary, detailed: bool) -> void:
 				continue  # perimeter columns only
 			var x: float = lerpf(t0[0] + 0.5, t0[2] - 0.5, i / float(nx - 1))
 			var z: float = lerpf(t0[1] + 0.5, t0[3] - 0.5, j / float(nz - 1))
-			beam(Vector3(x, 0.0, z), Vector3(x, ytop + 3.0, z), 0.6, 0.6, CONCRETE.darkened(0.12))
+			beam(Vector3(x, base, z), Vector3(x, ytop + 3.0, z), 0.6, 0.6, CONCRETE.darkened(0.12))
 	# Hoarding round the site at street level, safety screens on the top two floors.
-	walls(t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, 0.0, 2.6, Color(0.2, 0.36, 0.3), KIND_TRIM, 0, 0)
+	walls(t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, base, base + 2.6, Color(0.2, 0.36, 0.3), KIND_TRIM, 0, 0)
 	# Edge-protection barrier round the working floor.
 	walls(t0[0] - 0.2, t0[1] - 0.2, t0[2] + 0.2, t0[3] + 0.2, ytop + 0.1, ytop + 1.2,
 		Color(0.95, 0.55, 0.15), KIND_TRIM, 0, 0)
@@ -847,6 +908,17 @@ func _add_frame(b: Dictionary, detailed: bool) -> void:
 
 ## Cranes and the bridge. `detailed` = lattice/girder geometry, else solid massing.
 func add_structure(s: Dictionary, detailed: bool) -> void:
+	var first := verts.size()
+	_structure(s, detailed)
+	# Structures are specified from street level 0; y0 lifts them onto their
+	# block's terrace (CityLayout._lift).
+	var dy: float = s.get("y0", 0.0)
+	if dy != 0.0:
+		for i in range(first, verts.size()):
+			verts[i].y += dy
+
+
+func _structure(s: Dictionary, detailed: bool) -> void:
 	match s["type"]:
 		"tower_crane":
 			_tower_crane(s, detailed)
@@ -1036,18 +1108,34 @@ func _bridge(s: Dictionary, detailed: bool) -> void:
 
 ## Ground for one chunk: asphalt, raised pavement blocks with kerbs, park
 ## lawns and dashed avenue centre lines, clipped to the chunk rectangle.
+const GROUND_STEP := 16.0  # m: road surface tessellation (bilinear between junctions; ≤ ~3 cm off)
+
+
 func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 	var asphalt := Color(0.2, 0.21, 0.23)
 	var pave := Color(0.58, 0.57, 0.55)
 	var kerb := Color(0.7, 0.69, 0.66)
 	var grass := Color(0.32, 0.45, 0.24)
+	var wall := Color(0.5, 0.46, 0.4)
+	var T := layout.terrain
 	var land := Rect2(CityLayout.RIVER_EDGE, CityLayout.MIN_Z - 200, CityLayout.MAX_X + 400, CityLayout.MAX_Z - CityLayout.MIN_Z + 400)
 	var r := chunk_rect.intersection(land)
 	if r.has_area():
+		# Streets only: cut the land along every kerb line and skip the cells
+		# a block covers (its pavement or terrace is drawn over it).
+		var kx := _kerb_lines(layout.x_streets)
+		var kz := _kerb_lines(layout.z_streets)
 		for lr in layout.land:
 			var g := r.intersection(lr)
-			if g.has_area():
-				top(g.position.x, g.position.y, g.end.x, g.end.y, 0.0, asphalt, KIND_ROOF, 0, 0)
+			if not g.has_area():
+				continue
+			var cx := _cuts(g.position.x, g.end.x, kx)
+			var cz := _cuts(g.position.y, g.end.y, kz)
+			for i in cx.size() - 1:
+				for j in cz.size() - 1:
+					var cell := Rect2(cx[i], cz[j], cx[i + 1] - cx[i], cz[j + 1] - cz[j])
+					if not layout.block_at(cell.get_center().x, cell.get_center().y).has_area():
+						terrain_patch(T, cell, 0.0, asphalt)
 	for blk in layout.blocks:
 		var g: Rect2 = (blk as Rect2).intersection(chunk_rect)
 		if not g.has_area():
@@ -1060,20 +1148,25 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		for w in layout.water:
 			if (w as Rect2).encloses(blk.grow(-7.0)) and w.position.x > 0.0:
 				is_basin = true
+		var level: float = layout.terraces.get(blk, NAN)
+		var flat := not is_nan(level)
 		if is_basin:
 			# Only the quay ring is paved; the middle is open water.
 			for q in CityLayout._subtract(blk, blk.grow(-6.0)):
 				var gq: Rect2 = (q as Rect2).intersection(chunk_rect)
 				if gq.has_area():
-					top(gq.position.x, gq.position.y, gq.end.x, gq.end.y, 0.15, pave, KIND_ROOF, 0, 0)
+					top(gq.position.x, gq.position.y, gq.end.x, gq.end.y, level, pave, KIND_ROOF, 0, 0)
+		elif flat:
+			top(g.position.x, g.position.y, g.end.x, g.end.y, level, grass if is_park else pave, KIND_ROOF, 0, 0)
 		else:
-			top(g.position.x, g.position.y, g.end.x, g.end.y, 0.15, grass if is_park else pave, KIND_ROOF, 0, 0)
-		walls(g.position.x, g.position.y, g.end.x, g.end.y, 0.0, 0.15, kerb, KIND_TRIM, 0, 0)
+			terrain_patch(T, g, CityTerrain.KERB, grass if is_park else pave)
+		# Kerb (sloping blocks) or retaining wall down to the street (terraces).
+		terrain_skirt(T, blk, chunk_rect, level, kerb if not flat else wall)
 		if is_basin:
 			# Quay walls down to the basin water.
 			var w2: Rect2 = blk.grow(-6.0).intersection(chunk_rect)
 			if w2.has_area():
-				_inner_walls(w2, -3.0, 0.16, Color(0.4, 0.33, 0.28))
+				_inner_walls(w2, -3.0, level + 0.01, Color(0.4, 0.33, 0.28))
 	# Waterfront promenade edge / river wall.
 	if chunk_rect.position.x <= CityLayout.RIVER_EDGE and chunk_rect.end.x > CityLayout.RIVER_EDGE:
 		var z0 := chunk_rect.position.y
@@ -1082,6 +1175,97 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
 			Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
 		solid(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33))
+
+
+static func _kerb_lines(streets: Array) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for st in streets:
+		out.append(float(st[0]) - float(st[1]) * 0.5)
+		out.append(float(st[0]) + float(st[1]) * 0.5)
+	return out
+
+
+## a, b and every line strictly between them, ascending.
+static func _cuts(a: float, b: float, lines: PackedFloat32Array) -> PackedFloat32Array:
+	var out := PackedFloat32Array([a])
+	for l in lines:
+		if l > a + 0.01 and l < b - 0.01:
+			out.append(l)
+	out.append(b)
+	out.sort()
+	return out
+
+
+## The ground over `r`, dy above the road surface (CityTerrain.road_y): a
+## grid through every junction line, at most `step` apart, so it matches
+## road_y everywhere (collision is built from these very triangles).
+func terrain_patch(T: CityTerrain, r: Rect2, dy: float, col: Color, step := GROUND_STEP) -> void:
+	var xs := T.splits(r.position.x, r.end.x, T.xs, step)
+	var zs := T.splits(r.position.y, r.end.y, T.zs, step)
+	var row := PackedFloat32Array()
+	row.resize(xs.size() * zs.size())
+	for i in xs.size():
+		for j in zs.size():
+			row[i * zs.size() + j] = T.road_y(xs[i], zs[j]) + dy
+	for i in xs.size() - 1:
+		for j in zs.size() - 1:
+			var x0 := xs[i]
+			var x1 := xs[i + 1]
+			var z0 := zs[j]
+			var z1 := zs[j + 1]
+			var a := Vector3(x0, row[i * zs.size() + j], z0)
+			var b := Vector3(x1, row[(i + 1) * zs.size() + j], z0)
+			var c := Vector3(x1, row[(i + 1) * zs.size() + j + 1], z1)
+			var d := Vector3(x0, row[i * zs.size() + j + 1], z1)
+			var n := (c - a).cross(b - d).normalized()
+			if n.y < 0.0:
+				n = -n
+			quad(a, b, c, d, n, Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1), col, KIND_ROOF, 0, 0)
+
+
+## Walls round a block (only the parts inside `clip`): from below the street
+## up to the pavement – a kerb where the pavement follows the street
+## (level = NAN), a retaining wall up to a terrace at `level`.
+func terrain_skirt(T: CityTerrain, blk: Rect2, clip: Rect2, level: float, col: Color, step := GROUND_STEP) -> void:
+	var x0 := blk.position.x
+	var z0 := blk.position.y
+	var x1 := blk.end.x
+	var z1 := blk.end.y
+	# Same corner order and outward normals as walls().
+	var corners := [Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0), Vector2(x0, z0)]
+	var ns := [Vector3.BACK, Vector3.RIGHT, Vector3.FORWARD, Vector3.LEFT]
+	for k in 4:
+		var a: Vector2 = corners[k]
+		var b: Vector2 = corners[(k + 1) % 4]
+		var along_x := absf(a.y - b.y) < 0.01
+		var lines := T.xs if along_x else T.zs
+		var u0 := a.x if along_x else a.y
+		var u1 := b.x if along_x else b.y
+		var cuts := T.splits(minf(u0, u1), maxf(u0, u1), lines, step)
+		if u0 > u1:
+			cuts.reverse()
+		for m in cuts.size() - 1:
+			var p := Vector2(cuts[m], a.y) if along_x else Vector2(a.x, cuts[m])
+			var q := Vector2(cuts[m + 1], a.y) if along_x else Vector2(a.x, cuts[m + 1])
+			var mid := (p + q) * 0.5
+			if not clip.has_point(mid):
+				continue
+			var yp := T.road_y(p.x, p.y)
+			var yq := T.road_y(q.x, q.y)
+			var tp := level if not is_nan(level) else yp + CityTerrain.KERB
+			var tq := level if not is_nan(level) else yq + CityTerrain.KERB
+			quad(Vector3(p.x, tp, p.y), Vector3(q.x, tq, q.y), Vector3(q.x, yq - 0.3, q.y), Vector3(p.x, yp - 0.3, p.y),
+				ns[k], Vector2(cuts[m], tp), Vector2(cuts[m + 1], tq), Vector2(cuts[m + 1], yq - 0.3),
+				Vector2(cuts[m], yp - 0.3), col, KIND_TRIM if is_nan(level) else KIND_WALL, 5, 0.42)
+
+
+## All triangles, for a ConcavePolygonShape3D (collision = what's drawn).
+func faces() -> PackedVector3Array:
+	var out := PackedVector3Array()
+	out.resize(indices.size())
+	for i in indices.size():
+		out[i] = verts[indices[i]]
+	return out
 
 
 func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL) -> void:

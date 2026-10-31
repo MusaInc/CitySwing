@@ -63,6 +63,11 @@ var crossings: Array = []     # [x, z] street intersection centres
 var kit_obbs: Array = []
 var kit_hulls: Array = []
 var pieces: SetPieces
+## The ground (see CityTerrain): junction heights, road surface, terraces.
+var terrain := CityTerrain.new()
+## Blocks levelled into a terrace (set pieces, basins): Rect2 -> pavement level.
+## Every other block's pavement follows the street slope (road_y + kerb).
+var terraces := {}
 var _sites: Array = []        # [Rect2, district] construction lots, built after the blocks
 
 
@@ -70,13 +75,17 @@ func generate(p_seed := 1207) -> CityLayout:
 	seed = p_seed
 	rng.seed = seed
 	_streets()
+	terrain.build(x_streets, z_streets)
+	var ls := _snap()
 	_landmarks()
+	_lift_on_slope(ls)
 	_bridge()
 	pieces = SetPieces.new(self)
 	_blocks()
 	_construction()
 	_viaduct()
 	_skybridges()
+	_causeway()
 	pieces.elevated_rail()
 	pieces.gateways()
 	pieces.lighthouse()
@@ -159,6 +168,137 @@ func _landmarks() -> void:
 	_add(_building([[cx - 17, cz - 17, cx + 17, cz + 17, 82, 103]], Style.SANDSTONE, sand, "invisible"))
 
 
+## Lifts what was added to the layout since `snap` (see _snap) by dy metres:
+## buildings, props, structures (their y0), anchors, set-piece collision and
+## landmark models. Every block's contents are generated at street level 0
+## and then lifted onto the block's terrace.
+func _lift(snap: Array, dy: float) -> void:
+	if absf(dy) < 0.001:
+		return
+	for i in range(snap[0], buildings.size()):
+		var b: Dictionary = buildings[i]
+		for t in b["tiers"]:
+			t[4] += dy
+			t[5] += dy
+		if b.has("roof"):
+			b["roof"] += dy
+		b["base"] = float(b.get("base", 0.0)) + dy
+	for i in range(snap[1], props.size()):
+		var xf: Transform3D = props[i][1]
+		props[i][1] = xf.translated(Vector3(0, dy, 0))
+	for i in range(snap[2], structures.size()):
+		structures[i]["y0"] = float(structures[i].get("y0", 0.0)) + dy
+	for i in range(snap[3], anchor_lines.size()):
+		anchor_lines[i] = [anchor_lines[i][0] + Vector3(0, dy, 0), anchor_lines[i][1] + Vector3(0, dy, 0)]
+	for i in range(snap[4], kit_obbs.size()):
+		kit_obbs[i][0] = (kit_obbs[i][0] as Transform3D).translated(Vector3(0, dy, 0))
+	for i in range(snap[5], kit_hulls.size()):
+		var hull: PackedVector3Array = kit_hulls[i]
+		for k in hull.size():
+			hull[k] += Vector3(0, dy, 0)
+		kit_hulls[i] = hull
+	for i in range(snap[6], landmarks.size()):
+		landmarks[i][1] = (landmarks[i][1] as Transform3D).translated(Vector3(0, dy, 0))
+
+
+## Lifts what a sloping block's generation added since `snap`: each building
+## stands level on its own lot at the lot's highest street-level corner (its
+## base course shows down the slope: b["foot"]); whatever stands on or in a
+## building (roof props, huts, spires, signs) rises with that building; the
+## rest (street lights, trees) stands on the ground where it is.
+func _lift_on_slope(snap: Array) -> void:
+	var feet: Array = []  # [Rect2 footprint, dy]
+	for i in range(snap[0], buildings.size()):
+		var b: Dictionary = buildings[i]
+		if not b["kind"] in ["normal", "landmark"]:
+			continue
+		var t: Array = b["tiers"][0]
+		var fp := Rect2(t[0], t[1], t[2] - t[0], t[3] - t[1])
+		var inside := false
+		for f in feet:
+			if (f[0] as Rect2).grow(0.05).encloses(fp):
+				inside = true  # stands on an earlier building (landmark towers)
+		if inside:
+			continue
+		var hi := -INF
+		var lo := INF
+		for c in [fp.position, fp.end, Vector2(fp.end.x, fp.position.y), Vector2(fp.position.x, fp.end.y)]:
+			var y := terrain.road_y(c.x, c.y)
+			hi = maxf(hi, y)
+			lo = minf(lo, y)
+		feet.append([fp, hi])
+		b["foot"] = lo
+	var dy_at := func(x: float, z: float) -> float:
+		for f in feet:
+			if (f[0] as Rect2).grow(0.05).has_point(Vector2(x, z)):
+				return f[1]
+		return terrain.road_y(x, z)
+	for i in range(snap[0], buildings.size()):
+		var b: Dictionary = buildings[i]
+		var t: Array = b["tiers"][0]
+		var dy: float = dy_at.call((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5)
+		for tt in b["tiers"]:
+			tt[4] += dy
+			tt[5] += dy
+		if b.has("roof"):
+			b["roof"] += dy
+		if b.has("foot"):
+			b["foot"] = minf(b["foot"], dy)
+		b["base"] = float(b.get("base", 0.0)) + dy
+	for i in range(snap[1], props.size()):
+		var xf: Transform3D = props[i][1]
+		props[i][1] = xf.translated(Vector3(0, dy_at.call(xf.origin.x, xf.origin.z), 0))
+	for i in range(snap[3], anchor_lines.size()):
+		var m: Vector3 = (anchor_lines[i][0] + anchor_lines[i][1]) * 0.5
+		var up := Vector3(0, dy_at.call(m.x, m.z), 0)
+		anchor_lines[i] = [anchor_lines[i][0] + up, anchor_lines[i][1] + up]
+	for i in range(snap[6], landmarks.size()):
+		var o: Vector3 = (landmarks[i][1] as Transform3D).origin
+		landmarks[i][1] = (landmarks[i][1] as Transform3D).translated(Vector3(0, dy_at.call(o.x, o.z), 0))
+
+
+func _snap() -> Array:
+	return [buildings.size(), props.size(), structures.size(), anchor_lines.size(), kit_obbs.size(),
+		kit_hulls.size(), landmarks.size()]
+
+
+## The block (pavement rectangle between streets) containing (x, z), or an
+## empty Rect2 on a street or off the grid.
+func block_at(x: float, z: float) -> Rect2:
+	var xr := Vector2.ZERO
+	var zr := Vector2.ZERO
+	for i in x_streets.size() - 1:
+		var a: float = x_streets[i][0] + x_streets[i][1] * 0.5
+		var b: float = x_streets[i + 1][0] - x_streets[i + 1][1] * 0.5
+		if x >= a and x <= b:
+			xr = Vector2(a, b)
+	for j in z_streets.size() - 1:
+		var a: float = z_streets[j][0] + z_streets[j][1] * 0.5
+		var b: float = z_streets[j + 1][0] - z_streets[j + 1][1] * 0.5
+		if z >= a and z <= b:
+			zr = Vector2(a, b)
+	if xr == Vector2.ZERO or zr == Vector2.ZERO:
+		return Rect2()
+	return Rect2(xr.x, zr.x, xr.y - xr.x, zr.y - zr.x)
+
+
+## How far a block's contents are lifted: its terrace (pavement) level less
+## the kerb, so a flat block at 0 is exactly the old city.
+func block_lift(r: Rect2) -> float:
+	return terrain.block_level(r) - CityTerrain.KERB
+
+
+## Height of what you'd stand on at (x, z): a block's pavement or the road.
+## (Basins are water: their quay ring is the block level.)
+func ground_y(x: float, z: float) -> float:
+	var r := block_at(x, z)
+	if r.has_area():
+		if terraces.has(r):
+			return terraces[r]
+		return terrain.road_y(x, z) + CityTerrain.KERB
+	return terrain.road_y(x, z)
+
+
 func _reserved(r: Rect2) -> bool:
 	for q in reserved:
 		if r.grow(4.0).intersects(q):
@@ -182,35 +322,50 @@ func _blocks() -> void:
 	for xr in bx:
 		for zr in bz:
 			var rect := Rect2(xr[0], zr[0], xr[1] - xr[0], zr[1] - zr[0])
-			blocks.append(rect)
-			var c := rect.get_center()
-			var dist := district(c.x, c.y)
-			var brng := RandomNumberGenerator.new()
-			brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ seed
-			# A plaza near the beacon: the beacon stands in it, and it's a big launch gap.
-			if not cbd_plaza_done and rect.grow(10).has_point(Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)):
-				parks.append(rect)
-				_park_props(rect, brng)
+			var snap := _snap()
+			var n_struct := structures.size()
+			_block(rect, cbd_plaza_done)
+			if parks.size() > 0 and parks[-1] == rect and rect.grow(10).has_point(Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)):
 				cbd_plaza_done = true
-				continue
-			var piece := pieces.piece_for(rect)
-			if piece != "":
-				pieces.build(piece, rect)
-				if piece in ["wheel", "yard"]:
-					_street_props(rect, brng)
-				continue
-			if dist == "docks" and brng.randf() < 0.4 and c.x < 470.0:
-				var basin := rect.grow(-6.0)
-				water.append(basin)
-				_quay_cranes(basin, brng)
-				pieces.ship(basin)
-				continue
-			if dist == "georgian" and brng.randf() < 0.12 or dist == "midtown" and brng.randf() < 0.06:
-				parks.append(rect)
-				_park_props(rect, brng)
-				continue
-			_fill_block(rect, dist, brng)
+			if structures.size() > n_struct or water.size() > 0 and water[-1] == rect.grow(-6.0):
+				# Set pieces and dock basins stand on a level terrace with
+				# retaining walls down to the streets.
+				terraces[rect] = terrain.block_level(rect)
+				_lift(snap, block_lift(rect))
+			else:
+				_lift_on_slope(snap)
+
+
+## One block's contents, generated at street level 0 (_blocks lifts them).
+func _block(rect: Rect2, cbd_plaza_done: bool) -> void:
+	blocks.append(rect)
+	var c := rect.get_center()
+	var dist := district(c.x, c.y)
+	var brng := RandomNumberGenerator.new()
+	brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ seed
+	# A plaza near the beacon: the beacon stands in it, and it's a big launch gap.
+	if not cbd_plaza_done and rect.grow(10).has_point(Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)):
+		parks.append(rect)
+		_park_props(rect, brng)
+		return
+	var piece := pieces.piece_for(rect)
+	if piece != "":
+		pieces.build(piece, rect)
+		if piece in ["wheel", "yard"]:
 			_street_props(rect, brng)
+		return
+	if dist == "docks" and brng.randf() < 0.4 and c.x < 470.0:
+		var basin := rect.grow(-6.0)
+		water.append(basin)
+		_quay_cranes(basin, brng)
+		pieces.ship(basin)
+		return
+	if dist == "georgian" and brng.randf() < 0.12 or dist == "midtown" and brng.randf() < 0.06:
+		parks.append(rect)
+		_park_props(rect, brng)
+		return
+	_fill_block(rect, dist, brng)
+	_street_props(rect, brng)
 
 
 func _park_props(rect: Rect2, brng: RandomNumberGenerator) -> void:
@@ -503,25 +658,42 @@ func _billboard(t: Array, roof: float, brng: RandomNumberGenerator) -> void:
 ## neighbours (it's placed to swing from: the jib reaches out over a street).
 func _construction() -> void:
 	for entry in _sites:
-		var lot: Rect2 = (entry[0] as Rect2).grow(-1.2)
-		var dist: String = entry[1]
-		var brng := RandomNumberGenerator.new()
-		brng.seed = hash(Vector2i(int(lot.position.x), int(lot.position.y))) ^ seed
-		var c := lot.get_center()
-		var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 34.0, 120.0)
-		var f := lot.grow(-4.0)
-		var floors: Array = []
-		var y := 4.2
-		while y <= h:
-			floors.append([f.position.x, f.position.y, f.end.x, f.end.y, y - 0.45, y])
-			y += 4.2
-		var top: float = floors[-1][5]
-		var fb := _building(floors, Style.MODERN, Color(0.66, 0.65, 0.62), "frame")
-		_add(fb)
-		_add(_building([[c.x - 4.5, c.y - 4.5, c.x + 4.5, c.y + 4.5, 0.0, top + 6.0]], Style.MODERN,
-			Color(0.62, 0.61, 0.58), "plain"))
-		props.append(["ac_unit", Transform3D(Basis(), Vector3(c.x + 6.0, top, c.y + 6.0))])
-		_tower_crane(lot, top, brng)
+		var snap := _snap()
+		_site(entry)
+		# Rigid (the crane's collision must stay with the crane), on the lot's
+		# highest street corner; the frame's foot reaches down the slope.
+		var lot: Rect2 = entry[0]
+		var hi := -INF
+		var lo := INF
+		for c in [lot.position, lot.end, Vector2(lot.end.x, lot.position.y), Vector2(lot.position.x, lot.end.y)]:
+			hi = maxf(hi, terrain.road_y(c.x, c.y))
+			lo = minf(lo, terrain.road_y(c.x, c.y))
+		_lift(snap, hi)
+		for i in range(snap[0], buildings.size()):
+			buildings[i]["foot"] = lo
+
+
+## One construction site (frame, core, crane), built at street level 0.
+func _site(entry: Array) -> void:
+	var lot: Rect2 = (entry[0] as Rect2).grow(-1.2)
+	var dist: String = entry[1]
+	var brng := RandomNumberGenerator.new()
+	brng.seed = hash(Vector2i(int(lot.position.x), int(lot.position.y))) ^ seed
+	var c := lot.get_center()
+	var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 34.0, 120.0)
+	var f := lot.grow(-4.0)
+	var floors: Array = []
+	var y := 4.2
+	while y <= h:
+		floors.append([f.position.x, f.position.y, f.end.x, f.end.y, y - 0.45, y])
+		y += 4.2
+	var top: float = floors[-1][5]
+	var fb := _building(floors, Style.MODERN, Color(0.66, 0.65, 0.62), "frame")
+	_add(fb)
+	_add(_building([[c.x - 4.5, c.y - 4.5, c.x + 4.5, c.y + 4.5, 0.0, top + 6.0]], Style.MODERN,
+		Color(0.62, 0.61, 0.58), "plain"))
+	props.append(["ac_unit", Transform3D(Basis(), Vector3(c.x + 6.0, top, c.y + 6.0))])
+	_tower_crane(lot, top, brng)
 
 
 func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> void:
@@ -697,12 +869,75 @@ func _traffic() -> void:
 		for zs in z_streets:
 			var hx: float = xs[1] * 0.5 + 1.0
 			var hz: float = zs[1] * 0.5 + 1.0
-			var a := Vector3(xs[0] + hx, 0.15, zs[0] - hz)
-			var b := Vector3(xs[0] - hx, 0.15, zs[0] + hz)
+			var a := Vector3(xs[0] + hx, 0.0, zs[0] - hz)
+			var b := Vector3(xs[0] - hx, 0.0, zs[0] + hz)
+			a.y = ground_y(a.x, a.z)
+			b.y = ground_y(b.x, b.z)
+			if not is_nan(terrain.deck_y(xs[0], zs[0])):
+				continue  # (no lights under the causeway)
 			if not is_water(a) and not _in_park(a):
 				props.append(["traffic_light", Transform3D(Basis(Vector3.UP, PI), a)])
 			if not is_water(b) and not _in_park(b):
 				props.append(["traffic_light", Transform3D(Basis(), b)])
+
+
+## The Valley Causeway: the avenue nearest x = 715 carried across the rail
+## valley on a road deck from the north rim junction to the south bank, at
+## street level at both ends. The valley streets pass under it and the
+## railway over it – three levels at one crossing.
+func _causeway() -> void:
+	var st: Array = x_streets[0]
+	for s in x_streets:
+		if absf(float(s[0]) - 715.0) < absf(float(st[0]) - 715.0):
+			st = s
+	var x: float = st[0]
+	var half: float = float(st[1]) * 0.5 - 4.0  # deck: the carriageway, pavements stay below
+	var zn: Array = z_streets[0]
+	var zsth: Array = z_streets[-1]
+	for s in z_streets:
+		if absf(float(s[0]) - 171.0) < absf(float(zn[0]) - 171.0):
+			zn = s
+		if absf(float(s[0]) - 581.0) < absf(float(zsth[0]) - 581.0):
+			zsth = s
+	var za: float = float(zn[0]) + float(zn[1]) * 0.5
+	var zb: float = float(zsth[0]) - float(zsth[1]) * 0.5
+	var ya := terrain.road_y(x, za)
+	var yb := terrain.road_y(x, zb)
+	terrain.decks.append({"x": x, "half": half, "za": za, "zb": zb, "ya": ya, "yb": yb})
+	var k := _kit("causeway")
+	var concrete := Color(0.62, 0.6, 0.56)
+	var dark := Color(0.38, 0.37, 0.36)
+	var at := func(z: float) -> float: return lerpf(ya, yb, (z - za) / (zb - za))
+	# Deck in spans between piers; parapets; piers mid-block (clear of the
+	# valley streets crossing underneath).
+	var piers: Array[float] = [za]
+	for j in z_streets.size() - 1:
+		var mid: float = (float(z_streets[j][0]) + float(z_streets[j + 1][0])) * 0.5
+		if mid > za + 20.0 and mid < zb - 20.0:
+			piers.append(mid)
+	piers.append(zb)
+	const T := 1.1  # deck thickness
+	for i in piers.size() - 1:
+		var a := Vector3(x, at.call(piers[i]) - T * 0.5, piers[i])
+		var b := Vector3(x, at.call(piers[i + 1]) - T * 0.5, piers[i + 1])
+		_kbeam(k, a, b, half * 2.0, T, concrete)
+		for sd in [-1.0, 1.0]:
+			var off := Vector3(sd * (half - 0.2), T * 0.5 + 0.55, 0.0)
+			_kbeam(k, a + off, b + off, 0.4, 1.1, dark)
+			# Edge girders under the deck, so the underside reads as a bridge.
+			var g := Vector3(sd * (half - 1.2), -T * 0.5 - 0.5, 0.0)
+			_kbeam(k, a + g, b + g, 0.8, 1.0, dark)
+		_anchor(a + Vector3(-half, T * 0.5 + 1.1, 0), b + Vector3(-half, T * 0.5 + 1.1, 0))
+		_anchor(a + Vector3(half, T * 0.5 + 1.1, 0), b + Vector3(half, T * 0.5 + 1.1, 0))
+	for i in range(1, piers.size() - 1):
+		var z := piers[i]
+		var top: float = at.call(z) - T - 1.0
+		for sd in [-1.0, 1.0]:
+			var px: float = x + sd * (half - 2.5)
+			var gy := terrain.road_y(px, z)
+			if top - gy > 1.0:
+				_ksolid(k, px - 0.9, z - 0.9, px + 0.9, z + 0.9, gy - 0.3, top, concrete)
+		_ksolid(k, x - half + 1.0, z - 1.0, x + half - 1.0, z + 1.0, top - 1.0, top + 0.05, concrete)
 
 
 func _in_park(p: Vector3) -> bool:

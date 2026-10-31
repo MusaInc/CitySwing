@@ -35,6 +35,9 @@ var detail_range := 380.0
 ## Fire escapes, fins, portals, chimneys: small detail, drawn nearer than the
 ## detailed LOD (they still collide at any distance).
 var feature_range := 190.0
+## The streamed chunk grid: its ground is drawn per chunk; beyond it, the
+## outskirts draw (and collide) a coarser ground.
+var grid_rect := Rect2()
 var view_distance := 900.0
 var prop_density := 1.0
 var traffic_density := 1.0
@@ -85,8 +88,11 @@ func _ready() -> void:
 		detail_range = minf(380.0, view_distance * 0.45)
 	_materials()
 	_load_props()
-	for cx in range(floori(CityLayout.RIVER_EDGE / CHUNK) - 1, ceili((CityLayout.MAX_X + 200.0) / CHUNK)):
-		for cz in range(floori((CityLayout.MIN_Z - 100.0) / CHUNK), ceili((CityLayout.MAX_Z + 100.0) / CHUNK)):
+	var kx := Vector2i(floori(CityLayout.RIVER_EDGE / CHUNK) - 1, ceili((CityLayout.MAX_X + 200.0) / CHUNK))
+	var kz := Vector2i(floori((CityLayout.MIN_Z - 100.0) / CHUNK), ceili((CityLayout.MAX_Z + 100.0) / CHUNK))
+	grid_rect = Rect2(kx.x * CHUNK, kz.x * CHUNK, (kx.y - kx.x) * CHUNK, (kz.y - kz.x) * CHUNK)
+	for cx in range(kx.x, kx.y):
+		for cz in range(kz.x, kz.y):
 			_all_keys.append(Vector2i(cx, cz))
 	for key in _by_chunk:
 		if not key in _all_keys:
@@ -98,6 +104,7 @@ func _ready() -> void:
 	_build_structures()
 	_build_outskirts()
 	_bake_street_maps()
+	_bake_ground_height()
 	_build_birds()
 	GrappleTargeting.anchor_lines = layout.anchor_lines
 	print("CityWorld: %d buildings, %d props, %d chunks, layout+collision %d ms" % [
@@ -122,7 +129,7 @@ func spawn_point() -> Vector3:
 			continue
 		var t: Array = b["tiers"][-1]
 		var c := Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5)
-		var h: float = t[5]
+		var h: float = t[5] - BuildingMesher.base_of(b)  # above its street
 		if h < 55.0 or h > 95.0 or t[2] - t[0] < 14.0 or t[3] - t[1] < 14.0:
 			continue
 		var s := -c.distance_to(CityLayout.CBD_CENTER + Vector2(-60, 260)) - absf(h - 75.0) * 2.0
@@ -160,7 +167,7 @@ func rooftop_spawns() -> Array:
 		if b["kind"] != "normal":
 			continue
 		var t: Array = b["tiers"][-1]
-		var h: float = t[5]
+		var h: float = t[5] - BuildingMesher.base_of(b)  # above its street
 		if h < 50.0 or h > 150.0 or t[2] - t[0] < 18.0 or t[3] - t[1] < 18.0:
 			continue
 		var spot := _clear_spot(t, roof_props)
@@ -554,7 +561,7 @@ func _place_furniture() -> Dictionary:
 		for w in layout.water:
 			if (w as Rect2).position.x > 0.0 and (w as Rect2).encloses(r.grow(-7.0)):
 				basin = true
-		if basin:
+		if basin or layout.terraces.has(r):
 			continue
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash(Vector2i(int(r.position.x), int(r.position.y))) ^ 0xf00d
@@ -579,7 +586,7 @@ func _place_furniture() -> Dictionary:
 				var key := Vector2i(floori(p2.x / CHUNK), floori(p2.y / CHUNK))
 				if not out.has(key):
 					out[key] = []
-				out[key].append([kind, Transform3D(basis * Basis(Vector3.UP, yaw), Vector3(p2.x, 0.15, p2.y))])
+				out[key].append([kind, Transform3D(basis * Basis(Vector3.UP, yaw), Vector3(p2.x, layout.ground_y(p2.x, p2.y), p2.y))])
 			# Corner street sign at the start of every other edge.
 			if ei % 2 == 0:
 				put.call("sign_post", 2.2, 0.5, PI * 0.25)
@@ -680,10 +687,16 @@ func _build_collision() -> void:
 	street.collision_layer = 1 << 3
 	street.collision_mask = 0
 	street.add_to_group("street")
-	for r in ground_rects():
-		_add_box(street, AABB(Vector3(r.position.x, -2.0, r.position.y), Vector3(r.size.x, 2.0, r.size.y)))
-	for r in pavement_rects():
-		_add_box(street, AABB(Vector3(r.position.x, 0.0, r.position.y), Vector3(r.size.x, BuildingMesher.KERB, r.size.y)))
+	# The ground follows the terrain: collide with exactly the triangles drawn
+	# (streets, sloping pavements and kerbs, terraces and retaining walls).
+	for key in _all_keys:
+		var gm := BuildingMesher.new()
+		gm.add_ground(layout, Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK)))
+		_add_faces(street, gm)
+	var og := BuildingMesher.new()
+	for r in outer_ground_rects():
+		og.terrain_patch(layout.terrain, r, 0.0, Color.WHITE, OUTER_STEP)
+	_add_faces(street, og)
 	# River wall along the promenade (the parapet drawn by add_ground).
 	_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, CityLayout.MIN_Z - 200.0),
 		Vector3(0.6, 5.1, CityLayout.MAX_Z - CityLayout.MIN_Z + 400.0)))
@@ -797,6 +810,16 @@ static func _add_oriented_box(body: StaticBody3D, xf: Transform3D, size: Vector3
 	body.add_child(shape)
 
 
+static func _add_faces(body: StaticBody3D, m: BuildingMesher) -> void:
+	if m.is_empty():
+		return
+	var shape := ConcavePolygonShape3D.new()
+	shape.set_faces(m.faces())
+	var cs := CollisionShape3D.new()
+	cs.shape = shape
+	body.add_child(cs)
+
+
 static func _add_box(body: StaticBody3D, box: AABB) -> void:
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
 		return
@@ -822,6 +845,17 @@ func ground_rects() -> Array:
 		rects = next
 	rects.append(Rect2(-2600.0, -2600.0, CityLayout.FAR_SHORE + 2600.0, 5200.0))
 	return rects
+
+
+const OUTER_STEP := 400.0  # m: beyond the grid the surface is linear between junction lines: exact
+
+
+## Ground beyond the streamed chunk grid (outskirts, far shore), minus basins.
+func outer_ground_rects() -> Array:
+	var out: Array = []
+	for r in ground_rects():
+		out.append_array(CityLayout._subtract(r, grid_rect))
+	return out
 
 
 ## Raised pavement blocks (kerb height) as drawn by BuildingMesher.add_ground:
@@ -1010,12 +1044,11 @@ func _build_outskirts() -> void:
 			var brng := RandomNumberGenerator.new()
 			brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ layout.seed
 			var park := brng.randf() < 0.1
-			_add_box(pave_body, AABB(Vector3(blk.position.x, 0.0, blk.position.y),
-				Vector3(blk.size.x, BuildingMesher.KERB, blk.size.y)))
-			blocks_m.top(blk.position.x, blk.position.y, blk.end.x, blk.end.y, 0.15,
-				Color(0.32, 0.45, 0.24) if park else Color(0.58, 0.57, 0.55), BuildingMesher.KIND_ROOF, 0, 0)
-			blocks_m.walls(blk.position.x, blk.position.y, blk.end.x, blk.end.y, 0.0, 0.15, Color(0.7, 0.69, 0.66),
-				BuildingMesher.KIND_TRIM, 0, 0)
+			# Pavements follow the terrain like the city's (collision: the same
+			# triangles, added to pave_body below).
+			blocks_m.terrain_patch(layout.terrain, blk, CityTerrain.KERB,
+				Color(0.32, 0.45, 0.24) if park else Color(0.58, 0.57, 0.55), OUTER_STEP)
+			blocks_m.terrain_skirt(layout.terrain, blk, blk.grow(1.0), NAN, Color(0.7, 0.69, 0.66), OUTER_STEP)
 			if park:
 				continue
 			var lots: Array = []
@@ -1038,9 +1071,16 @@ func _build_outskirts() -> void:
 				var h := brng.randf_range(42.0, 80.0) if tall else brng.randf_range(10.0, 30.0)
 				var st: int = styles[brng.randi() % styles.size()]
 				var cols: Array = CityLayout.STYLE_COLORS[st]
-				var bd := {"tiers": [[r.position.x, r.position.y, r.end.x, r.end.y, 0.0, h]], "style": st,
+				# Level on its lot at the highest street corner, base course down the slope.
+				var hi := -INF
+				var lo := INF
+				for cpt in [r.position, r.end, Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y)]:
+					hi = maxf(hi, layout.terrain.road_y(cpt.x, cpt.y))
+					lo = minf(lo, layout.terrain.road_y(cpt.x, cpt.y))
+				var bd := {"tiers": [[r.position.x, r.position.y, r.end.x, r.end.y, hi, hi + h]], "style": st,
 					"color": (cols[brng.randi() % cols.size()] as Color).lightened(brng.randf_range(-0.05, 0.05)),
-					"kind": "normal", "seed": brng.randf(), "_features": BuildingMesher.NO_FEATURES}
+					"kind": "normal", "seed": brng.randf(), "_features": BuildingMesher.NO_FEATURES,
+					"base": hi, "foot": lo}
 				# Everything drawn out here is solid too: the outskirts are part
 				# of the city you can swing into, not a painted backdrop.
 				if near:
@@ -1049,7 +1089,7 @@ func _build_outskirts() -> void:
 						_add_box(col_body, box)
 				else:
 					m.add_building(bd, false)
-					_add_box(col_body, AABB(Vector3(r.position.x, 0.0, r.position.y), Vector3(r.size.x, h, r.size.y)))
+					_add_box(col_body, AABB(Vector3(r.position.x, lo - 0.3, r.position.y), Vector3(r.size.x, hi + h - lo + 0.3, r.size.y)))
 	# Far shore across the river (where the bridge lands): a quay road, then
 	# terraces and a few towers. Near the bridge they collide, so it's a place
 	# to land, not a painted backdrop.
@@ -1090,18 +1130,10 @@ func _build_outskirts() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	var g := BuildingMesher.new()
-	# Under everything, minus the dock basins (their water sits below street level).
-	var rects: Array = [Rect2(CityLayout.RIVER_EDGE, CityLayout.MIN_Z - 1000.0,
-		CityLayout.MAX_X + 1000.0 - CityLayout.RIVER_EDGE, CityLayout.MAX_Z - CityLayout.MIN_Z + 2000.0)]
-	for w in layout.water:
-		if (w as Rect2).position.x < 0.0:
-			continue
-		var next: Array = []
-		for r in rects:
-			next.append_array(CityLayout._subtract(r, w))
-		rects = next
-	for r in rects:
-		g.top(r.position.x, r.position.y, r.end.x, r.end.y, -0.02, Color(0.22, 0.23, 0.24), BuildingMesher.KIND_ROOF, 0, 0)
+	# Beyond the chunk grid (which draws its own ground): continues the
+	# terrain level outward from the grid's edge.
+	for r in outer_ground_rects():
+		g.terrain_patch(layout.terrain, r, 0.0, Color(0.22, 0.23, 0.24), OUTER_STEP)
 	var gmesh := ArrayMesh.new()
 	gmesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, g.arrays())
 	var gi := MeshInstance3D.new()
@@ -1122,6 +1154,7 @@ func _build_outskirts() -> void:
 		ni.mesh = _mesh_from(near_m.arrays())
 		ni.material_override = building_mat
 		add_child(ni)
+	_add_faces(pave_body, blocks_m)
 	add_child(col_body)
 	add_child(pave_body)
 
@@ -1155,6 +1188,21 @@ static func _extend_ranges(edge: float, sgn: float, reach: float, rng: RandomNum
 var _outer_ranges: Array = [[], []]
 const STREET_MAP_X := Vector2(-640.0, 2600.0)  # origin, texels (1 m each)
 const STREET_MAP_Z := Vector2(-1500.0, 3000.0)
+
+
+## The road surface as a texture for the GPU-driven traffic and pedestrians
+## (global shader uniforms ground_height / ground_rect). 2 m texels over the
+## junction grid; clamped sampling continues it level beyond, like road_y.
+func _bake_ground_height() -> void:
+	var T := layout.terrain
+	var cell := 2.0
+	var r := Rect2(T.xs[0], T.zs[0], T.xs[-1] - T.xs[0], T.zs[-1] - T.zs[0])
+	var tex := T.bake(r, cell)
+	var w := tex.get_width()
+	var h := tex.get_height()
+	RenderingServer.global_shader_parameter_set(&"ground_height", tex)
+	RenderingServer.global_shader_parameter_set(&"ground_rect",
+		Vector4(r.position.x - cell * 0.5, r.position.y - cell * 0.5, cell * w, cell * h))
 
 
 func _bake_street_maps() -> void:
@@ -1487,7 +1535,7 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		groups[k].append([xf[i], custom[i], TAXI_YELLOW if CAR_KINDS[k][0] == "car_taxi" else col])
 	# Cars only ever drive inside their chunk (lanes are clipped to it), so the
 	# chunk itself is an exact culling box for the GPU-moved instances.
-	var bounds := AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 6.0, CHUNK))
+	var bounds := AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # (terrain)
 	for k in groups.size():
 		var g: Array = groups[k]
 		if g.is_empty() or car_meshes[k] == null:
@@ -1549,8 +1597,8 @@ func _pavement_paths() -> Array:
 		for w in layout.water:
 			if (w as Rect2).position.x > 0.0 and (w as Rect2).encloses(r.grow(-7.0)):
 				basin = true
-		if basin:
-			continue
+		if basin or layout.terraces.has(r):
+			continue  # (terraced set-piece blocks have no pavement walks)
 		for inset_dir in [[1.7, 1.0], [3.0, -1.0]]:
 			var i: float = inset_dir[0]
 			var fwd: bool = inset_dir[1] > 0.0
@@ -1599,7 +1647,7 @@ func _add_walkers(root: Node3D, key: Vector2i) -> void:
 	for i in xf.size():
 		items.append([xf[i], custom[i], CLOTHES[rng.randi() % CLOTHES.size()]])
 	mm.buffer = _instance_buffer(items)
-	mm.custom_aabb = AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 4.0, CHUNK))  # walks stay in the chunk
+	mm.custom_aabb = AABB(Vector3(rect.position.x, -1.0, rect.position.y), Vector3(CHUNK, 70.0, CHUNK))  # walks stay in the chunk
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "Walkers"
 	mmi.multimesh = mm
@@ -1656,7 +1704,11 @@ func _parked_cars(rect: Rect2, rng: RandomNumberGenerator, xf: Array, custom: Ar
 							# Parked facing with the traffic on that side.
 							var fwd := (Vector3.BACK if side > 0.0 else Vector3.FORWARD) if axis == 0 \
 								else (Vector3.LEFT if side > 0.0 else Vector3.RIGHT)
-							var basis := Basis.looking_at(fwd, Vector3.UP)
+							# On the road surface, pitched with the street's grade.
+							var T := layout.terrain
+							pos.y += T.road_y(pos.x, pos.z)
+							var grade := (T.road_y(pos.x + fwd.x, pos.z + fwd.z) - T.road_y(pos.x - fwd.x, pos.z - fwd.z)) * 0.5
+							var basis := Basis.looking_at((fwd + Vector3.UP * grade).normalized(), Vector3.UP)
 							# Phase 5 m into a 10 m "segment": full size, shifted 5 m along -Z.
 							xf.append(Transform3D(basis, pos + basis.z * 5.0))
 							custom.append(Color(0.0, 5.0, 10.0, 0.0))

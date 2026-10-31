@@ -139,7 +139,7 @@ func test_course_grand_tour_flyable(t) -> void:
 
 func test_endurance_ends_on_street(t) -> void:
 	var p := _player()
-	p.global_position = Vector3(400, 3, 0)
+	p.global_position = Vector3(400, world.layout.ground_y(400, 0) + 3.0, 0)
 	var mode := EnduranceMode.new()
 	add_child(mode)
 	mode.setup(p, Hud.new(), null, world)

@@ -17,8 +17,12 @@ var _seg := 0
 var _bad := 0.0  # s the current shot has looked wrong (see needs_cut)
 
 
+var _layout: CityLayout
+
+
 func _init(world: Node) -> void:
 	super(SwingBot.Style.EXPERT, Vector3.FORWARD)
+	_layout = world.layout
 	_build_loop(world.layout)
 	goal_fn = _goal
 
@@ -57,7 +61,11 @@ func entry(rng: RandomNumberGenerator) -> Array:
 	var b: Vector2 = l[1]
 	var g := a.lerp(b, rng.randf_range(0.15, 0.5))
 	var along := (b - a).normalized()
-	return [Vector3(g.x, 48.0, g.y), Vector3(along.x, -0.15, along.y).normalized() * 20.0]
+	return [Vector3(g.x, 48.0 + _ground(g.x, g.y), g.y), Vector3(along.x, -0.15, along.y).normalized() * 20.0]
+
+
+func _ground(x: float, z: float) -> float:
+	return _layout.ground_y(x, z) if _layout else 0.0
 
 
 ## Starts on the leg nearest the hero.
@@ -103,7 +111,7 @@ func _goal(p: Node3D) -> Vector3:
 func needs_cut(p: Player, dt: float) -> bool:
 	if _loop.is_empty():
 		return false
-	var wrong := p.stunned or p.knocked_out or (p.global_position.y < 3.0 and p.is_on_floor()) \
+	var wrong := p.stunned or p.knocked_out or (p.height_above_ground() < 3.0 and p.is_on_floor()) \
 		or (not p.is_on_floor() and p.s.velocity.length() < 5.0) \
 		or absf(_lateral(p.global_position)) > _half[_seg] + SETBACK + 8.0
 	_bad = _bad + dt if wrong else maxf(_bad - dt * 0.5, 0.0)
