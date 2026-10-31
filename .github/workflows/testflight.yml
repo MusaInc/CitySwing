@@ -97,20 +97,19 @@ jobs:
           print("App record:", apps[0]["id"], apps[0]["attributes"]["name"])
           PY
 
-      - name: Archive (automatic signing via the API key)
+      - name: Archive (unsigned; the export step signs in the cloud)
+        # Signing here made CI create a new "Apple Development" certificate on
+        # every fresh runner until the account hit Apple's certificate limit.
+        # The archive is built unsigned; -exportArchive signs it with the
+        # cloud-managed distribution certificate (needs an Admin API key).
         env:
           TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ISSUER: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           xcodebuild -project build/ios/CitySwing.xcodeproj -scheme CitySwing \
             -configuration Release -destination "generic/platform=iOS" \
             -archivePath build/CitySwing.xcarchive archive \
-            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Development" PROVISIONING_PROFILE_SPECIFIER="" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$HOME/private_keys/AuthKey_${KEY_ID}.p8" \
-            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER" | tail -40
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" PROVISIONING_PROFILE_SPECIFIER="" | tail -40
 
       - name: Upload to TestFlight
         env:

@@ -92,15 +92,17 @@ maps to iOS haptics on supported iPhones. It can be turned off in Settings.
 ## TestFlight without a Mac (GitHub Actions)
 
 `.github/workflows/testflight.yml` does steps 1–4 on a GitHub-hosted Mac
-(macos-15, Xcode 16): installs Godot 4.5.1 + templates, exports the Xcode
-project, archives with automatic signing through an App Store Connect API key
-and uploads the build to TestFlight. Build number = the workflow run number.
+(macos-15, newest Xcode 26): installs Godot 4.5.1 + templates, exports the
+Xcode project, archives it unsigned, then signs it with the cloud-managed
+distribution certificate during export and uploads the build to TestFlight.
+(Archiving with automatic signing made a new Apple Development certificate on
+every run until the account hit Apple's certificate limit.) Build number = the workflow run number.
 It only runs when started by hand (Actions → TestFlight → Run workflow).
 
 One-time setup:
 1. App Store Connect → My Apps → + → New App, bundle ID
    `com.musastudios.cityswing` (the API can't create app records).
-2. An App Store Connect API key with the App Manager (or Admin) role
+2. An App Store Connect API key with the Admin role (cloud signing refuses App Manager keys)
    (Users and Access → Integrations → App Store Connect API).
 3. Push this repo to a **private** GitHub repo and add the secrets
    `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`
