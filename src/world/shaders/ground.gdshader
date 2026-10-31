@@ -14,6 +14,8 @@ render_mode cull_back, diffuse_burley;
 uniform sampler2D road_field : filter_linear, repeat_disable;
 uniform vec4 road_rect = vec4(0.0, 0.0, 1.0, 1.0);  // x, z origin, x, z size (m)
 uniform bool has_streets = false;
+global uniform float wetness;
+global uniform float rain;
 
 varying float v_up;
 varying float v_dist;
@@ -180,6 +182,17 @@ void fragment() {
 		vec2 f = fract(p / 1.8);
 		albedo *= 1.0 - 0.1 * (step(f.x, 0.03) + step(f.y, 0.03));
 	}
+	if (wetness > 0.001 && flat_top) {
+		// Wet streets: everything darkens and gets a sheen; puddles collect in
+		// the dips of a low-frequency noise (and fill as the rain goes on),
+		// mirror-smooth and – while it's raining – rippled.
+		float pud = smoothstep(0.62 - 0.22 * wetness, 0.7 - 0.22 * wetness, vnoise(p * 0.11) * 0.7 + vnoise(p * 0.43) * 0.3);
+		pud *= wetness * (asphalt ? 1.0 : 0.6);
+		albedo *= 1.0 - 0.3 * wetness - 0.25 * pud;
+		rough = mix(rough, 0.3, wetness * 0.8);
+		rough = mix(rough, 0.03 + 0.12 * rain * vnoise(p * 6.0 + TIME * 3.0), pud);
+	}
 	ALBEDO = albedo;
 	ROUGHNESS = rough;
+	SPECULAR = 0.5 + 0.3 * wetness;
 }

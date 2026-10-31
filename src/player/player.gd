@@ -286,6 +286,9 @@ func _physics_process(dt: float) -> void:
 	# review script can opt in with `human_steer` to move like a player).
 	controls.turn_assist = bot == null or bot.get("human_steer") == true
 	controls.human = controls.turn_assist
+	# Trains are solid (ride them!) for people only: bots and recorded
+	# courses must not depend on where a train happens to be.
+	set_collision_mask_value(6, controls.human)
 	controls.reel = auto_tighten()
 	controls.jump = inp.get("jump", false)
 	controls.gravity_scale = 1.0

@@ -1,30 +1,83 @@
 class_name Atmosphere
 extends Node3D
-## Sky, sun, fog and tonemapping for the whole game. One preset: late-afternoon
-## golden hour over the river – low warm sun, long shadows, hazy depth.
-## Building/water shaders receive the same sky colours so their reflections match.
+## Sky, sun/moon, fog, weather and tonemapping for the whole game.
+##
+## Time of day: `hour` (0–24). In a live game it runs through a full day in
+## DAY_MINUTES real minutes (Settings.time_of_day = "cycle") or holds a fixed
+## hour. The sun rises in the east, crosses the south and sets behind the
+## strait in the west; after dusk the same light becomes a cool moon.
+## Everything that should react reads shared global shader uniforms:
+##   sky_top / sky_horizon (linear)  sun_dir  night (0..1)  wetness  rain
+## and the city's lamps read `night` via CityWorld.set_night().
+##
+## Weather: clear, cloudy, rain, storm, fog. "changing" drifts between them
+## every few minutes; every parameter eases (no pops). Rain draws streaks
+## round the camera (RainFx), wets streets/roofs/water (wetness rises while it
+## rains and dries afterwards), storms add lightning (and a thunder signal).
+## Captures and tools get a fixed golden hour, clear (`live` = false), unless
+## asked for `--time=<h>` / `--weather=<name>`.
+
+signal thunder(delay: float, strength: float)
 
 const ZENITH := Color(0.17, 0.38, 0.74)
 const HORIZON := Color(0.78, 0.84, 0.9)
-## Sun direction (towards the sun), shared with the facade shader so window
-## reveals and corners shade on the side the light actually comes from.
+## The default (captures, tools, first launch): late-afternoon golden hour.
+const DEFAULT_HOUR := 16.0
+const DAY_MINUTES := 16.0
+## Sun direction at DEFAULT_HOUR (kept for callers that want the fixed one).
 const SUN_ROT := Vector3(-38.0, -112.0, 0.0)
+const WEATHERS := ["clear", "cloudy", "rain", "storm", "fog"]
+## Per weather: cloud cover, rain, fog, storm (lightning), cloud darkness.
+const WEATHER_PARAMS := {
+	"clear": {"cloud": 0.38, "rain": 0.0, "fog": 0.0, "storm": 0.0, "dark": 0.0},
+	"cloudy": {"cloud": 0.72, "rain": 0.0, "fog": 0.12, "storm": 0.0, "dark": 0.25},
+	"rain": {"cloud": 0.92, "rain": 0.65, "fog": 0.35, "storm": 0.0, "dark": 0.7},
+	"storm": {"cloud": 1.0, "rain": 1.0, "fog": 0.45, "storm": 1.0, "dark": 1.0},
+	"fog": {"cloud": 0.6, "rain": 0.0, "fog": 1.0, "storm": 0.0, "dark": 0.2},
+}
 
 var env: Environment
 var sun: DirectionalLight3D
+var sky_mat: ShaderMaterial
+var rain_fx: RainFx
+## Runs the clock and weather changes (main sets it for real play).
+var live := false
+var hour := DEFAULT_HOUR
+var weather := "clear"
+## Current (eased) weather parameters and derived values other systems read.
+var w := WEATHER_PARAMS["clear"].duplicate()
+var wetness := 0.0
+var night := 0.0
+var _flash := 0.0
+var _next_bolt := 8.0
+var _weather_left := 240.0
+var _rng := RandomNumberGenerator.new()
+var _sky_t := 0.0
+var _world: Node
 
 
 static func sun_direction() -> Vector3:
 	return Basis.from_euler(SUN_ROT * PI / 180.0) * Vector3.BACK
 
 
+## Sun elevation and azimuth (degrees) for an hour: up at ~05:30, highest
+## (70°) at noon in the south, down at ~18:30 in the west.
+static func sun_angles(h: float) -> Vector2:
+	var el := 70.0 * sin(PI * (h - 5.5) / 13.0)
+	if h < 5.5 or h > 18.5:
+		# Below the horizon: keep going down smoothly through the night.
+		var t := fposmod(h - 18.5, 24.0) / 11.0  # 0 at dusk, 1 at dawn
+		el = -40.0 * sin(PI * t)
+	var yaw := -112.0 + (h - DEFAULT_HOUR) * 15.0
+	return Vector2(el, yaw)
+
+
 func _ready() -> void:
+	_rng.randomize()
 	var settings := get_node_or_null("/root/Settings")
 	var preset: Dictionary = settings.preset() if settings else {"shadows": true, "glow": true}
-	var sky_mat := ShaderMaterial.new()
+	sky_mat = ShaderMaterial.new()
 	sky_mat.shader = load("res://src/world/shaders/sky.gdshader")
-	sky_mat.set_shader_parameter("zenith", ZENITH)
-	sky_mat.set_shader_parameter("horizon", HORIZON)
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_64
@@ -33,9 +86,7 @@ func _ready() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	# Warm sun, cool sky fill: lit faces read gold, shaded faces read blue-violet
-	# instead of one warm-grey wash. Kept low so faces away from the sun have
-	# real contrast against faces towards it.
+	# Warm sun, cool sky fill: lit faces read gold, shaded faces read blue-violet.
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 0.62
 	env.ambient_light_color = Color(0.56, 0.66, 0.9)
@@ -44,16 +95,9 @@ func _ready() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
 	env.tonemap_white = 8.0
-	# Depth haze: nothing within ~180 m, building to a soft blue veil on the
-	# skyline – nearby blocks stay crisp, the far city recedes.
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
-	env.fog_depth_begin = 180.0
-	env.fog_depth_end = 2600.0
 	env.fog_depth_curve = 1.6
-	env.fog_density = 0.62
-	env.fog_light_color = Color(0.68, 0.77, 0.9)
-	env.fog_light_energy = 1.0
 	env.fog_sun_scatter = 0.3
 	env.fog_aerial_perspective = 0.4
 	env.fog_sky_affect = 0.15
@@ -71,11 +115,6 @@ func _ready() -> void:
 
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
-	# West-south-west, behind the river: a warm late-afternoon sun, high
-	# enough (38°) that it reaches down into the avenues.
-	sun.rotation_degrees = SUN_ROT
-	sun.light_color = Color(1.0, 0.84, 0.64)
-	sun.light_energy = 2.3
 	sun.light_angular_distance = 0.6
 	sun.shadow_enabled = preset.get("shadows", true)
 	sun.shadow_bias = 0.04
@@ -85,6 +124,215 @@ func _ready() -> void:
 	sun.directional_shadow_split_1 = 0.18
 	sun.directional_shadow_blend_splits = false
 	add_child(sun)
+
+	rain_fx = RainFx.new()
+	rain_fx.name = "Rain"
+	add_child(rain_fx)
+	_apply(0.0, true)
+
+
+## Main calls this once settings and command-line overrides are known.
+func configure(args: Dictionary, world: Node) -> void:
+	_world = world
+	var capture := args.has("shot") or args.has("cam")
+	live = not capture
+	if args.has("time"):
+		hour = fposmod(float(args["time"]), 24.0)
+		live = false
+	if args.has("weather") and args["weather"] in WEATHERS:
+		set_weather(args["weather"], true)
+	elif live:
+		_from_settings(true)
+	if live:
+		Settings.changed.connect(func(): _from_settings(false))
+	_apply(0.0, true)
+
+
+func _from_settings(instant: bool) -> void:
+	match Settings.time_of_day:
+		"day":
+			hour = 13.0
+		"sunset":
+			hour = 17.9
+		"night":
+			hour = 23.0
+	if Settings.weather in WEATHERS:
+		set_weather(Settings.weather, instant)
+	elif not weather in WEATHERS or instant:
+		set_weather("clear", instant)
+
+
+func set_weather(name: String, instant := false) -> void:
+	weather = name
+	_weather_left = _rng.randf_range(150.0, 320.0)
+	if instant:
+		w = WEATHER_PARAMS[name].duplicate()
+		wetness = clampf(w["rain"] * 1.2, 0.0, 1.0)
+
+
+func _process(dt: float) -> void:
+	if live:
+		if Settings.time_of_day == "cycle":
+			hour = fposmod(hour + dt * 24.0 / (DAY_MINUTES * 60.0), 24.0)
+		if Settings.weather == "changing":
+			_weather_left -= dt
+			if _weather_left <= 0.0:
+				set_weather(_next_weather())
+	_apply(dt, false)
+
+
+## Mostly fair: clear and cloudy most of the time, rain now and then, the
+## odd storm or fog bank (fog favours the night and early morning).
+func _next_weather() -> String:
+	var foggy := 0.12 if hour < 9.0 or hour > 21.0 else 0.04
+	var opts := {"clear": 0.4, "cloudy": 0.28, "rain": 0.18, "storm": 0.08, "fog": foggy}
+	var total := 0.0
+	for k in opts:
+		total += opts[k] if k != weather else 0.0
+	var x := _rng.randf() * total
+	for k in opts:
+		if k == weather:
+			continue
+		x -= opts[k]
+		if x <= 0.0:
+			return k
+	return "clear"
+
+
+func _apply(dt: float, instant: bool) -> void:
+	# Ease the weather towards its target (~25 s for most of the change).
+	var target: Dictionary = WEATHER_PARAMS.get(weather, WEATHER_PARAMS["clear"])
+	var k := 1.0 if instant else 1.0 - exp(-dt / 9.0)
+	for key in w:
+		w[key] = lerpf(w[key], target[key], k)
+	# Streets soak in a minute of rain and take a few minutes to dry.
+	var wet_to := clampf(float(w["rain"]) * 1.3, 0.0, 1.0)
+	if not instant:
+		var rate := 1.0 / 45.0 if wet_to > wetness else 1.0 / 200.0
+		wetness = move_toward(wetness, wet_to, rate * dt)
+	# Lightning: a bright double flicker every 6–20 s in a storm.
+	if float(w["storm"]) > 0.5 and live:
+		_next_bolt -= dt
+		if _next_bolt <= 0.0:
+			_next_bolt = _rng.randf_range(6.0, 20.0)
+			_flash = 1.0
+			thunder.emit(_rng.randf_range(0.6, 3.0), _rng.randf_range(0.5, 1.0))
+	_flash = maxf(_flash - dt * 3.2, 0.0)
+	var fl := _flash * (0.6 + 0.4 * sin(_flash * 40.0)) if _flash > 0.0 else 0.0
+
+	var ang := sun_angles(hour)
+	var el := ang.x
+	var overcast := smoothstep(0.55, 1.0, float(w["cloud"]))
+	var fog := float(w["fog"])
+	night = 1.0 - smoothstep(-8.0, 3.0, el)
+	var lamps := maxf(night, overcast * 0.35 * float(w["dark"]))
+
+	# --- light: the sun above -3°, the moon below.
+	var day_light := smoothstep(-3.0, 8.0, el)
+	if el > -3.0:
+		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
+		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.5, 0.26)], [8.0, Color(1.0, 0.72, 0.48)],
+			[25.0, Color(1.0, 0.84, 0.64)], [60.0, Color(1.0, 0.95, 0.88)]])
+		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.2], [10.0, 1.9], [25.0, 2.3], [60.0, 2.5]])
+		sky_mat.set_shader_parameter("sun_glow", 1.0)
+		sky_mat.set_shader_parameter("disc_size", 0.9993)
+		sky_mat.set_shader_parameter("disc_k", 6.0)
+		sky_mat.set_shader_parameter("sun_tint", sun.light_color)
+	else:
+		# Moon: high in the south-east, cool and dim.
+		sun.rotation_degrees = Vector3(-42.0, 150.0, 0.0)
+		sun.light_color = Color(0.62, 0.72, 1.0)
+		sun.light_energy = 0.45 * smoothstep(-3.0, -12.0, el)
+		sky_mat.set_shader_parameter("sun_glow", 0.25)
+		sky_mat.set_shader_parameter("disc_size", 0.99955)
+		sky_mat.set_shader_parameter("disc_k", 2.2)
+		sky_mat.set_shader_parameter("sun_tint", Color(0.8, 0.85, 1.0))
+	sun.light_energy *= 1.0 - 0.8 * overcast
+	sun.shadow_opacity = 1.0 - 0.7 * overcast
+
+	# --- sky colours by sun height, greyed by cloud.
+	var zen := _ramp(el, [[-18.0, Color(0.012, 0.02, 0.05)], [-6.0, Color(0.07, 0.1, 0.25)],
+		[0.0, Color(0.15, 0.22, 0.45)], [8.0, Color(0.17, 0.32, 0.62)], [25.0, ZENITH], [60.0, Color(0.2, 0.43, 0.8)]])
+	var hor := _ramp(el, [[-18.0, Color(0.04, 0.06, 0.1)], [-6.0, Color(0.36, 0.3, 0.4)],
+		[0.0, Color(0.95, 0.6, 0.42)], [8.0, Color(0.88, 0.78, 0.72)], [25.0, HORIZON], [60.0, Color(0.8, 0.87, 0.93)]])
+	var haze := _ramp(el, [[-18.0, Color(0.05, 0.06, 0.1)], [-6.0, Color(0.5, 0.3, 0.32)],
+		[0.0, Color(1.0, 0.5, 0.25)], [8.0, Color(1.0, 0.62, 0.38)], [25.0, Color(1.0, 0.66, 0.42)],
+		[60.0, Color(0.95, 0.85, 0.75)]])
+	var grey := 0.3 + 0.55 * day_light
+	var grey_c := Color(grey * 0.92, grey * 0.95, grey) * lerpf(1.0, 0.7, float(w["dark"]))
+	zen = zen.lerp(grey_c * 0.85, overcast * 0.8)
+	hor = hor.lerp(grey_c, overcast * 0.75)
+	haze = haze.lerp(grey_c, overcast * 0.85)
+	zen = zen.lerp(Color(0.8, 0.85, 1.0), fl * 0.6)
+	hor = hor.lerp(Color(0.8, 0.85, 1.0), fl * 0.6)
+	# The sky shader is radiance-mapped: update it a few times a second, not
+	# every frame (it changes slowly), except for lightning.
+	_sky_t -= dt
+	if _sky_t <= 0.0 or instant or fl > 0.0:
+		_sky_t = 0.25
+		sky_mat.set_shader_parameter("zenith", zen)
+		sky_mat.set_shader_parameter("horizon", hor)
+		sky_mat.set_shader_parameter("haze", haze)
+		sky_mat.set_shader_parameter("ground", hor.darkened(0.6))
+		var cl := _ramp(el, [[-12.0, Color(0.1, 0.12, 0.18)], [-3.0, Color(0.55, 0.38, 0.4)],
+			[3.0, Color(1.0, 0.62, 0.45)], [15.0, Color(1.0, 0.86, 0.72)], [40.0, Color(1.0, 0.97, 0.94)]])
+		var cs := _ramp(el, [[-12.0, Color(0.04, 0.05, 0.08)], [-3.0, Color(0.25, 0.22, 0.3)],
+			[10.0, Color(0.56, 0.55, 0.64)], [40.0, Color(0.66, 0.68, 0.74)]])
+		sky_mat.set_shader_parameter("cloud_lit", cl.lerp(grey_c, overcast * 0.6))
+		sky_mat.set_shader_parameter("cloud_shade", cs.lerp(grey_c * 0.6, overcast * 0.6))
+		sky_mat.set_shader_parameter("cloud_cover", w["cloud"])
+		sky_mat.set_shader_parameter("cloud_dark", w["dark"])
+		sky_mat.set_shader_parameter("stars", night * (1.0 - overcast) * (1.0 - fog))
+		sky_mat.set_shader_parameter("flash", fl)
+
+	# --- ambient, exposure, fog.
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.48], [2.0, 0.52], [20.0, 0.62]]) \
+		* (1.0 + 0.3 * overcast) + fl * 2.0
+	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.32, 0.42, 0.8)], [2.0, Color(0.6, 0.55, 0.75)],
+		[20.0, Color(0.56, 0.66, 0.9)]]).lerp(Color(0.7, 0.72, 0.76), overcast * 0.6)
+	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast)
+	env.fog_depth_begin = lerpf(180.0, 12.0, fog)
+	env.fog_depth_end = lerpf(2600.0, 520.0, fog)
+	env.fog_density = lerpf(0.62, 0.97, fog)
+	env.fog_light_color = hor.lerp(Color(0.68, 0.77, 0.9), 0.35 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
+	env.fog_light_energy = lerpf(1.0, 0.55, night)
+	env.fog_sun_scatter = 0.3 * day_light * (1.0 - overcast)
+	env.glow_intensity = lerpf(0.4, 0.75, night)
+	env.glow_hdr_threshold = lerpf(1.0, 0.8, night)
+
+	# --- shared shader inputs.
+	var top_l := zen.srgb_to_linear()
+	var hor_l := hor.srgb_to_linear()
+	RenderingServer.global_shader_parameter_set("sky_top", Vector3(top_l.r, top_l.g, top_l.b))
+	RenderingServer.global_shader_parameter_set("sky_horizon", Vector3(hor_l.r, hor_l.g, hor_l.b))
+	RenderingServer.global_shader_parameter_set("sun_dir", sun.global_basis * Vector3.BACK)
+	RenderingServer.global_shader_parameter_set("night", lamps)
+	RenderingServer.global_shader_parameter_set("wetness", wetness)
+	RenderingServer.global_shader_parameter_set("rain", w["rain"])
+	if _world and _world.has_method("set_night"):
+		_world.set_night(lamps)
+	rain_fx.set_rain(float(w["rain"]), hor_l, lamps)
+
+
+## Sun height → colour, piecewise linear over [[elevation, Color], ...].
+static func _ramp(x: float, keys: Array) -> Color:
+	if x <= keys[0][0]:
+		return keys[0][1]
+	for i in keys.size() - 1:
+		if x <= keys[i + 1][0]:
+			var t := (x - float(keys[i][0])) / (float(keys[i + 1][0]) - float(keys[i][0]))
+			return (keys[i][1] as Color).lerp(keys[i + 1][1], t)
+	return keys[-1][1]
+
+
+static func _rampf(x: float, keys: Array) -> float:
+	if x <= keys[0][0]:
+		return keys[0][1]
+	for i in keys.size() - 1:
+		if x <= keys[i + 1][0]:
+			var t := (x - float(keys[i][0])) / (float(keys[i + 1][0]) - float(keys[i][0]))
+			return lerpf(keys[i][1], keys[i + 1][1], t)
+	return keys[-1][1]
 
 
 ## CitySwing's grade, as a 3D LUT: cool, slightly lifted shadows, warm

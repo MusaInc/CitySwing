@@ -59,6 +59,8 @@ func build(area: Rect2) -> void:
 
 ## The designed landform, sampled at junctions only (see build()).
 static func design(x: float, z: float) -> float:
+	if x < CityLayout.FAR_SHORE:
+		return mainland_design(x, z)
 	var y := RISE * smoothstep(210.0, 860.0, x)
 	# The Heights: the cathedral's ridge, north-east.
 	var dx := (x - 900.0) / 260.0
@@ -73,6 +75,20 @@ static func design(x: float, z: float) -> float:
 	var dock := (1.0 - smoothstep(470.0, 600.0, x)) * smoothstep(180.0, 265.0, z)
 	y *= 1.0 - dock
 	return maxf(y, 0.0)
+
+
+## The mainland across the strait: a quay at sea level rising westward onto
+## Westbank Hill (where the bridge's approach viaduct comes down), with a
+## gentler knoll in the south-west.
+const MAINLAND_RISE := 22.0
+
+
+static func mainland_design(x: float, z: float) -> float:
+	var y := MAINLAND_RISE * smoothstep(CityLayout.FAR_SHORE - 40.0, CityLayout.FAR_SHORE - 330.0, x)
+	var dx := (x + 980.0) / 220.0
+	var dz := (z - 260.0) / 200.0
+	y += 12.0 * exp(-(dx * dx + dz * dz))
+	return y
 
 
 func _node(i: int, j: int) -> float:

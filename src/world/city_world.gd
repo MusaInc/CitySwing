@@ -55,6 +55,15 @@ const CAR_NEAR := 260.0
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var furniture_mat: StandardMaterial3D
+var trains: Trains
+var _lamp_mat: BaseMaterial3D   # the streetlight head's emissive material (brightened at night)
+var _lamp_base := 1.0
+var _glow_mats: Array[ShaderMaterial] = []  # [pool, halo]
+var _glow_meshes: Array[Mesh] = []  # [pool (PlaneMesh), halo (QuadMesh)]
+var _glow_nodes: Array = []
+var _glow_on := false
+## Lamp head in the streetlight model's frame (build_kit.py streetlight()).
+const LAMP_HEAD := Vector3(0.0, 6.72, -1.45)
 var _furn_src := {}             # kind -> [verts, normals, colors, indices] (material colours baked in)
 var _furniture_by_chunk := {}   # Vector2i -> Array of [kind, Transform3D]
 var _walk_paths: Array = []  # [from, to] pavement segments (directional)
@@ -74,9 +83,16 @@ var chunks_built := 0
 var gen_ms_total := 0.0
 
 
+## The mainland (Westbank) is a second CityWorld, `secondary`, streaming its
+## own layout (CityLayout.generate_mainland) as a child of the island's.
+var secondary := false
+var mainland: CityWorld
+
+
 func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
-	layout = CityLayout.new().generate()
+	if layout == null:
+		layout = CityLayout.new().generate()
 	_by_chunk = layout.buildings_by_chunk()
 	_props_by_chunk = layout.props_by_chunk()
 	var settings := get_node_or_null("/root/Settings")
@@ -100,25 +116,43 @@ func _ready() -> void:
 			_all_keys.append(key)  # e.g. the far bridge anchorage across the river
 	_build_collision()
 	_build_prop_collision()
-	_build_water()
+	if not secondary:
+		_build_water()
 	_build_landmarks()
 	_build_structures()
-	_build_outskirts()
+	trains = Trains.new()
+	trains.name = "Trains"
+	add_child(trains)
+	trains.setup(layout.rail.lines, _load_mesh("train_car"), _load_mesh("train_cab"))
 	_bake_street_maps()
+	if secondary:
+		print("Mainland: %d buildings, %d chunks, %d ms" % [layout.buildings.size(), _all_keys.size(),
+			Time.get_ticks_msec() - t0])
+		return
 	_bake_ground_height()
 	_build_birds()
-	GrappleTargeting.anchor_lines = layout.anchor_lines
+	mainland = CityWorld.new()
+	mainland.name = "Mainland"
+	mainland.secondary = true
+	mainland.layout = CityLayout.new().generate_mainland(layout.seed)
+	add_child(mainland)
+	layout.mainland = mainland.layout
+	# (The bridge's anchor lines are the island layout's; the mainland's
+	# approach viaduct edges join them.)
+	GrappleTargeting.anchor_lines = layout.anchor_lines + mainland.layout.anchor_lines
 	print("CityWorld: %d buildings, %d props, %d chunks, layout+collision %d ms" % [
 		layout.buildings.size(), layout.props.size(), _all_keys.size(), Time.get_ticks_msec() - t0])
 
 
 func _exit_tree() -> void:
-	if GrappleTargeting.anchor_lines == layout.anchor_lines:
+	if not secondary:
 		GrappleTargeting.anchor_lines = []
 
 
 func set_viewer(v: Node3D) -> void:
 	viewer = v
+	if mainland:
+		mainland.set_viewer(v)
 
 
 func spawn_point() -> Vector3:
@@ -498,11 +532,29 @@ func _materials() -> void:
 	water_mat.shader = load("res://src/world/shaders/water.gdshader")
 
 
-func set_sky_colors(top: Color, horizon: Color) -> void:
-	for m in [building_mat, water_mat]:
-		m.set_shader_parameter("sky_top", top)
-		m.set_shader_parameter("sky_horizon", horizon)
-	building_mat.set_shader_parameter("sun_dir", Atmosphere.sun_direction())
+## (Sky colours and the sun now reach every shader as global uniforms, set by
+## Atmosphere as the day turns; kept for callers.)
+func set_sky_colors(_top: Color, _horizon: Color) -> void:
+	pass
+
+
+## Lamps on (0 = day, 1 = full night): streetlight heads glow, their light
+## pools and halos fade in. Called by Atmosphere every frame (cheap: two
+## material values and, on a change of state, the glow nodes' visibility).
+func set_night(n: float) -> void:
+	if trains:
+		trains.set_night(n)
+	if mainland:
+		mainland.set_night(n)
+	if _lamp_mat:
+		_lamp_mat.emission_energy_multiplier = lerpf(_lamp_base, _lamp_base * 7.0, n)
+	var on := n > 0.2
+	if on != _glow_on:
+		_glow_on = on
+		for g in _glow_nodes:
+			if is_instance_valid(g):
+				(g as Node3D).visible = on
+		_glow_nodes = _glow_nodes.filter(func(g): return is_instance_valid(g))
 
 
 func _load_mesh(name: String) -> Mesh:
@@ -522,7 +574,29 @@ func _load_props() -> void:
 			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut"]:
 		var m := _load_mesh(k)
 		if m:
+			if k == "streetlight":
+				m = m.duplicate()
+				for i in m.get_surface_count():
+					var sm := m.surface_get_material(i) as BaseMaterial3D
+					if sm and sm.emission_enabled:
+						_lamp_mat = sm.duplicate()
+						_lamp_base = _lamp_mat.emission_energy_multiplier
+						m.surface_set_material(i, _lamp_mat)
 			prop_meshes[k] = m
+	for mode in 2:
+		var gm := ShaderMaterial.new()
+		gm.shader = load("res://src/world/shaders/lamp_glow.gdshader")
+		gm.set_shader_parameter("mode", mode)
+		var q: PrimitiveMesh
+		if mode == 0:
+			q = PlaneMesh.new()  # (flat, facing up)
+			(q as PlaneMesh).size = Vector2(15.0, 15.0)
+		else:
+			q = QuadMesh.new()
+			(q as QuadMesh).size = Vector2(1.8, 1.8)
+		q.material = gm
+		_glow_mats.append(gm)
+		_glow_meshes.append(q)
 	var shader: Shader = load("res://src/world/shaders/traffic.gdshader")
 	for kind in CAR_KINDS:
 		var car := _load_mesh(kind[0])
@@ -774,8 +848,9 @@ func _build_collision() -> void:
 		og.terrain_patch(layout.terrain, r, 0.0, Color.WHITE, OUTER_STEP)
 	_add_faces(street, og)
 	# River wall along the promenade (the parapet drawn by add_ground).
-	_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, layout.island.position.y),
-		Vector3(0.6, 5.1, layout.island.size.y)))
+	if not layout.is_mainland:
+		_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, layout.island.position.y),
+			Vector3(0.6, 5.1, layout.island.size.y)))
 	add_child(street)
 	var water_floor := StaticBody3D.new()
 	water_floor.name = "WaterFloor"
@@ -921,7 +996,7 @@ static func _add_box(body: StaticBody3D, box: AABB) -> void:
 
 ## Ground outside the streamed chunks: the mainland across the strait.
 func ground_rects() -> Array:
-	return [Rect2(-2600.0, -2600.0, CityLayout.FAR_SHORE + 2600.0, 5200.0)]
+	return []  # (the mainland is its own world now; sea all round)
 
 
 const OUTER_STEP := 400.0  # m: the mainland is level (the landform is clamped past its grid)
@@ -998,6 +1073,8 @@ func _build_structures() -> void:
 		for detailed in [true, false]:
 			var m := BuildingMesher.new()
 			m.add_structure(s, detailed)
+			if m.is_empty():
+				continue
 			var mi := MeshInstance3D.new()
 			mi.name = "Detail" if detailed else "Low"
 			mi.mesh = _mesh_from(m.arrays())
@@ -1062,95 +1139,6 @@ func _build_birds() -> void:
 		mmi.visibility_range_end = 320.0
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mmi)
-
-
-## The mainland across the strait (where the bridge lands): low-detail
-## terraces and a few towers, solid near the bridge. The island itself ends at
-## its sea walls (the outer-block code below is kept for the street maps).
-func _build_outskirts() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = layout.seed * 31
-	var m := BuildingMesher.new()
-	var col_body := StaticBody3D.new()
-	col_body.name = "OutskirtsCol"
-	col_body.collision_layer = 1 | (1 << 1)
-	col_body.collision_mask = 0
-	var pave_body := StaticBody3D.new()  # outer pavements: street, not a web target
-	pave_body.name = "OutskirtsPavements"
-	pave_body.collision_layer = 1 << 3
-	pave_body.collision_mask = 0
-	pave_body.add_to_group("street")
-	var near_m := BuildingMesher.new()  # (unused now: kept for the mesh plumbing below)
-	var blocks_m := BuildingMesher.new()
-	# Far shore across the river (where the bridge lands): a quay road, then
-	# terraces and a few towers. Near the bridge they collide, so it's a place
-	# to land, not a painted backdrop.
-	var shore_x := CityLayout.FAR_SHORE - 40.0
-	var z2 := -2200.0
-	while z2 < 2200.0:
-		var w2 := rng.randf_range(24.0, 50.0)
-		var d2 := rng.randf_range(24.0, 50.0)
-		var bx := shore_x - w2 - rng.randf_range(0.0, 30.0)
-		var near_bridge := absf(z2 - CityLayout.BRIDGE_Z) < 300.0
-		while bx > shore_x - (520.0 if near_bridge else 260.0):
-			if absf(z2 + d2 * 0.5 - CityLayout.BRIDGE_Z) < 40.0 + d2 * 0.5:
-				break  # keep the bridge's landing road open
-			var h2 := rng.randf_range(10.0, 26.0) if rng.randf() > 0.12 else rng.randf_range(40.0, 75.0)
-			var st2: int = [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.SANDSTONE][rng.randi() % 3]
-			var cols2: Array = CityLayout.STYLE_COLORS[st2]
-			var b2 := {"tiers": [[bx, z2, bx + w2, z2 + d2, 0.0, h2]], "style": st2,
-				"color": cols2[rng.randi() % cols2.size()], "kind": "normal", "seed": rng.randf(),
-				"_features": BuildingMesher.NO_FEATURES}
-			m.add_building(b2, near_bridge)
-			if near_bridge:
-				for box in BuildingMesher.collision_boxes(b2):
-					_add_box(col_body, box)
-			else:
-				_add_box(col_body, AABB(Vector3(bx, 0.0, z2), Vector3(w2, h2, d2)))
-			bx -= w2 + rng.randf_range(14.0, 24.0)
-		z2 += d2 + rng.randf_range(14.0, 24.0)
-	m.top(-2600.0, -2600.0, CityLayout.FAR_SHORE, 2600.0, 0.0, Color(0.33, 0.33, 0.34), BuildingMesher.KIND_ROOF, 0, 0)
-	_add_box(pave_body, AABB(Vector3(CityLayout.FAR_SHORE - 0.6, -4.0, -2600.0), Vector3(0.6, 5.1, 5200.0)))
-	m.walls(CityLayout.FAR_SHORE - 0.6, -2600.0, CityLayout.FAR_SHORE, 2600.0, -4.0, 1.1, Color(0.42, 0.38, 0.33),
-		BuildingMesher.KIND_TRIM, 0, 0)
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.arrays())
-	var mi := MeshInstance3D.new()
-	mi.name = "Outskirts"
-	mi.mesh = mesh
-	mi.material_override = building_mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	var g := BuildingMesher.new()
-	# Beyond the chunk grid (which draws its own ground): continues the
-	# terrain level outward from the grid's edge.
-	for r in outer_ground_rects():
-		g.terrain_patch(layout.terrain, r, 0.0, Color(0.22, 0.23, 0.24), OUTER_STEP)
-	var gmesh := ArrayMesh.new()
-	gmesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, g.arrays())
-	var gi := MeshInstance3D.new()
-	gi.name = "OutskirtsGround"
-	gi.mesh = gmesh
-	gi.material_override = ground_mat
-	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(gi)
-	if not blocks_m.is_empty():
-		var bi := MeshInstance3D.new()
-		bi.name = "OutskirtsBlocks"
-		bi.mesh = _mesh_from(blocks_m.arrays())
-		bi.material_override = ground_mat
-		bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(bi)
-	if not near_m.is_empty():
-		var ni := MeshInstance3D.new()
-		ni.name = "OutskirtsNear"
-		ni.mesh = _mesh_from(near_m.arrays())
-		ni.material_override = building_mat
-		add_child(ni)
-	if not blocks_m.is_empty():
-		_add_faces(pave_body, blocks_m)
-	add_child(col_body)
-	add_child(pave_body)
 
 
 ## The road surface as a texture for the GPU-driven traffic and pedestrians
@@ -1431,6 +1419,32 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mmi)
+		if kind == "streetlight" and not _glow_meshes.is_empty():
+			_add_lamp_glow(root, list)
+
+
+## Night light for a chunk's streetlights: a ground pool under each head and
+## a halo round it (two instanced draws per chunk, hidden by day).
+func _add_lamp_glow(root: Node3D, lamps: Array) -> void:
+	for mode in 2:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = _glow_meshes[mode]
+		mm.instance_count = lamps.size()
+		for j in lamps.size():
+			var xf: Transform3D = lamps[j]
+			var head := xf * LAMP_HEAD
+			var at := Vector3(head.x, xf.origin.y + 0.03, head.z) if mode == 0 else head
+			mm.set_instance_transform(j, Transform3D(Basis(), at))
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "LampPools" if mode == 0 else "LampHalos"
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.visibility_range_end = 420.0 if mode == 0 else 700.0
+		mmi.extra_cull_margin = 4.0
+		mmi.visible = _glow_on
+		root.add_child(mmi)
+		_glow_nodes.append(mmi)
 
 
 func _add_traffic(root: Node3D, key: Vector2i) -> void:

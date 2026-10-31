@@ -8,16 +8,18 @@
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
-uniform vec3 sky_top : source_color = vec3(0.36, 0.55, 0.82);
-uniform vec3 sky_horizon : source_color = vec3(0.95, 0.82, 0.68);
+// Sky colours (linear) and the sun, set by Atmosphere every frame as the day
+// turns; `night` 0..1 lights the windows, `wetness` 0..1 darkens and glosses.
+global uniform vec3 sky_top;
+global uniform vec3 sky_horizon;
+global uniform vec3 sun_dir;
+global uniform float night;
+global uniform float wetness;
 uniform vec3 interior_warm : source_color = vec3(1.0, 0.78, 0.48);
 uniform float lit_fraction = 0.025;
 uniform float lit_strength = 0.35;
 uniform float detail_fade_start = 250.0;
 uniform float detail_fade_end = 700.0;
-// Towards the sun (world space): window reveals and sills cast their shadow
-// on the side away from it.
-uniform vec3 sun_dir = vec3(0.73, 0.62, -0.29);
 
 const float KIND_WALL = 0.0;
 const float KIND_TRIM = 1.0;
@@ -117,7 +119,7 @@ void fragment() {
 		albedo = mix(base, ink, max(headline, strap) * detail);
 		albedo = mix(albedo, base * 0.35, stripe);
 		albedo = mix(albedo, vec3(0.16), clamp(frame, 0.0, 1.0) * 0.0);
-		emit = base * 0.18;
+		emit = base * mix(0.18, 1.2, night);  // billboards are floodlit at night
 		rough = 0.55;
 	} else {
 		float glass;
@@ -191,12 +193,20 @@ void fragment() {
 		// Blinds half-drawn in some windows (offices and flats, not shops).
 		float blind_h = step(0.86, hash12(cell * 2.7 + seed * 17.0)) * (shop ? 0.0 : 1.0);
 		float in_blind = blind_h * step(1.0 - hash12(cell + 5.1) * 0.6, fract(uv.y / (style == 1.0 ? 3.0 : 3.6)) + 0.3);
-		float lit = step(1.0 - lit_fraction, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
+		// Lit rooms: a few by day; after dusk they come on one by one (each
+		// window has its own threshold) up to a per-building share, in warm
+		// tungsten, cool office white or the odd blue TV glow.
+		float lit_share = mix(lit_fraction, 0.08 + 0.2 * fract(seed * 3.7), night);
+		float lit = step(1.0 - lit_share, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
+		float lk = hash12(cell * 3.17 + seed * 11.0);
+		vec3 lamp_col = lk < 0.55 ? interior_warm : (lk < 0.88 ? vec3(0.86, 0.9, 1.0) : vec3(0.5, 0.66, 1.0));
+		lamp_col = mix(interior_warm, lamp_col, night);
+		float lit_k = mix(lit_strength, 1.3, night) * (0.45 + 0.75 * hash12(cell * 0.71 + seed));
 		vec3 gcol = mix(interior, refl, 0.25 + 0.6 * fres);
 		// Blinds: a paler band in the glass's own colour, not a beige patch.
 		gcol = mix(gcol, mix(gcol, vec3(0.78, 0.76, 0.72), 0.45) * (0.85 + 0.15 * rnd), in_blind * 0.8 * detail);
-		gcol += interior_warm * lit * lit_strength * 0.35;
-		emit = interior_warm * lit * lit_strength * glass * 0.5;
+		gcol += lamp_col * lit * lit_k * 0.35 * (1.0 - night * 0.6);
+		emit = lamp_col * lit * lit_k * glass * 0.5;
 		// Window reveal: slightly darker frame around each opening.
 		vec3 framed = mix(wall, wall * 0.72, (1.0 - glass) * frame * detail);
 		bool punched = !shop && style != 2.0 && style != 6.0 && v_kind != KIND_GLASS;
@@ -249,7 +259,7 @@ void fragment() {
 			albedo = mix(albedo, mix(shop_in, refl, 0.22 + 0.5 * fres), glass * (1.0 - riser));
 			albedo = mix(albedo, base * 0.5, max(riser, max(mull, transom) * glass) * detail);
 			albedo = mix(albedo, vec3(0.08, 0.07, 0.07), door * 0.85 * detail);
-			emit += interior_warm * glass * (1.0 - door) * (1.0 - riser) * 0.07 * (0.5 + sid) * detail;
+			emit += interior_warm * glass * (1.0 - door) * (1.0 - riser) * mix(0.07, 0.3, night) * (0.5 + sid) * mix(detail, 1.0, night);
 			float fascia = step(3.7, uv.y) * step(uv.y, 4.5);
 			albedo = mix(albedo, sign_col, fascia);
 			// Lettering blocks on the fascia.
@@ -280,8 +290,9 @@ void fragment() {
 		albedo *= mix(vec3(0.5, 0.54, 0.62), vec3(1.0), smoothstep(0.0, 12.0, uv.y));
 		albedo *= mix(0.86, 1.04, smoothstep(6.0, 80.0, uv.y));
 	}
-	ALBEDO = albedo;
-	ROUGHNESS = rough;
+	// Rain: surfaces darken and gloss (glass is already glossy).
+	ALBEDO = albedo * (1.0 - 0.16 * wetness);
+	ROUGHNESS = mix(rough, min(rough, 0.32), wetness * 0.75);
 	METALLIC = metal;
 	SPECULAR = 0.5;
 	EMISSION = emit;

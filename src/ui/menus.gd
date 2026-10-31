@@ -515,6 +515,27 @@ func show_settings(back: Callable) -> void:
 	if OS.is_debug_build():
 		box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))
 	box.add_child(_label("Draw-distance changes apply on next launch.", 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_section("World"))
+	var tod := OptionButton.new()
+	var tod_ids := ["cycle", "day", "sunset", "night"]
+	for n in ["Day & night cycle", "Always day", "Always sunset", "Always night"]:
+		tod.add_item(n)
+	tod.selected = maxi(tod_ids.find(Settings.time_of_day), 0)
+	tod.item_selected.connect(func(i):
+		_tap()
+		Settings.time_of_day = tod_ids[i]
+		Settings.save())
+	box.add_child(_row("Time of day", tod))
+	var wx := OptionButton.new()
+	var wx_ids := ["changing", "clear", "cloudy", "rain", "storm", "fog"]
+	for n in ["Changing", "Clear", "Cloudy", "Rain", "Storm", "Fog"]:
+		wx.add_item(n)
+	wx.selected = maxi(wx_ids.find(Settings.weather), 0)
+	wx.item_selected.connect(func(i):
+		_tap()
+		Settings.weather = wx_ids[i]
+		Settings.save())
+	box.add_child(_row("Weather", wx))
 	box.add_child(_section("Controls"))
 	var aim := OptionButton.new()
 	aim.add_item("SWING button (assisted)")

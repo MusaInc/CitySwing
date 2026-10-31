@@ -40,6 +40,7 @@ const STYLE := {
 	"waterfront": {"angle": 0.0, "jitter": 4.0, "area": 6400.0, "w": 16.0, "bend": 0.02},
 	"docks": {"angle": 0.0, "jitter": 0.0, "area": 9500.0, "w": 18.0, "bend": 0.0},
 	"georgian": {"angle": 28.0, "jitter": 18.0, "area": 4600.0, "w": 13.0, "bend": 0.07},
+	"suburb": {"angle": 12.0, "jitter": 14.0, "area": 5200.0, "w": 13.0, "bend": 0.06},
 }
 
 var seed := 1207
@@ -51,6 +52,12 @@ var roads: Array = []
 var roundabouts: Array = []
 var blocks: Array = []
 var by_name := {}            # name -> road dict
+## Another land (the mainland): its own boulevards (name -> control points)
+## instead of the island's, and no inner ring when inner_radius is 0.
+var custom_majors := {}
+var inner_radius := 245.0
+## Set by mirror_x(): the straight quay is then the east edge.
+var mirrored := false
 
 
 func generate(p_seed: int, p_district: Callable, p_bounds: Rect2, p_reserved: Array = []) -> CityRoads:
@@ -137,7 +144,10 @@ func _arc(path: Array, c: Vector2, r: float, a0: float, a1: float) -> void:
 func _ring_coast() -> PackedVector2Array:
 	var out := PackedVector2Array()
 	for p in coast:
-		out.append(Vector2(p.x + WEST_PROMENADE - ESPLANADE, p.y) if p.x < bounds.position.x + 0.5 else p)
+		if mirrored:
+			out.append(Vector2(p.x - (WEST_PROMENADE - ESPLANADE), p.y) if p.x > bounds.end.x - 0.5 else p)
+		else:
+			out.append(Vector2(p.x + WEST_PROMENADE - ESPLANADE, p.y) if p.x < bounds.position.x + 0.5 else p)
 	return out
 
 
@@ -173,11 +183,15 @@ func _majors() -> Array:
 		# Old Town Crescent: a long curve through the north.
 		"crescent": [Vector2(W, -470), Vector2(200, -500), Vector2(330, -560), Vector2(470, N)],
 	}
+	if not custom_majors.is_empty():
+		defs = custom_majors
 	var out: Array = []
 	for name in defs:
 		var pts := _smooth(PackedVector2Array(defs[name]))
 		roads.append({"pts": pts, "w": MAJOR_W, "kind": "major", "name": name})
 		out.append({"pts": pts, "w": MAJOR_W})
+	if inner_radius <= 0.0:
+		return out
 	# Inner Ring round the business district: a closed, slightly irregular loop.
 	var c := Vector2(560.0, -160.0)
 	var cp := PackedVector2Array()
@@ -188,6 +202,32 @@ func _majors() -> Array:
 	var loop := _smooth_closed(cp)
 	roads.append({"pts": loop, "w": MAJOR_W - 4.0, "kind": "major", "name": "inner", "loop": true})
 	out.append({"pts": loop, "w": MAJOR_W - 4.0, "loop": true})
+	return out
+
+
+## Reflects the whole plan in the vertical line x = axis_sum / 2 (so the
+## straight quay, generated in the west, faces east), keeping polygons
+## counter-clockwise. Call before bake_field().
+func mirror_x(axis_sum: float) -> void:
+	mirrored = true
+	coast = _mirror_poly(coast, axis_sum)
+	for r in roads:
+		var pts := PackedVector2Array()
+		for q in r["pts"]:
+			pts.append(Vector2(axis_sum - q.x, q.y))
+		r["pts"] = pts
+	for rb in roundabouts:
+		rb["c"] = Vector2(axis_sum - rb["c"].x, rb["c"].y)
+	for b in blocks:
+		b["poly"] = _mirror_poly(b["poly"], axis_sum)
+	bounds = Rect2(axis_sum - bounds.end.x, bounds.position.y, bounds.size.x, bounds.size.y)
+
+
+static func _mirror_poly(p: PackedVector2Array, axis_sum: float) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for q in p:
+		out.append(Vector2(axis_sum - q.x, q.y))
+	out.reverse()
 	return out
 
 

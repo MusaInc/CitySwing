@@ -36,6 +36,12 @@ const SEA_REACH := 4000.0
 const BRIDGE_DECK := 24.0
 const BRIDGE_TOWERS := [-80.0, -340.0]
 const BRIDGE_TOWER_TOP := 132.0
+## The mainland (Westbank) is generated like the island but mirrored, so its
+## straight quay faces the strait: plan coordinates x' = MIRROR - x.
+const MIRROR := FAR_SHORE + RIVER_EDGE
+const MAINLAND_PLAN := Rect2(30.0, -500.0, 690.0, 980.0)   # (mirrored plan space)
+## Where the bridge's approach viaduct comes down onto Westbank Hill.
+const APPROACH_END := -800.0
 
 enum Style { STONE, BRICK, GLASS, WAREHOUSE, MODERN, SANDSTONE, DARK_GLASS, DECO }
 
@@ -74,9 +80,16 @@ var anchor_lines: Array = []   # [from:Vector3, to:Vector3] web anchors on thin 
 var kit_obbs: Array = []
 var kit_hulls: Array = []
 var pieces: SetPieces
+## Railways the trains run on (and the Loop Line's viaduct and stations).
+var rail: RailNetwork
 var roads: CityRoads
 ## The ground (see CityTerrain): the landform on a regular grid.
 var terrain := CityTerrain.new()
+## True for the mainland's layout (see generate_mainland).
+var is_mainland := false
+## The mainland's layout, on the island's (CityWorld sets it): is_water and
+## ground_y answer for both lands.
+var mainland: CityLayout
 var _sites: Array = []         # [Rect2 (local), district, rot, pivot] construction lots, built after the blocks
 var _block_grid := {}          # Vector2i (BLOCK_CELL cells) -> block indices
 const BLOCK_CELL := 40.0
@@ -107,10 +120,78 @@ func generate(p_seed := 1207) -> CityLayout:
 	_construction()
 	_viaduct()
 	_skybridges()
+	rail = RailNetwork.new(self)
 	pieces.elevated_rail()
+	rail.build_loop()
 	pieces.lighthouse()
 	_traffic()
 	_sea()
+	return self
+
+
+## Westbank, the mainland across the strait: the same city machinery (organic
+## streets, blocks, buildings, street props, traffic) on a smaller, lower,
+## leafier plan – a strip of waterfront towers facing the island, a small
+## high street round a centre, and terraced suburbs up the hill behind. The
+## bridge's approach lands on the hill at APPROACH_END; the strip under it is
+## kept clear (a plaza).
+func generate_mainland(p_seed := 1207) -> CityLayout:
+	is_mainland = true
+	seed = p_seed * 3 + 11
+	rng.seed = seed
+	pieces = SetPieces.new(self)
+	rail = RailNetwork.new(self)
+	var under := Rect2(APPROACH_END, BRIDGE_Z - 13.0, FAR_SHORE - 62.0 - APPROACH_END, 26.0)
+	reserved.append(under)
+	roads = CityRoads.new()
+	roads.inner_radius = 0.0
+	var px := func(x: float) -> float: return MIRROR - x  # world x <-> plan x
+	var N := MAINLAND_PLAN.position.y - 60.0
+	var S := MAINLAND_PLAN.end.y + 60.0
+	var E := MAINLAND_PLAN.end.x + 60.0
+	var W := MAINLAND_PLAN.position.x - 40.0
+	var land := float(px.call(APPROACH_END))
+	roads.custom_majors = {
+		# Westway: from where the approach lands, west over the hill.
+		"westway": [Vector2(land - 6.0, BRIDGE_Z), Vector2(land + 70.0, BRIDGE_Z + 6.0), Vector2(land + 170.0, 20.0),
+			Vector2(land + 260.0, 34.0), Vector2(E, 40.0)],
+		# Parkway: north coast to south coast behind the waterfront.
+		"parkway": [Vector2(470.0, N), Vector2(450.0, -260.0), Vector2(470.0, -20.0), Vector2(440.0, 180.0),
+			Vector2(480.0, S)],
+		# Shore Road and Harbour Road curve in from the quay.
+		"shore": [Vector2(W, -300.0), Vector2(160.0, -330.0), Vector2(300.0, -420.0), Vector2(400.0, N)],
+		"harbour": [Vector2(W, 250.0), Vector2(170.0, 235.0), Vector2(320.0, 300.0), Vector2(430.0, S)],
+	}
+	var keep: Array = [_rect_poly(Rect2(float(px.call(under.end.x)), under.position.y, under.size.x, under.size.y))]
+	roads.generate(seed, func(x: float, z: float) -> String: return district(MIRROR - x, z), MAINLAND_PLAN, keep)
+	roads.mirror_x(MIRROR)
+	# The strip under the approach viaduct: cut out of the blocks it crosses
+	# and kept as an open plaza.
+	var cut := _rect_poly(under)
+	var kept: Array = []
+	for b in roads.blocks:
+		for q in Geometry2D.clip_polygons(b["poly"], cut):
+			if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 60.0:
+				kept.append({"poly": q, "district": b["district"], "kind": b["kind"]})
+		for q in Geometry2D.intersect_polygons(b["poly"], cut):
+			if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 30.0:
+				kept.append({"poly": q, "district": b["district"], "kind": "plaza"})
+	roads.blocks = kept
+	roads.bake_field(2.0)
+	coast = roads.coast
+	island = _bbox(coast)
+	terrain.build(island.grow(80.0))
+	# Lamps along the approach viaduct.
+	var lx := FAR_SHORE - 20.0
+	while lx > APPROACH_END + 10.0:
+		for sz: float in [-1.0, 1.0]:
+			props.append(["streetlight", Transform3D(Basis(Vector3.UP, 0.0 if sz > 0.0 else PI),
+				Vector3(lx, approach_y(lx), BRIDGE_Z + sz * 8.6))])
+		lx -= 36.0
+	_blocks()
+	_construction()
+	_skybridges()
+	_traffic()
 	return self
 
 
@@ -118,7 +199,8 @@ func _sea() -> void:
 	# The strait (west, the old river) and the open sea everywhere else; the
 	# island's land is cut out of it by is_water().
 	water.append(Rect2(FAR_SHORE, -2500, RIVER_EDGE - FAR_SHORE, 5000))
-	sea = [Rect2(RIVER_EDGE, -SEA_REACH, SEA_REACH, SEA_REACH * 2.0)]
+	sea = [Rect2(RIVER_EDGE, -SEA_REACH, SEA_REACH, SEA_REACH * 2.0),
+		Rect2(-SEA_REACH, -SEA_REACH, SEA_REACH + FAR_SHORE, SEA_REACH * 2.0)]  # (round the mainland too)
 	water.append_array(sea)
 
 
@@ -281,7 +363,8 @@ func _blocks() -> void:
 				blk["level"] = terrain.poly_level(poly)
 				_lift(snap, float(blk["level"]) - CityTerrain.KERB)
 				continue
-		if dist == "georgian" and brng.randf() < 0.07 or dist == "midtown" and brng.randf() < 0.05:
+		if dist == "georgian" and brng.randf() < 0.07 or dist == "midtown" and brng.randf() < 0.05 \
+				or dist == "suburb" and brng.randf() < 0.12:
 			blk["kind"] = "park"
 			_park_props(poly, brng)
 			_lift_on_slope(snap)
@@ -396,6 +479,8 @@ func block_at(x: float, z: float) -> int:
 ## Height of what you'd stand on at (x, z): a block's pavement or the road.
 ## (Basins are water: their quay ring is the block level.)
 func ground_y(x: float, z: float) -> float:
+	if mainland != null and x < FAR_SHORE:
+		return mainland.ground_y(x, z)
 	var i := block_at(x, z)
 	if i >= 0:
 		var lv: float = blocks[i]["level"]
@@ -464,6 +549,7 @@ const LOTS := {
 	"waterfront": [18.0, 30.0, 20.0, 30.0],
 	"docks": [20.0, 36.0, 20.0, 32.0],
 	"georgian": [13.0, 22.0, 16.0, 24.0],
+	"suburb": [12.0, 20.0, 14.0, 22.0],
 }
 
 
@@ -920,8 +1006,12 @@ func is_water(p: Vector3) -> bool:
 	for w in basins:
 		if (w as Rect2).has_point(q):
 			return true
+	if is_mainland:
+		return not Geometry2D.is_point_in_polygon(q, coast)
 	if p.x < RIVER_EDGE:
-		return p.x > FAR_SHORE
+		if p.x > FAR_SHORE:
+			return true
+		return mainland != null and mainland.is_water(p)
 	return not Geometry2D.is_point_in_polygon(q, coast)
 
 
@@ -952,6 +1042,12 @@ func tallest_near(p: Vector2, radius: float) -> float:
 
 # ------------------------------------------------- buildings, kit, structures
 func district(x: float, z: float) -> String:
+	if is_mainland:
+		if FAR_SHORE - x < 190.0 and absf(z) < 380.0:
+			return "waterfront"
+		if Vector2(x, z).distance_to(Vector2(-930.0, -60.0)) < 170.0:
+			return "midtown"
+		return "suburb"
 	if x < 250.0 and z > -330.0 and z < 260.0:
 		return "waterfront"
 	if z >= 260.0 and x < 560.0:
@@ -1058,6 +1154,14 @@ func _split(r: Rect2, out: Array, brng: RandomNumberGenerator, min_size: float, 
 ## grain silos) mixed with loft and residential towers. Old Town (georgian):
 ## mansion blocks with church and civic towers above them.
 func _height_for(dist: String, c: Vector2, brng: RandomNumberGenerator) -> float:
+	if is_mainland and dist != "suburb":
+		# Westbank is lower and leafier than the island: its towers top out
+		# well under the island's, so the city's skyline stays the star.
+		return _height_for_island(dist, c, brng) * 0.62
+	return _height_for_island(dist, c, brng)
+
+
+func _height_for_island(dist: String, c: Vector2, brng: RandomNumberGenerator) -> float:
 	var r := brng.randf()
 	match dist:
 		"cbd":
@@ -1072,6 +1176,10 @@ func _height_for(dist: String, c: Vector2, brng: RandomNumberGenerator) -> float
 			return brng.randf_range(52.0, 112.0) if r < 0.75 else brng.randf_range(120.0, 175.0)
 		"docks":
 			return brng.randf_range(28.0, 44.0) if r < 0.45 else brng.randf_range(62.0, 150.0)
+		"suburb":
+			if r < 0.7:
+				return brng.randf_range(13.0, 30.0)
+			return brng.randf_range(32.0, 54.0) if r < 0.95 else brng.randf_range(58.0, 86.0)
 		_:
 			if r < 0.45:
 				return brng.randf_range(36.0, 60.0)
@@ -1130,7 +1238,7 @@ func _form_for(dist: String, h: float, r: Rect2, frng: RandomNumberGenerator) ->
 func _style_for(dist: String, h: float, form: String, brng: RandomNumberGenerator) -> int:
 	if dist == "docks" and h < 45.0:
 		return Style.WAREHOUSE
-	if dist == "georgian" and h < 62.0:
+	if dist in ["georgian", "suburb"] and h < 62.0:
 		var g := brng.randf()
 		return Style.BRICK if g < 0.6 else (Style.SANDSTONE if g < 0.8 else Style.STONE)
 	if form in ["pencil", "twin", "cantilever"] and h > 70.0:
@@ -1593,8 +1701,21 @@ func _bridge() -> void:
 	# Anchorages (solid stone blocks at both ends).
 	_add(_building([[x_east - 2.0, zc - 14.0, x_east + 14.0, zc + 14.0, 0.0, deck + 6.0]], Style.STONE,
 		Color(0.62, 0.58, 0.52), "plain"))
-	_add(_building([[x_west - 16.0, zc - 14.0, x_west + 2.0, zc + 14.0, -2.0, deck + 6.0]], Style.STONE,
+	# West anchorage: the roadway runs over it onto the approach viaduct; the
+	# cables go down into stone housings either side.
+	_add(_building([[x_west - 16.0, zc - 10.5, x_west + 2.0, zc + 10.5, -2.0, deck - 2.0]], Style.STONE,
 		Color(0.62, 0.58, 0.52), "plain"))
+	for sz: float in [-1.0, 1.0]:
+		_add(_building([[x_west - 16.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_west + 2.0,
+			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 3.5]], Style.STONE, Color(0.62, 0.58, 0.52), "plain"))
+	_bridge_approach(x_west - 16.0, zc, deck)
+	# Lamps along both sides of the deck (lit at night like the streets').
+	var lx := x_east - 12.0
+	while lx > x_west:
+		for sz: float in [-1.0, 1.0]:
+			props.append(["streetlight", Transform3D(Basis(Vector3.UP, 0.0 if sz > 0.0 else PI),
+				Vector3(lx, deck, zc + sz * 8.6))])
+		lx -= 36.0
 	var cables: Array = []
 	for sz: float in [-1.0, 1.0]:
 		var pts := PackedVector3Array()
@@ -1613,7 +1734,7 @@ func _bridge() -> void:
 			pts.append(Vector3(x, sag + (top - 1.0 - sag) * k * k, z))
 		for i in range(1, 7):
 			var u := i / 6.0
-			pts.append(Vector3(lerpf(tb, x_west - 4.0, u), lerpf(top - 1.0, deck + 5.0, u) - sin(u * PI) * 5.0, z))
+			pts.append(Vector3(lerpf(tb, x_west - 8.0, u), lerpf(top - 1.0, deck + 3.0, u) - sin(u * PI) * 5.0, z))
 		cables.append(pts)
 		for i in pts.size() - 1:
 			if pts[i].y > deck + 9.0 or pts[i + 1].y > deck + 9.0:
@@ -1623,6 +1744,52 @@ func _bridge() -> void:
 
 
 # ------------------------------------------------------- elevated & bridges
+## Road height on the bridge's approach (west anchorage → Westbank Hill).
+static func approach_y(x: float) -> float:
+	var x0 := FAR_SHORE - 2.0
+	var y1 := CityTerrain.mainland_design(APPROACH_END, BRIDGE_Z) + CityTerrain.KERB
+	var t := clampf((x0 - x) / (x0 - APPROACH_END), 0.0, 1.0)
+	return lerpf(BRIDGE_DECK, y1, t * t * (3.0 - 2.0 * t))
+
+
+## The bridge's approach viaduct on the mainland: from the west anchorage
+## (x0, at deck height) gently down onto Westbank Hill at APPROACH_END, on
+## twin columns every 40 m, with parapets and lane markings.
+func _bridge_approach(x0: float, zc: float, deck: float) -> void:
+	var k := _kit("bridge_approach")
+	var x1 := APPROACH_END
+	var yf := func(x: float) -> float: return approach_y(x)
+	var conc := Color(0.6, 0.59, 0.56)
+	var n := ceili((x0 - x1) / 18.0)
+	for i in n:
+		var xa := lerpf(x0, x1, float(i) / n)
+		var xb := lerpf(x0, x1, float(i + 1) / n)
+		var A := Vector3(xa + 0.2, float(yf.call(xa)), zc)
+		var B := Vector3(xb - 0.2, float(yf.call(xb)), zc)
+		_kbeam(k, A + Vector3.DOWN * 0.8, B + Vector3.DOWN * 0.8, 20.0, 1.6, Color(0.23, 0.24, 0.26))
+		_kbeam(k, A + Vector3.DOWN * 2.0, B + Vector3.DOWN * 2.0, 12.0, 1.2, conc, false)
+		for sz: float in [-1.0, 1.0]:
+			var o := Vector3(0.0, 0.0, sz * 9.8)
+			_kbeam(k, A + o + Vector3.UP * 0.55, B + o + Vector3.UP * 0.55, 0.4, 1.1, conc)
+			_anchor(A + o * 1.03 + Vector3.DOWN * 1.4, B + o * 1.03 + Vector3.DOWN * 1.4)
+			# Lane lines (painted, no collision): edge lines and lane dashes.
+			_kbeam(k, A + Vector3(0, 0.01, sz * 7.6), B + Vector3(0, 0.01, sz * 7.6), 0.15, 0.02, Color(0.9, 0.9, 0.86),
+				false)
+			if i % 2 == 0:
+				_kbeam(k, A + Vector3(0, 0.01, sz * 3.8), A.lerp(B, 0.4) + Vector3(0, 0.01, sz * 3.8), 0.15, 0.02,
+					Color(0.9, 0.9, 0.86), false)
+		_kbeam(k, A + Vector3(0, 0.01, 0.0), B + Vector3(0, 0.01, 0.0), 0.3, 0.02, Color(0.92, 0.78, 0.25), false)
+	var x := x0 - 30.0
+	while x > x1 + 30.0:
+		var y := float(yf.call(x)) - 2.6
+		var g := CityTerrain.mainland_design(x, zc) - 0.5
+		if y - g > 2.0:
+			for sz: float in [-1.0, 1.0]:
+				_kbeam(k, Vector3(x, g, zc + sz * 5.5), Vector3(x, y, zc + sz * 5.5), 1.8, 1.8, conc)
+			_kbeam(k, Vector3(x, y + 0.3, zc - 8.0), Vector3(x, y + 0.3, zc + 8.0), 1.6, 1.2, conc)
+		x -= 40.0
+
+
 
 
 func _viaduct() -> void:
@@ -1631,4 +1798,7 @@ func _viaduct() -> void:
 	while z < MAX_Z - 25.0:
 		landmarks.append(["viaduct", Transform3D(Basis(Vector3.UP, PI), Vector3(48, 0, z + 25.0))])
 		z += 25.0
-	_add(_building([[43.5, MIN_Z + 20.0, 52.5, z, 9.8, 12.0]], Style.MODERN, Color(0.2, 0.24, 0.26), "invisible"))
+	# (Its walkable deck: the arches and girders collide from the mesh itself;
+	# the Loop Line's trains run on top, so this stops at the deck.)
+	_add(_building([[43.5, MIN_Z + 20.0, 52.5, z, 9.8, RailNetwork.VIADUCT_DECK]], Style.MODERN, Color(0.2, 0.24, 0.26),
+		"invisible"))

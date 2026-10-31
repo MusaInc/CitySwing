@@ -309,6 +309,102 @@ def viaduct():
     export("viaduct.glb", [join("viaduct", p)])
 
 
+# ------------------------------------------------------------------ trains
+TRAIN_PROFILE = [(1.40, 0.95), (1.45, 1.35), (1.46, 2.7), (1.40, 3.2), (1.2, 3.6), (0.75, 3.84), (0.0, 3.9)]
+
+
+def _ring(prof, y, sx=1.0, sz=1.0):
+    """Closed cross-section (mirrored half profile) at Y = y, scaled about the floor."""
+    half = [(x * sx, 0.95 + (z - 0.95) * sz) for x, z in prof]
+    full = half + [(-x, z) for x, z in reversed(half[:-1])]
+    return [Vector((x, y, z)) for x, z in full]
+
+
+def loft_rings(name, rings, material, cap_ends=True):
+    """Skin between successive cross-section rings (same vertex count)."""
+    bm = bmesh.new()
+    vrings = [[bm.verts.new(v) for v in r] for r in rings]
+    n = len(rings[0])
+    for a, b in zip(vrings, vrings[1:]):
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    if cap_ends:
+        bm.faces.new(list(reversed(vrings[0])))
+        bm.faces.new(vrings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    ob = new_obj(name, bm, material)
+    for p in ob.data.polygons:
+        p.use_smooth = True
+    return ob
+
+
+def train_car(cab):
+    """Elevated-railway car, 17.6 m over the couplers, origin at rail top under
+    its centre, front (+Y in Blender = -Z in Godot). Cab cars have a raked
+    nose with a wrap windscreen and headlights at the front."""
+    reset()
+    body = mat("train_body", (0.88, 0.87, 0.83), 0.35, 0.1)
+    stripe = mat("train_stripe", (0.72, 0.09, 0.08), 0.4, 0.1)
+    glass = mat("train_window", (0.07, 0.09, 0.11), 0.08, 0.3, emit=(1.0, 0.86, 0.62))
+    dark = mat("train_dark", (0.12, 0.12, 0.13), 0.6, 0.4)
+    roof = mat("train_roof", (0.55, 0.56, 0.57), 0.5, 0.3)
+    door = mat("train_door", (0.3, 0.32, 0.34), 0.4, 0.3)
+    lamp = mat("lamp", (1.0, 0.95, 0.85), 0.2, 0.0, emit=(1.0, 0.95, 0.85))
+    p = []
+    L = 8.8
+    if cab:
+        rings = [_ring(TRAIN_PROFILE, -L), _ring(TRAIN_PROFILE, 6.2), _ring(TRAIN_PROFILE, 7.4, 0.97, 0.94),
+                 _ring(TRAIN_PROFILE, 8.3, 0.88, 0.8), _ring(TRAIN_PROFILE, 8.8, 0.74, 0.62)]
+    else:
+        rings = [_ring(TRAIN_PROFILE, -L), _ring(TRAIN_PROFILE, L)]
+    p.append(loft_rings("body", rings, body))
+    side_end = 6.0 if cab else L - 0.4
+    for sx in (-1, 1):
+        x = sx * 1.47
+        # Window band with pillars, broken by two doors a side.
+        p.append(box("band", (0.03, side_end + L - 0.8, 0.95), (x, (side_end - L + 0.4) / 2, 2.4), glass))
+        for yy in [y * 0.5 for y in range(-16, int(side_end * 2) - 1, 4)]:
+            p.append(box("pillar", (0.05, 0.16, 1.0), (x * 1.005, yy, 2.4), body))
+        for dy in (-4.4, 3.6):
+            p.append(box("door", (0.05, 1.5, 2.0), (x * 1.008, dy, 2.0), door))
+            p.append(box("doorwin", (0.06, 0.5, 0.8), (x * 1.01, dy - 0.36, 2.45), glass))
+            p.append(box("doorwin", (0.06, 0.5, 0.8), (x * 1.01, dy + 0.36, 2.45), glass))
+        p.append(box("stripe", (0.04, side_end + L - 0.8, 0.22), (x * 1.0, (side_end - L + 0.4) / 2, 1.62), stripe))
+        p.append(box("skirt", (0.05, 2 * L - 1.0, 0.18), (sx * 1.42, 0, 1.06), dark))
+    # Underframe, equipment boxes, bogies with wheels.
+    p.append(box("frame", (2.5, 2 * L - 1.2, 0.5), (0, 0, 0.72), dark))
+    for by in (-6.2, 6.2):
+        p.append(box("bogie", (2.3, 2.8, 0.45), (0, by, 0.48), dark, bevel=0.05))
+        for wy in (-0.9, 0.9):
+            for wx in (-0.75, 0.75):
+                w = cyl("wheel", 0.42, 0.14, (0, 0, 0), dark, 12)
+                w.rotation_euler = (0, math.pi / 2, 0)
+                w.location = (wx - 0.07, by + wy, 0.42)
+                p.append(w)
+    for ey in (-2.0, 1.4):
+        p.append(box("equip", (1.6, 1.8, 0.4), (0, ey, 0.35), dark))
+    # Roof: air-con pods and a walkway strip.
+    for ry in (-4.0, 3.0):
+        p.append(box("ac", (1.7, 2.6, 0.32), (0, ry, 3.95), roof, bevel=0.08))
+    p.append(box("roofstrip", (0.5, 2 * L - 2.5, 0.06), (0, -0.4 if cab else 0, 3.92), roof))
+    # Gangway ends.
+    for gy in ([-L] if cab else [-L, L]):
+        p.append(box("gangway", (1.3, 0.3, 2.5), (0, gy + (0.15 if gy < 0 else -0.15), 2.2), dark))
+    if cab:
+        # Raked windscreen, headlights, a crimson nose band and a coupler.
+        ws = box("windscreen", (2.3, 0.06, 1.05), (0, 8.15, 2.95), glass)
+        ws.rotation_euler = (math.radians(-38), 0, 0)
+        p.append(ws)
+        p.append(box("nose_band", (2.15, 0.08, 0.32), (0, 8.72, 1.62), stripe))
+        for lx in (-0.75, 0.75):
+            p.append(box("headlight", (0.42, 0.06, 0.18), (lx, 8.78, 1.3), lamp))
+        p.append(box("coupler", (0.3, 0.6, 0.25), (0, 8.95, 0.85), dark))
+        for wx in (-1.0, 1.0):  # side cab windows
+            p.append(box("cabwin", (0.04, 0.9, 0.7), (wx * 1.4, 7.0, 2.6), glass))
+    export("train_cab.glb" if cab else "train_car.glb", [join("train_cab" if cab else "train_car", p)])
+
+
 def crane():
     reset()
     paint = mat("crane_paint", (0.86, 0.6, 0.16), 0.6, 0.3)
@@ -596,6 +692,7 @@ if __name__ == "__main__":
     # Cars: tools/blender/build_cars.py; trees, pedestrians, street furniture:
     # tools/blender/build_street.py
     for fn in (water_tower, ac_unit, antenna, streetlight, clock_crown, harbour_dome, beacon,
-               cathedral_tower_top, viaduct, crane, traffic_light, roof_hut):
+               cathedral_tower_top, viaduct, crane, traffic_light, roof_hut,
+               lambda: train_car(False), lambda: train_car(True)):
         fn()
     print("KIT DONE")

@@ -5,9 +5,9 @@ extends Node
 ## All sounds are synthesised by tools/audio/gen_audio.py.
 
 const DIR := "res://assets/audio/"
-const LOOPS := ["wind_loop", "rope_tension_loop", "city_ambience", "music_loop", "traffic_loop"]
+const LOOPS := ["wind_loop", "rope_tension_loop", "city_ambience", "music_loop", "traffic_loop", "rain_loop"]
 const SHOTS := ["knockout", "grapple_fire", "grapple_attach", "grapple_miss", "release_whoosh", "rope_snap", "land", "roll",
-	"impact", "splash", "checkpoint", "finish", "fail", "ui_click", "wall_kick", "bump", "horn",
+	"impact", "splash", "thunder", "checkpoint", "finish", "fail", "ui_click", "wall_kick", "bump", "horn",
 	"step_concrete_0", "step_concrete_1", "step_concrete_2", "step_gravel_0", "step_gravel_1", "step_gravel_2",
 	"step_grass_0", "step_grass_1", "step_grass_2"]
 
@@ -16,6 +16,7 @@ var _step_i := 0
 var _horn_in := 9.0
 
 var player: Player
+var atmosphere: Atmosphere
 var _loops := {}
 var _shots := {}
 var _pool: Array[AudioStreamPlayer] = []
@@ -101,6 +102,13 @@ func attach_player(p: Player) -> void:
 		Settings.haptic(25, 0.6))
 
 
+func attach_weather(a: Atmosphere) -> void:
+	atmosphere = a
+	a.thunder.connect(func(delay: float, strength: float):
+		get_tree().create_timer(delay).timeout.connect(func():
+			play("thunder", linear_to_db(0.35 + 0.5 * strength), randf_range(0.85, 1.1))))
+
+
 func _on_landed(speed: float, _street: bool) -> void:
 	if player and player.params and speed > player.params.roll_landing_speed:
 		play("roll", -2.0)
@@ -147,6 +155,10 @@ func _process(dt: float) -> void:
 		# Street-level traffic: loud on the pavement, gone above the rooftops.
 		var low := 1.0 - clampf(player.height_above_ground() / 60.0, 0.0, 1.0)
 		traffic.volume_db = lerpf(traffic.volume_db, linear_to_db(maxf(low * low * 0.4, 0.002)), k)
+	var rain: AudioStreamPlayer = _loops.get("rain_loop")
+	if rain:
+		var r: float = atmosphere.w["rain"] if atmosphere else 0.0
+		rain.volume_db = lerpf(rain.volume_db, linear_to_db(maxf(r * 0.5, 0.001)), k)
 	_horn_in -= dt
 	if _horn_in <= 0.0:
 		_horn_in = randf_range(8.0, 24.0)
@@ -178,7 +190,7 @@ func _footsteps(dt: float) -> void:
 	var pos := player.global_position
 	var surf := "gravel" if player.height_above_ground() > 3.0 else "concrete"
 	var world := get_parent().get_node_or_null("World") if get_parent() else null
-	if surf == "concrete" and world and world.get("layout") and world.layout._in_park(pos):
+	if surf == "concrete" and world and world.get("layout") and world.layout.is_park(Vector2(pos.x, pos.z)):
 		surf = "grass"
 	_step_i = (_step_i + 1 + randi() % 2) % 3
 	play("step_%s_%d" % [surf, _step_i], linear_to_db(clampf(0.25 + vh / 14.0, 0.25, 0.75)), randf_range(0.94, 1.06))

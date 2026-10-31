@@ -362,7 +362,50 @@ def traffic_loop():
     write("traffic_loop.wav", norm(loopify(x, 1.0), 0.6))
 
 
-ALL = (wind_loop, rope_tension_loop, city_ambience, music_loop, grapple_fire, grapple_attach, grapple_miss,
+def rain_loop():
+    # Steady rain: broadband patter (dense random clicks through a band-pass)
+    # over a soft hiss, with slow swells.
+    d = 10.0
+    n = int(d * SR)
+    hiss = bandpass(noise(d), 900, 7000) * 0.35
+    clicks = (rng.random(n) > 0.9965) * rng.uniform(-1, 1, n)
+    patter = bandpass(clicks, 1500, 6000) * 3.0
+    drip = bandpass((rng.random(n) > 0.9995) * rng.uniform(-1, 1, n), 300, 1400) * 4.0
+    swell = 0.8 + 0.2 * np.sin(2 * np.pi * t(d) / 5.0)
+    x = (hiss + patter + drip) * swell
+    write("rain_loop.wav", norm(loopify(x, 1.0), 0.6))
+
+
+def thunder():
+    # A crack, then a long rolling rumble that fades.
+    d = 6.0
+    n = int(d * SR)
+    crack = bandpass(noise(d), 400, 3000) * env(n, 0.005, 0.35, curve=6.0)
+    roll = lp_fast(noise(d), 120) * 4.0
+    rollenv = env(n, 0.25, 5.5, curve=3.0) * (0.7 + 0.3 * np.sin(2 * np.pi * t(d) * 1.3) ** 2)
+    x = crack * 0.5 + roll * rollenv
+    write("thunder.wav", norm(x, 0.9))
+
+
+def train_loop():
+    # Elevated train passing: wheel rumble, rail-joint clacks every ~0.7 s.
+    d = 8.4
+    n = int(d * SR)
+    tt = t(d)
+    rumble = lp_fast(noise(d), 220) * 1.5 + 0.2 * np.sin(2 * np.pi * 48 * tt)
+    clack = np.zeros(n)
+    for k in range(12):
+        for off in (0.0, 0.11):
+            i = int((k * 0.7 + off) * SR)
+            ln = int(0.06 * SR)
+            g = bandpass(noise(0.06), 200, 1600) * env(ln, 0.002, 0.05)
+            clack[i:i + ln] += g[: len(clack[i:i + ln])] * 2.5
+    squeal = 0.04 * np.sin(2 * np.pi * (2200 + 60 * np.sin(2 * np.pi * 0.3 * tt)) * tt)
+    x = rumble + clack + squeal
+    write("train_loop.wav", norm(loopify(x, 0.7), 0.7))
+
+
+ALL = (rain_loop, thunder, train_loop, wind_loop, rope_tension_loop, city_ambience, music_loop, grapple_fire, grapple_attach, grapple_miss,
        release, rope_snap, landing, roll, impact, splash, checkpoint, finish, fail, ui_click, wall_kick, knockout,
        footsteps, bump, horn, traffic_loop)
 

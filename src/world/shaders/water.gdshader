@@ -5,8 +5,10 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 
 uniform vec3 deep : source_color = vec3(0.08, 0.17, 0.2);
 uniform vec3 shallow : source_color = vec3(0.2, 0.32, 0.33);
-uniform vec3 sky_top : source_color = vec3(0.36, 0.55, 0.82);
-uniform vec3 sky_horizon : source_color = vec3(0.95, 0.82, 0.68);
+global uniform vec3 sky_top;
+global uniform vec3 sky_horizon;
+global uniform float rain;
+global uniform float night;
 
 float hash12(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -22,7 +24,10 @@ float vnoise(vec2 p) {
 }
 
 float waves(vec2 p) {
-	return vnoise(p * 0.08 + vec2(TIME * 0.05, TIME * 0.03)) * 0.6 + vnoise(p * 0.31 - vec2(TIME * 0.11, -TIME * 0.07)) * 0.4;
+	float w = vnoise(p * 0.08 + vec2(TIME * 0.05, TIME * 0.03)) * 0.6 + vnoise(p * 0.31 - vec2(TIME * 0.11, -TIME * 0.07)) * 0.4;
+	// Rain: a fine, fast pock-marking on top of the swell (and a choppier swell).
+	w += rain * (vnoise(p * 2.4 + vec2(TIME * 1.7, -TIME * 1.3)) * 0.22 + vnoise(p * 0.5 + TIME * 0.2) * 0.15);
+	return w;
 }
 
 void fragment() {
@@ -36,6 +41,6 @@ void fragment() {
 	vec3 r = reflect(-view_w, nw);
 	vec3 refl = mix(sky_horizon, sky_top, clamp(r.y * 1.4, 0.0, 1.0));
 	ALBEDO = mix(mix(deep, shallow, h * 0.5), refl, 0.15 + 0.75 * fres);
-	ROUGHNESS = 0.06;
+	ROUGHNESS = 0.06 + 0.1 * rain;
 	SPECULAR = 0.8;
 }

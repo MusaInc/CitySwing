@@ -10,6 +10,8 @@ render_mode cull_back, diffuse_burley;
 // the terrain vertex by vertex, so they pitch with the street's grade.
 global uniform sampler2D ground_height : filter_linear, repeat_disable;
 global uniform vec4 ground_rect;
+global uniform float night;
+global uniform float wetness;
 uniform vec3 tint : source_color = vec3(1.0);
 uniform bool use_instance_color = false;
 uniform float emission = 0.0;
@@ -34,7 +36,7 @@ void vertex() {
 void fragment() {
 	vec3 c = use_instance_color ? COLOR.rgb : tint;
 	ALBEDO = c;
-	ROUGHNESS = roughness;
+	ROUGHNESS = mix(roughness, roughness * 0.5, wetness);
 	METALLIC = use_instance_color ? 0.35 : 0.0;
-	EMISSION = tint * emission;
+	EMISSION = tint * emission * (1.0 + 3.5 * night);  // headlights and tail lights after dark
 }

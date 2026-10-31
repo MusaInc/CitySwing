@@ -9,6 +9,9 @@ shader_type spatial;
 render_mode cull_back, diffuse_burley;
 
 uniform vec3 rim_color : source_color = vec3(1.0, 0.88, 0.72);
+global uniform vec3 sun_dir;
+global uniform float night;
+global uniform float wetness;
 uniform float rim_strength = 0.55;
 // Same space as the baked vertex colours.
 uniform vec3 suit_color = vec3(0.796, 0.098, 0.09);
@@ -67,13 +70,14 @@ void fragment() {
 	AO = ao;
 	AO_LIGHT_AFFECT = 0.0;
 	// Suit fabric has a soft sheen; trainers and gloves stay matte.
-	ROUGHNESS = mix(0.6, 0.3, glow);
+	ROUGHNESS = mix(mix(0.6, 0.38, wetness), 0.3, glow);
 	EMISSION = COLOR.rgb * glow * 2.5;
 	// Two-tone rim: warm on the sun side, cool sky-blue elsewhere, so the
 	// silhouette separates from both lit and shaded facades at a distance.
 	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	vec3 n_w = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
-	float sun_side = clamp(dot(n_w, normalize(vec3(0.73, 0.62, -0.29))) * 0.5 + 0.5, 0.0, 1.0);
-	vec3 rim_c = mix(vec3(0.55, 0.75, 1.0), rim_color, sun_side);
-	EMISSION += rim_c * rim * rim_strength * (1.0 - glow) * ao;
+	float sun_side = clamp(dot(n_w, sun_dir) * 0.5 + 0.5, 0.0, 1.0);
+	vec3 rim_c = mix(vec3(0.55, 0.75, 1.0), mix(rim_color, vec3(0.6, 0.7, 1.0), night), sun_side);
+	// (At night a cooler, softer moonlit rim keeps the silhouette readable.)
+	EMISSION += rim_c * rim * rim_strength * mix(1.0, 0.75, night) * (1.0 - glow) * ao;
 }

@@ -36,6 +36,10 @@ var sfx_volume := 1.0
 ## Post-process style, a LookFilter.STYLES key. Clean (no filter) since 0.5:
 ## the unfiltered render reads better; others stay for `--look=` comparisons.
 var look := "clean"
+## Sky: "cycle" (day → night → day, ~16 min) or a fixed "day" / "sunset" / "night".
+var time_of_day := "cycle"
+## Weather: "changing" (drifts between clear, cloudy, rain, storm, fog) or one fixed state.
+var weather := "changing"
 var tuning_overrides := {}  # SwingParams property -> value, from the in-game tuning panel
 
 
@@ -46,6 +50,8 @@ func _ready() -> void:
 		fps_60 = cfg.get_value("gfx", "fps_60", fps_60)
 		show_perf = cfg.get_value("gfx", "show_perf", show_perf)
 		look = cfg.get_value("gfx", "look", look)
+		time_of_day = cfg.get_value("gfx", "time_of_day", time_of_day)
+		weather = cfg.get_value("gfx", "weather", weather)
 		haptics = cfg.get_value("input", "haptics", haptics)
 		look_sensitivity = cfg.get_value("input", "look_sensitivity", look_sensitivity)
 		invert_y = cfg.get_value("input", "invert_y", invert_y)
@@ -88,6 +94,8 @@ func save() -> void:
 	cfg.set_value("gfx", "fps_60", fps_60)
 	cfg.set_value("gfx", "show_perf", show_perf)
 	cfg.set_value("gfx", "look", look)
+	cfg.set_value("gfx", "time_of_day", time_of_day)
+	cfg.set_value("gfx", "weather", weather)
 	cfg.set_value("input", "haptics", haptics)
 	cfg.set_value("input", "look_sensitivity", look_sensitivity)
 	cfg.set_value("input", "invert_y", invert_y)

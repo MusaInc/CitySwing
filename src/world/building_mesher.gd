@@ -1129,10 +1129,36 @@ func _bridge(s: Dictionary, detailed: bool) -> void:
 		if detailed:
 			beam(Vector3(xw, deck + 1.2, z0 - sz * 0.4), Vector3(xe, deck + 1.2, z0 - sz * 0.4), 0.12, 0.12, STEEL)
 	if detailed:
-		var x := xw
-		while x < xe:
-			top(x, zc - 0.12, x + 3.0, zc + 0.12, deck + 0.02, Color(0.9, 0.85, 0.6), KIND_TRIM, 0, 0)
-			x += 9.0
+		# Road: a double yellow centre line, lane dashes, edge lines; raised
+		# walkways along both sides.
+		for zz: float in [-0.25, 0.25]:
+			top(xw, zc + zz - 0.08, xe, zc + zz + 0.08, deck + 0.02, Color(0.92, 0.78, 0.25), KIND_TRIM, 0, 0)
+		for sz: float in [-1.0, 1.0]:
+			top(xw, zc + sz * 7.5 - 0.08, xe, zc + sz * 7.5 + 0.08, deck + 0.02, Color(0.9, 0.9, 0.86), KIND_TRIM, 0, 0)
+			var x := xw
+			while x < xe:
+				top(x, zc + sz * 3.8 - 0.07, x + 3.0, zc + sz * 3.8 + 0.07, deck + 0.02, Color(0.9, 0.9, 0.86), KIND_TRIM,
+					0, 0)
+				x += 9.0
+			var w0 := zc + sz * 8.0
+			solid(xw, minf(w0, w0 + sz * 1.6), xe, maxf(w0, w0 + sz * 1.6), deck, deck + 0.22, Color(0.55, 0.54, 0.52))
+		# Stiffening truss under the deck edges: Warren diagonals between a
+		# top and bottom chord, the classic suspension-bridge look.
+		for sz: float in [-1.0, 1.0]:
+			var zt := zc + sz * 9.4
+			beam(Vector3(xw, deck - 6.0, zt), Vector3(xe, deck - 6.0, zt), 0.6, 0.6, BRIDGE_RED)
+			var x2 := xw
+			var up := true
+			while x2 < xe - 0.1:
+				var nx := minf(x2 + 7.5, xe)
+				beam(Vector3(x2, deck - (6.0 if up else 2.2), zt), Vector3(nx, deck - (2.2 if up else 6.0), zt), 0.35, 0.35,
+					BRIDGE_RED)
+				x2 = nx
+				up = not up
+		var x3 := xw + 15.0
+		while x3 < xe:  # floor beams under the roadway
+			beam(Vector3(x3, deck - 6.0, zc - 9.4), Vector3(x3, deck - 6.0, zc + 9.4), 0.5, 0.5, BRIDGE_RED.darkened(0.2))
+			x3 += 15.0
 	# Towers: two legs, three portal beams.
 	for tx: float in s["towers"]:
 		for sz: float in [-1.0, 1.0]:
@@ -1143,21 +1169,43 @@ func _bridge(s: Dictionary, detailed: bool) -> void:
 		for yy in [[deck - 6.0, deck - 2.0], [88.0, 92.0], [ytop - 6.0, ytop - 2.0]]:
 			solid(tx - 2.5, zc - 9.5, tx + 2.5, zc + 9.5, yy[0], yy[1], BRIDGE_RED)
 		solid(tx - 5.0, zc - 18.0, tx + 5.0, zc + 18.0, -3.0, 1.0, Color(0.5, 0.47, 0.42))
+		if detailed:
+			# Recessed panels up the legs and X-bracing between the portals.
+			for sz: float in [-1.0, 1.0]:
+				for side: float in [-1.0, 1.0]:
+					var y := deck + 6.0
+					while y < ytop - 8.0:
+						solid(tx + side * 3.0 - 0.06, zc + sz * 10.4 - 0.5, tx + side * 3.0 + 0.06, zc + sz * 10.4 + 0.5,
+							y, y + 7.0, BRIDGE_RED.darkened(0.25))
+						y += 9.0
+			for yy in [[deck - 2.0, 88.0], [92.0, ytop - 6.0]]:
+				beam(Vector3(tx, yy[0], zc - 9.0), Vector3(tx, yy[1], zc + 9.0), 0.9, 0.9, BRIDGE_RED)
+				beam(Vector3(tx, yy[0], zc + 9.0), Vector3(tx, yy[1], zc - 9.0), 0.9, 0.9, BRIDGE_RED)
+		# Aviation lights on the tower tops (glow at night: KIND_SIGN emits).
+		for sz: float in [-1.0, 1.0]:
+			solid(tx - 0.5, zc + sz * 12.25 - 0.5, tx + 0.5, zc + sz * 12.25 + 0.5, ytop + 2.5, ytop + 3.3,
+				Color(1.0, 0.12, 0.08), KIND_SIGN)
 	# Main cables and vertical suspenders down to the deck.
 	for pts in s["cables"]:
 		var cable: PackedVector3Array = pts
 		for i in cable.size() - 1:
 			beam(cable[i], cable[i + 1], 0.9, 0.9, BRIDGE_RED)
+			# A string of lamps along each main cable – the bridge's night necklace.
+			var nl := maxi(1, int(cable[i].distance_to(cable[i + 1]) / 9.0))
+			for k in nl:
+				var lp := cable[i].lerp(cable[i + 1], (k + 0.5) / nl) + Vector3.UP * 0.55
+				solid(lp.x - 0.22, lp.z - 0.22, lp.x + 0.22, lp.z + 0.22, lp.y - 0.15, lp.y + 0.2,
+					Color(1.0, 0.92, 0.75), KIND_SIGN)
 		if not detailed:
 			continue
 		for i in cable.size() - 1:
 			var a := cable[i]
 			var b := cable[i + 1]
-			var n := int(absf(b.x - a.x) / 10.0)
+			var n := maxi(1, int(absf(b.x - a.x) / 7.5))
 			for k in n:
 				var p := a.lerp(b, (k + 0.5) / n)
 				if p.y > deck + 2.0:
-					beam(p, Vector3(p.x, deck + 0.4, p.z), 0.12, 0.12, STEEL)
+					beam(p, Vector3(p.x, deck + 0.4, p.z), 0.22, 0.22, BRIDGE_RED.darkened(0.15))
 
 
 ## Ground for one chunk: asphalt, raised pavement blocks with kerbs, park
@@ -1495,7 +1543,9 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var s: float = smp[2]
 	var H := T.road_y(p.x, p.y)
 	var x_taper := smoothstep(CityLayout.RIVER_EDGE + 10.0, CityLayout.RIVER_EDGE + 90.0, p.x)
-	var dock := 1.0 - smoothstep(500.0, 590.0, p.x) if p.y > 250.0 else 0.0
+	var dock := 1.0 - smoothstep(500.0, 590.0, p.x) if p.y > 250.0 and p.x > 0.0 else 0.0
+	if layout.is_mainland:  # (its straight quay faces east, onto the strait)
+		x_taper = smoothstep(CityLayout.FAR_SHORE - 10.0, CityLayout.FAR_SHORE - 90.0, p.x)
 	var n1 := _snoise(s / 70.0)
 	var n2 := _snoise(s / 23.0 + 40.0)
 	var amt := x_taper * (1.0 - dock)

@@ -363,11 +363,9 @@ func ship(basin: Rect2) -> void:
 # -------------------------------------------------------- elevated rail
 ## Elevated railway along Valley Road (curving with it): deck segments on
 ## steel bents at the kerbs (never in a traffic lane or a junction), side
-## girders, rails, and a parked three-car train. Run along it, swing under
-## it, land on the train.
+## girders and rails; a three-car shuttle runs on it (RailNetwork/Trains).
+## Run along it, swing under it, land on the train.
 func elevated_rail() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash("el")
 	var k := L._kit("el")
 	var road: Dictionary = L.roads.by_name.get("valley", {})
 	if road.is_empty():
@@ -419,18 +417,8 @@ func elevated_rail() -> void:
 			t += 24.0
 		else:
 			t += 4.0
-	# The train: three cars with a gap, on one track.
-	var t0 := 150.0 + rng.randf_range(0.0, 60.0)
-	for car in 3:
-		var a2 := _at(path, t0 + car * 19.0)
-		var b2 := _at(path, t0 + car * 19.0 + 18.0)
-		var dd := (b2 - a2).normalized()
-		var off := Vector2(-dd.y, dd.x) * 2.0
-		var A := Vector3(a2.x + off.x, 0.0, a2.y + off.y)
-		var B := Vector3(b2.x + off.x, 0.0, b2.y + off.y)
-		L._kbeam(k, A + Vector3.UP * (deck + 2.4), B + Vector3.UP * (deck + 2.4), 3.2, 3.6, Color(0.82, 0.8, 0.74))
-		L._kbeam(k, A + Vector3.UP * (deck + 2.8), B + Vector3.UP * (deck + 2.8), 3.3, 1.2, Color(0.16, 0.2, 0.25), false)
-		L._kbeam(k, A + Vector3.UP * (deck + 1.35), B + Vector3.UP * (deck + 1.35), 3.3, 0.5, Color(0.85, 0.5, 0.1), false)
+	# The trains themselves move (Trains): register the line.
+	L.rail.add_valley(path, deck)
 
 
 ## Point `t` metres along a polyline (clamped).

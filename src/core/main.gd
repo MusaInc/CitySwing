@@ -7,6 +7,7 @@ extends Node3D
 ##   --bot=expert|novice   --shot=<png> --shot-at=<s,s,...>   --quality=0|1|2
 ##   --perf   --touch   --look=clean|comic|toon|painted   --cam=x,y,z,lx,ly,lz [--fov=deg]   --menu=<screen>
 ##   --save=<path> (scratch save file)   --menu=shop --shop_tab=<slot>
+##   --time=<hour 0-24> (fixed time of day)   --weather=clear|cloudy|rain|storm|fog
 
 enum State { TITLE, PLAYING, PAUSED, RESULTS }
 
@@ -57,8 +58,7 @@ func _ready() -> void:
 	world = PrototypeWorld.new() if world_kind == "prototype" else CityWorld.new()
 	world.name = "World"
 	add_child(world)
-	if world.has_method("set_sky_colors"):
-		world.set_sky_colors(Atmosphere.ZENITH, Atmosphere.HORIZON)
+	atmosphere.configure(args, world)
 
 	player = Player.new()
 	player.name = "Player"
@@ -101,6 +101,7 @@ func _ready() -> void:
 	audio.name = "Audio"
 	add_child(audio)
 	audio.attach_player(player)
+	audio.attach_weather(atmosphere)
 
 	ui = CanvasLayer.new()
 	add_child(ui)

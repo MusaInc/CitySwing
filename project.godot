@@ -73,3 +73,27 @@ ground_rect={
 "type": "vec4",
 "value": Vector4(0, 0, 1, 1)
 }
+sky_top={
+"type": "vec3",
+"value": Vector3(0.09, 0.26, 0.64)
+}
+sky_horizon={
+"type": "vec3",
+"value": Vector3(0.88, 0.65, 0.42)
+}
+sun_dir={
+"type": "vec3",
+"value": Vector3(0.73, 0.62, -0.29)
+}
+night={
+"type": "float",
+"value": 0.0
+}
+wetness={
+"type": "float",
+"value": 0.0
+}
+rain={
+"type": "float",
+"value": 0.0
+}
