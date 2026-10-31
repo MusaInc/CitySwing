@@ -46,6 +46,8 @@ func test_buildings_do_not_overlap_streets_or_each_other(t) -> void:
 		if b["kind"] != "normal":
 			continue
 		var tt: Array = b["tiers"][0]
+		if not BuildingMesher._on_ground(b, tt):
+			continue  # towers standing on a podium / bell towers on a roof
 		rects.append(Rect2(tt[0], tt[1], tt[2] - tt[0], tt[3] - tt[1]))
 	var overlaps := 0
 	for i in rects.size():
@@ -59,6 +61,60 @@ func test_buildings_do_not_overlap_streets_or_each_other(t) -> void:
 			if absf(r.get_center().x - s[0]) < s[1] * 0.5:
 				in_street += 1
 	t.check(in_street == 0, "%d buildings centred in a street" % in_street)
+
+
+func test_whole_layout_repeats_exactly(t) -> void:
+	# Courses, spawns and tests replay recorded flights: the city must come
+	# out identical every launch (no global-RNG draws in generation).
+	var a := CityLayout.new().generate()
+	var b := CityLayout.new().generate()
+	t.check(str(a.buildings.size()) == str(b.buildings.size()) and var_to_str(a.buildings) == var_to_str(b.buildings),
+		"two generations give the same buildings")
+	t.check(var_to_str(a.props) == var_to_str(b.props), "and the same props")
+
+
+func test_island_has_sea_round_it(t) -> void:
+	var l := CityLayout.new().generate()
+	var I := l.island
+	for p in [Vector2(I.end.x + 60.0, I.get_center().y), Vector2(I.get_center().x, I.position.y - 60.0),
+			Vector2(I.get_center().x, I.end.y + 60.0), Vector2(I.end.x + 900.0, I.end.y + 900.0)]:
+		t.check(l.is_water(Vector3(p.x, -2.0, p.y)), "sea at %s" % p)
+	for b in l.buildings:
+		var tt: Array = b["tiers"][0]
+		if b["kind"] in ["normal", "landmark"] and not I.grow(0.5).encloses(Rect2(tt[0], tt[1], tt[2] - tt[0], tt[3] - tt[1])):
+			t.check(false, "building at (%.0f, %.0f) stands off the island" % [tt[0], tt[1]])
+			return
+
+
+func test_every_district_is_swingable(t) -> void:
+	# Swinging needs anchors well over the street: in every district most
+	# roofs (by footprint area) stand at least 45 m above their street.
+	var l := CityLayout.new().generate()
+	var area := {}
+	var tall := {}
+	for b in l.buildings:
+		if b["kind"] not in ["normal", "plain"]:
+			continue
+		var t0: Array = b["tiers"][0]
+		if b["kind"] == "normal" and not BuildingMesher._on_ground(b, t0):
+			continue
+		var top := BuildingMesher.tiers_top(b)
+		for e in l.buildings:  # a tower on it counts for its roof
+			var et: Array = e["tiers"][0]
+			if e != b and e["kind"] == "normal" and Rect2(t0[0], t0[1], t0[2] - t0[0], t0[3] - t0[1]).encloses(
+					Rect2(et[0], et[1], et[2] - et[0], et[3] - et[1])) and absf(float(et[4]) - float(b["tiers"][-1][5])) < 0.6:
+				top = maxf(top, BuildingMesher.tiers_top(e))
+		var d := l.district((t0[0] + t0[2]) * 0.5, (t0[1] + t0[3]) * 0.5)
+		var a: float = (t0[2] - t0[0]) * (t0[3] - t0[1])
+		area[d] = area.get(d, 0.0) + a
+		if top - BuildingMesher.base_of(b) >= 45.0:
+			tall[d] = tall.get(d, 0.0) + a
+	var line := ""
+	for d in area:
+		var share: float = tall.get(d, 0.0) / area[d]
+		line += "%s %d%%  " % [d, roundi(share * 100.0)]
+		t.check(share >= (0.4 if d == "docks" else 0.55), "%s: %d%% of roof area is 45 m+" % [d, roundi(share * 100.0)])
+	t.note(line)
 
 
 func test_world_builds_collision_and_streams(t) -> void:

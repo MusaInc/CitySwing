@@ -164,7 +164,7 @@ func rooftop_spawns() -> Array:
 				roof_props[k] = []
 			roof_props[k].append(pr)
 	for b in layout.buildings:
-		if b["kind"] != "normal":
+		if b["kind"] != "normal" or b.get("roof_blocked", false):
 			continue
 		var t: Array = b["tiers"][-1]
 		var h: float = t[5] - BuildingMesher.base_of(b)  # above its street
@@ -698,8 +698,8 @@ func _build_collision() -> void:
 		og.terrain_patch(layout.terrain, r, 0.0, Color.WHITE, OUTER_STEP)
 	_add_faces(street, og)
 	# River wall along the promenade (the parapet drawn by add_ground).
-	_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, CityLayout.MIN_Z - 200.0),
-		Vector3(0.6, 5.1, CityLayout.MAX_Z - CityLayout.MIN_Z + 400.0)))
+	_add_box(street, AABB(Vector3(CityLayout.RIVER_EDGE, -4.0, layout.island.position.y),
+		Vector3(0.6, 5.1, layout.island.size.y)))
 	add_child(street)
 	var water_floor := StaticBody3D.new()
 	water_floor.name = "WaterFloor"
@@ -834,10 +834,9 @@ static func _add_box(body: StaticBody3D, box: AABB) -> void:
 ## Every piece of street-level ground that is drawn (the playable city, the
 ## outskirts round it and the far shore), minus the dock basins.
 func ground_rects() -> Array:
-	var rects: Array = [Rect2(CityLayout.RIVER_EDGE, CityLayout.MIN_Z - 1000.0,
-		CityLayout.MAX_X + 1000.0 - CityLayout.RIVER_EDGE, CityLayout.MAX_Z - CityLayout.MIN_Z + 2000.0)]
+	var rects: Array = [layout.island]
 	for w in layout.water:
-		if (w as Rect2).position.x < 0.0:
+		if (w as Rect2).position.x < 0.0 or w in layout.sea:
 			continue
 		var next: Array = []
 		for r in rects:
@@ -1001,8 +1000,9 @@ func _build_birds() -> void:
 		add_child(mmi)
 
 
-## Low-detail skyline beyond the playable grid (and a far river shore) so every
-## horizon reads as city. One mesh, low LOD only; outskirt blocks still collide.
+## The mainland across the strait (where the bridge lands): low-detail
+## terraces and a few towers, solid near the bridge. The island itself ends at
+## its sea walls (the outer-block code below is kept for the street maps).
 func _build_outskirts() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = layout.seed * 31
@@ -1025,12 +1025,9 @@ func _build_outskirts() -> void:
 	# distance – so every edge reads as more city, not an empty apron.
 	var xr_in := _block_ranges(layout.x_streets)
 	var zr_in := _block_ranges(layout.z_streets)
-	var last_x: Array = layout.x_streets[-1]
-	var xr_out := _extend_ranges(last_x[0] + last_x[1] * 0.5, 1.0, 760.0, rng)
-	var first_z: Array = layout.z_streets[0]
-	var last_z: Array = layout.z_streets[-1]
-	var zr_out := _extend_ranges(first_z[0] - first_z[1] * 0.5, -1.0, 760.0, rng) \
-		+ _extend_ranges(last_z[0] + last_z[1] * 0.5, 1.0, 760.0, rng)
+	# The city is an island now: nothing past the sea walls (see CityLayout._sea).
+	var xr_out: Array = []
+	var zr_out: Array = []
 	_outer_ranges = [xr_in + xr_out, zr_in + zr_out]
 	var grid := Rect2(CityLayout.MIN_X, CityLayout.MIN_Z, CityLayout.MAX_X - CityLayout.MIN_X, CityLayout.MAX_Z - CityLayout.MIN_Z)
 	for xr in xr_in + xr_out:
@@ -1142,19 +1139,21 @@ func _build_outskirts() -> void:
 	gi.material_override = ground_mat
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(gi)
-	var bi := MeshInstance3D.new()
-	bi.name = "OutskirtsBlocks"
-	bi.mesh = _mesh_from(blocks_m.arrays())
-	bi.material_override = ground_mat
-	bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(bi)
+	if not blocks_m.is_empty():
+		var bi := MeshInstance3D.new()
+		bi.name = "OutskirtsBlocks"
+		bi.mesh = _mesh_from(blocks_m.arrays())
+		bi.material_override = ground_mat
+		bi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(bi)
 	if not near_m.is_empty():
 		var ni := MeshInstance3D.new()
 		ni.name = "OutskirtsNear"
 		ni.mesh = _mesh_from(near_m.arrays())
 		ni.material_override = building_mat
 		add_child(ni)
-	_add_faces(pave_body, blocks_m)
+	if not blocks_m.is_empty():
+		_add_faces(pave_body, blocks_m)
 	add_child(col_body)
 	add_child(pave_body)
 

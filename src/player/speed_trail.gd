@@ -8,6 +8,8 @@ const LIFE := 0.45        # s a point stays in the ribbon
 const MIN_SPEED := 17.0   # m/s where ribbons start to show
 const FULL_SPEED := 34.0
 const WIDTH := 0.05
+const ALPHA := 0.09        # peak opacity of the white ribbons (was 0.22: too loud)
+const FLASH_ALPHA := 0.4   # extra opacity while a perfect release flashes gold
 
 var player: Player
 var rig: CharacterRig
@@ -75,7 +77,7 @@ func _process(dt: float) -> void:
 				along = Vector3.UP
 			var side := along.cross(eye - p).normalized()
 			var k := float(j) / float(arr.size() - 1)  # 0 = oldest tail, 1 = at the foot
-			var a := k * k * _amount * (0.22 + 0.5 * _flash)
+			var a := k * k * _amount * (ALPHA + FLASH_ALPHA * _flash)
 			var w := WIDTH * (0.25 + 0.75 * k) * (1.0 + _flash)
 			_mesh.surface_set_color(Color(col, a))
 			_mesh.surface_add_vertex(p + side * w)

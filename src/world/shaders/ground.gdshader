@@ -16,6 +16,7 @@ uniform bool has_streets = false;
 
 varying float v_up;
 varying float v_dist;
+varying vec3 v_world;
 
 float hash12(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -46,6 +47,7 @@ float band(float d, float h, float aa) {
 void vertex() {
 	v_up = NORMAL.y;
 	v_dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
+	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
@@ -61,7 +63,30 @@ void fragment() {
 	bool grass = c.g > c.r + 0.08;
 	bool pave = c.r > 0.5 && c.g > 0.5 && c.r < 0.85;
 
-	if (c.r > 0.85) {
+	bool shore = abs(COLOR.a * 8.0 - 5.0) < 0.3;  // BuildingMesher.KIND_SHORE
+
+	if (shore) {
+		// Rock round the cliffs (strata, big blotches, lichen on the flats) or
+		// sand on the beaches; everything darkens and shines where it's wet.
+		if (c.r < 0.6) {
+			// Bedding planes: crisp horizontal layers of different tone, gently warped.
+			float yb = v_world.y + 3.0 * vnoise(p * 0.04);
+			float layer = hash12(vec2(floor(yb / 1.7), 3.0));
+			float edge = band(fract(yb / 1.7) - 0.5, 0.47, 0.03);
+			float big = vnoise(p * 0.07);
+			vec3 warm = vec3(0.3, 0.26, 0.22);
+			albedo = mix(c, warm, big) * (0.62 + 0.55 * layer) * (0.75 + 0.25 * edge)
+				* (0.88 + 0.18 * vnoise(p * 1.3 + v_world.y));
+			albedo *= 0.8 + 0.25 * smoothstep(0.2, 0.9, v_up);  // steep faces darker, ledges lighter
+			albedo = mix(albedo, vec3(0.32, 0.37, 0.24), smoothstep(0.8, 0.97, v_up) * 0.45 * vnoise(p * 0.25));
+		} else {
+			albedo = c * (0.93 + 0.08 * vnoise(p * 0.45) + 0.04 * vnoise(p * 3.1));
+			rough = 0.97;
+		}
+		float wet = 1.0 - smoothstep(-1.4, 0.5, v_world.y);
+		albedo *= 1.0 - 0.38 * wet;
+		rough = mix(rough, 0.35, wet);
+	} else if (c.r > 0.85) {
 		albedo = c * (0.9 + 0.1 * n);  // old painted geometry (prototype world)
 	} else if (has_streets && flat_top) {
 		vec3 sx = street(street_x, p.x, street_map.x, street_map.y);

@@ -24,6 +24,12 @@ const FAR_SHORE := -440.0
 const CBD_CENTER := Vector2(560.0, -170.0)
 const CBD_RADIUS := 330.0
 const BRIDGE_Z := -17.0
+## The city is an island: sea all round except the strait (the old river) to
+## the mainland in the west, which the suspension bridge crosses. Past the
+## outermost streets an esplanade runs to the sea wall (cliffs on the east,
+## where the land is high).
+const ESPLANADE := 18.0
+const SEA_REACH := 4000.0
 const BRIDGE_DECK := 24.0
 const BRIDGE_TOWERS := [-80.0, -340.0]
 const BRIDGE_TOWER_TOP := 132.0
@@ -54,6 +60,8 @@ var z_streets: Array = []
 var land: Array = []           # Rect2 ground collision (land minus basins)
 var landmarks: Array = []      # [scene:String, Transform3D]
 var spawn := Vector3(330, 0, -60)
+var island := Rect2()           # the island's land (sea wall to sea wall; west edge = the strait's quay wall)
+var sea: Array = []             # Rect2 sea round the island (also in `water`)
 var reserved: Array = []      # Rect2 footprints owned by landmarks
 var structures: Array = []    # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
 var anchor_lines: Array = []  # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
@@ -75,6 +83,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	seed = p_seed
 	rng.seed = seed
 	_streets()
+	_island()
 	terrain.build(x_streets, z_streets)
 	var ls := _snap()
 	_landmarks()
@@ -90,6 +99,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	pieces.gateways()
 	pieces.lighthouse()
 	_traffic()
+	_sea()
 	_land()
 	return self
 
@@ -116,9 +126,35 @@ func _streets() -> void:
 		z += w + bd
 		i += 1
 	z_streets = zs
+	# The island's east edge: one more avenue past the last block column, so
+	# the eastern blocks (and the cathedral) are whole and the esplanade runs
+	# along a street. No random draw: the rest of the plan is unchanged.
+	if x_streets.size() > 0:
+		x_streets.append([x + 8.0, 16.0])
 	for xs_ in x_streets:
 		for zs_ in z_streets:
 			crossings.append([xs_[0], zs_[0]])
+
+
+func _island() -> void:
+	var lx: Array = x_streets[-1]
+	var fz: Array = z_streets[0]
+	var lz: Array = z_streets[-1]
+	var east := float(lx[0]) + float(lx[1]) * 0.5 + ESPLANADE
+	var north := float(fz[0]) - float(fz[1]) * 0.5 - ESPLANADE
+	var south := float(lz[0]) + float(lz[1]) * 0.5 + ESPLANADE
+	island = Rect2(RIVER_EDGE, north, east - RIVER_EDGE, south - north)
+
+
+## Sea on the three open sides (the strait in the west is the river rect).
+func _sea() -> void:
+	var i := island
+	sea = [
+		Rect2(i.end.x, -SEA_REACH, SEA_REACH, SEA_REACH * 2.0),                       # east
+		Rect2(RIVER_EDGE, -SEA_REACH, i.end.x - RIVER_EDGE, i.position.y + SEA_REACH),  # north
+		Rect2(RIVER_EDGE, i.end.y, i.end.x - RIVER_EDGE, SEA_REACH - i.end.y),          # south
+	]
+	water.append_array(sea)
 
 
 func district(x: float, z: float) -> String:
@@ -236,7 +272,8 @@ func _lift_on_slope(snap: Array) -> void:
 	for i in range(snap[0], buildings.size()):
 		var b: Dictionary = buildings[i]
 		var t: Array = b["tiers"][0]
-		var dy: float = dy_at.call((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5)
+		var at: Vector2 = b.get("lift_at", Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5))
+		var dy: float = dy_at.call(at.x, at.y)
 		for tt in b["tiers"]:
 			tt[4] += dy
 			tt[5] += dy
@@ -360,7 +397,7 @@ func _block(rect: Rect2, cbd_plaza_done: bool) -> void:
 		_quay_cranes(basin, brng)
 		pieces.ship(basin)
 		return
-	if dist == "georgian" and brng.randf() < 0.12 or dist == "midtown" and brng.randf() < 0.06:
+	if dist == "georgian" and brng.randf() < 0.07 or dist == "midtown" and brng.randf() < 0.05:
 		parks.append(rect)
 		_park_props(rect, brng)
 		return
@@ -432,43 +469,123 @@ func _split(r: Rect2, out: Array, brng: RandomNumberGenerator, min_size: float, 
 		_split(Rect2(r.position + Vector2(0, h), Vector2(r.size.x, r.size.y - h)), out, brng, min_size, depth + 1)
 
 
+## Building heights per district. Every district is swingable (most roofs
+## ≥ 45 m above the street, the height a good swing needs); each has its own
+## skyline. CBD: supertall core near 300 m. Midtown: a real tower district.
+## Waterfront: riverside towers and hotels. Docks: chunky warehouses (and
+## grain silos) mixed with loft and residential towers. Old Town (georgian):
+## mansion blocks with church and civic towers above them.
 func _height_for(dist: String, c: Vector2, brng: RandomNumberGenerator) -> float:
-	# Same random draws as before (the plan doesn't reshuffle); only the
-	# scale grew: a supertall core near 300 m, a real midtown skyline, and
-	# low districts that are mid-rise rather than terraces.
+	var r := brng.randf()
 	match dist:
 		"cbd":
 			var d := c.distance_to(CBD_CENTER)
 			var peak := 90.0 + 215.0 * exp(-pow(d / 260.0, 2.0))
-			if brng.randf() < 0.1:
-				return brng.randf_range(30.0, 50.0)  # technical low spots
+			if r < 0.08:
+				return brng.randf_range(34.0, 52.0)  # technical low spots
 			return peak * brng.randf_range(0.72, 1.22)
 		"midtown":
-			return brng.randf_range(50.0, 125.0) if brng.randf() > 0.3 else brng.randf_range(135.0, 210.0)
+			return brng.randf_range(62.0, 130.0) if r < 0.6 else brng.randf_range(135.0, 215.0)
 		"waterfront":
-			return brng.randf_range(42.0, 88.0)
+			return brng.randf_range(52.0, 112.0) if r < 0.75 else brng.randf_range(120.0, 175.0)
 		"docks":
-			return brng.randf_range(18.0, 30.0) if brng.randf() < 0.75 else brng.randf_range(60.0, 110.0)
+			return brng.randf_range(28.0, 44.0) if r < 0.45 else brng.randf_range(62.0, 150.0)
 		_:
-			return brng.randf_range(18.0, 40.0) if brng.randf() < 0.85 else brng.randf_range(62.0, 95.0)
+			if r < 0.45:
+				return brng.randf_range(36.0, 60.0)
+			return brng.randf_range(62.0, 105.0) if r < 0.88 else brng.randf_range(110.0, 155.0)
+
+
+## A building's form, from its own random stream (so the plan's draws don't
+## shift): "box" (plain or podium + setbacks), "offset" (setbacks stepped to
+## one side), "pencil" (slender tower), "slab" (long and thin), "twin" (two
+## towers on a podium joined by a sky bridge), "cantilever" (a top block
+## hanging out over a recessed body), "crown" (stepped crown), "campanile"
+## (a slim tower rising off one corner), "silos" (a grain-silo row).
+func _form_for(dist: String, h: float, r: Rect2, frng: RandomNumberGenerator) -> String:
+	var lo := minf(r.size.x, r.size.y)
+	var hi := maxf(r.size.x, r.size.y)
+	var opts: Array = []  # [form, weight]
+	match dist:
+		"cbd":
+			opts = [["pencil", 0.08], ["twin", 0.1], ["cantilever", 0.1], ["crown", 0.16], ["offset", 0.2]]
+		"midtown":
+			opts = [["pencil", 0.12], ["twin", 0.1], ["slab", 0.1], ["cantilever", 0.14], ["crown", 0.12],
+				["offset", 0.18]]
+		"waterfront":
+			opts = [["slab", 0.18], ["pencil", 0.1], ["cantilever", 0.1], ["campanile", 0.06], ["offset", 0.16]]
+		"docks":
+			if h < 45.0:
+				opts = [["silos", 0.24]]
+			else:
+				opts = [["cantilever", 0.2], ["slab", 0.15], ["twin", 0.1], ["offset", 0.15]]
+		_:
+			opts = [["campanile", 0.2 if h < 75.0 else 0.0], ["crown", 0.1], ["twin", 0.05], ["offset", 0.2]]
+	var x := frng.randf()
+	for o in opts:
+		x -= float(o[1])
+		if x < 0.0:
+			var f: String = o[0]
+			match f:
+				"pencil":
+					return f if h > 90.0 and lo > 26.0 else "box"
+				"twin":
+					return f if h > 80.0 and hi > 50.0 and lo > 24.0 else "box"
+				"slab":
+					return f if h > 50.0 and hi > 44.0 and lo > 26.0 else "box"
+				"cantilever":
+					return f if h > 50.0 and lo > 24.0 else "box"
+				"crown":
+					return f if h > 60.0 and lo > 24.0 else "box"
+				"campanile":
+					return f if lo > 22.0 else "box"
+				"silos":
+					return f if hi > 30.0 and lo > 14.0 else "box"
+			return f
+	return "box"
+
+
+func _style_for(dist: String, h: float, form: String, brng: RandomNumberGenerator) -> int:
+	if dist == "docks" and h < 45.0:
+		return Style.WAREHOUSE
+	if dist == "georgian" and h < 62.0:
+		var g := brng.randf()
+		return Style.BRICK if g < 0.6 else (Style.SANDSTONE if g < 0.8 else Style.STONE)
+	if form in ["pencil", "twin", "cantilever"] and h > 70.0:
+		return [Style.GLASS, Style.DARK_GLASS, Style.MODERN][brng.randi() % 3]
+	if dist == "georgian" and h < 110.0:
+		return [Style.STONE, Style.DECO, Style.SANDSTONE, Style.BRICK][brng.randi() % 4]
+	if h > 115.0:
+		return Style.GLASS if brng.randf() < 0.6 else Style.DARK_GLASS
+	if h > 65.0:
+		return [Style.MODERN, Style.DECO, Style.GLASS, Style.STONE][brng.randi() % 4]
+	if h > 35.0:
+		return [Style.STONE, Style.BRICK, Style.MODERN, Style.DECO][brng.randi() % 4]
+	return [Style.BRICK, Style.STONE, Style.SANDSTONE][brng.randi() % 3]
 
 
 func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void:
 	var c := r.get_center()
 	var h := _height_for(dist, c, brng)
-	var style: int
-	if dist == "docks" and h < 30.0:
-		style = Style.WAREHOUSE
-	elif dist == "georgian" and h < 40.0:
-		style = Style.BRICK if brng.randf() < 0.75 else Style.SANDSTONE
-	elif h > 115.0:
-		style = Style.GLASS if brng.randf() < 0.6 else Style.DARK_GLASS
-	elif h > 65.0:
-		style = [Style.MODERN, Style.DECO, Style.GLASS, Style.STONE][brng.randi() % 4]
-	elif h > 35.0:
-		style = [Style.STONE, Style.BRICK, Style.MODERN, Style.DECO][brng.randi() % 4]
-	else:
-		style = [Style.BRICK, Style.STONE, Style.SANDSTONE][brng.randi() % 3]
+	var frng := RandomNumberGenerator.new()
+	frng.seed = hash(Vector2i(int(c.x * 8.0), int(c.y * 8.0))) ^ (seed * 7 + 3)
+	var form := _form_for(dist, h, r, frng)
+	if form == "silos":
+		_silos(r, frng)
+		return
+	if form == "pencil":
+		var side := clampf(minf(r.size.x, r.size.y) * 0.62, 17.0, 24.0)
+		var px := frng.randf_range(r.position.x, r.end.x - side)
+		var pz := frng.randf_range(r.position.y, r.end.y - side)
+		r = Rect2(px, pz, side, side)
+		h = minf(h * frng.randf_range(1.1, 1.25), 330.0)
+	elif form == "slab":
+		var thin := frng.randf_range(15.0, 19.0)
+		if r.size.x > r.size.y:
+			r = Rect2(r.position.x, r.get_center().y - thin * 0.5, r.size.x, thin)
+		else:
+			r = Rect2(r.get_center().x - thin * 0.5, r.position.y, thin, r.size.y)
+	var style := _style_for(dist, h, form, brng)
 	var cols: Array = STYLE_COLORS[style]
 	var col: Color = cols[brng.randi() % cols.size()]
 	col = col.lightened(brng.randf_range(-0.06, 0.06))
@@ -477,36 +594,187 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	var z0 := r.position.y
 	var x1 := r.end.x
 	var z1 := r.end.y
-	if h > 70.0 and min(r.size.x, r.size.y) > 30.0 and brng.randf() < 0.7:
-		# Podium + slimmer tower, then setbacks.
+	var extra: Array = []      # more buildings standing on this one (twin towers, campanile)
+	var blocked: Array = []    # roof areas they take (no roof furniture there)
+	if form == "twin":
+		var pod := frng.randf_range(14.0, 24.0)
+		tiers.append([x0, z0, x1, z1, 0.0, pod])
+		var along_x := r.size.x >= r.size.y
+		var L := (r.size.x if along_x else r.size.y) * 0.38
+		var ins := 2.5
+		var h2 := h * frng.randf_range(0.74, 0.92)
+		var towers: Array = []
+		if along_x:
+			towers = [[x0 + ins, z0 + ins, x0 + ins + L, z1 - ins], [x1 - ins - L, z0 + ins, x1 - ins, z1 - ins]]
+		else:
+			towers = [[x0 + ins, z0 + ins, x1 - ins, z0 + ins + L], [x0 + ins, z1 - ins - L, x1 - ins, z1 - ins]]
+		for k in 2:
+			var tw: Array = towers[k]
+			var th: float = h if k == 0 else h2
+			var tt: Array = [[tw[0], tw[1], tw[2], tw[3], pod, th]]
+			if frng.randf() < 0.5 and minf(tw[2] - tw[0], tw[3] - tw[1]) > 16.0:
+				var si := frng.randf_range(2.5, 4.0)
+				tt[0][5] = th - frng.randf_range(10.0, 18.0)
+				tt.append([tw[0] + si, tw[1] + si, tw[2] - si, tw[3] - si, tt[0][5], th])
+			var tb := _building(tt, style, col, "normal")
+			tb["seed"] = frng.randf()
+			extra.append(tb)
+			blocked.append(Rect2(tw[0] - 2.0, tw[1] - 2.0, tw[2] - tw[0] + 4.0, tw[3] - tw[1] + 4.0))
+		# Sky bridge between the towers, two thirds of the way up the lower one.
+		var by := pod + (h2 - pod) * frng.randf_range(0.55, 0.75)
+		var a: Array = towers[0]
+		var b2: Array = towers[1]
+		if along_x:
+			var zc := (z0 + z1) * 0.5
+			extra.append(_building([[a[2] - 1.0, zc - 3.5, b2[0] + 1.0, zc + 3.5, by, by + 5.0]], Style.DARK_GLASS,
+				Color(0.22, 0.26, 0.3), "bridge"))
+		else:
+			var xc := (x0 + x1) * 0.5
+			extra.append(_building([[xc - 3.5, a[3] - 1.0, xc + 3.5, b2[1] + 1.0, by, by + 5.0]], Style.DARK_GLASS,
+				Color(0.22, 0.26, 0.3), "bridge"))
+	elif form == "cantilever":
+		# A recessed body with the top block hanging out over it on one or
+		# two sides (a covered gap to swing under, a strong silhouette).
+		var top_h := frng.randf_range(14.0, 26.0)
+		var body := [x0, z0, x1, z1]
+		var sides := [0, 1, 2, 3]
+		for k in range(3, 0, -1):  # (seeded shuffle: Array.shuffle() uses the global RNG)
+			var j := frng.randi_range(0, k)
+			var tmp: int = sides[k]
+			sides[k] = sides[j]
+			sides[j] = tmp
+		for k in 1 + int(frng.randf() < 0.5):
+			var o := frng.randf_range(3.5, 6.5)
+			match sides[k]:
+				0: body[0] += o
+				1: body[1] += o
+				2: body[2] -= o
+				3: body[3] -= o
+		var y_top := maxf(h - top_h, 24.0)
+		tiers.append([body[0], body[1], body[2], body[3], 0.0, y_top])
+		tiers.append([x0, z0, x1, z1, y_top, h])
+	elif h > 70.0 and min(r.size.x, r.size.y) > 30.0 and (form == "offset" or brng.randf() < 0.7):
+		# Podium + slimmer tower, then setbacks (stepped to one side for "offset").
+		var dx := 0.0
+		var dz := 0.0
+		if form == "offset":
+			dx = -1.0 if frng.randf() < 0.5 else 1.0
+			dz = -1.0 if frng.randf() < 0.5 else 1.0
 		var pod := brng.randf_range(12.0, 22.0)
 		tiers.append([x0, z0, x1, z1, 0.0, pod])
 		var inset := brng.randf_range(3.0, minf(r.size.x, r.size.y) * 0.22)
-		x0 += inset; z0 += inset; x1 -= inset; z1 -= inset
+		x0 += inset * (1.0 + dx); z0 += inset * (1.0 + dz); x1 -= inset * (1.0 - dx); z1 -= inset * (1.0 - dz)
 		var y := pod
 		var steps := 1 + int(h > 110.0) + int(brng.randf() < 0.4)
-		for s in steps:
-			var top := y + (h - y) * (0.62 if s < steps - 1 else 1.0)
-			if s == steps - 1:
+		for s_ in steps:
+			var top := y + (h - y) * (0.62 if s_ < steps - 1 else 1.0)
+			if s_ == steps - 1:
 				top = h
 			tiers.append([x0, z0, x1, z1, y, top])
 			y = top
 			var si := brng.randf_range(2.5, 5.0)
 			if x1 - x0 - si * 2.0 < 10.0 or z1 - z0 - si * 2.0 < 10.0:
 				break
-			x0 += si; z0 += si; x1 -= si; z1 -= si
+			x0 += si * (1.0 + dx); z0 += si * (1.0 + dz); x1 -= si * (1.0 - dx); z1 -= si * (1.0 - dz)
 		if tiers[-1][5] < h:
 			tiers[-1][5] = h
 	else:
 		tiers.append([x0, z0, x1, z1, 0.0, h])
-		if h > 40.0 and brng.randf() < 0.35 and min(r.size.x, r.size.y) > 22.0:
+		if form != "crown" and form != "campanile" and h > 40.0 and brng.randf() < 0.35 \
+				and min(r.size.x, r.size.y) > 22.0:
 			var si := brng.randf_range(3.0, 6.0)
 			var top := h + brng.randf_range(6.0, 14.0)
 			tiers.append([x0 + si, z0 + si, x1 - si, z1 - si, h, top])
+	if form == "crown":
+		# Replace the last tier's top with 3–5 stepped setbacks (deco crown).
+		var last: Array = tiers[-1]
+		var n := frng.randi_range(3, 5)
+		var step_h := frng.randf_range(3.5, 5.5)
+		var bottom: float = float(last[5]) - step_h * n
+		if bottom > float(last[4]) + 8.0:
+			last[5] = bottom
+			var t := last.duplicate()
+			for k in n:
+				var si := frng.randf_range(1.8, 3.0)
+				if float(t[2]) - float(t[0]) - si * 2.0 < 6.0 or float(t[3]) - float(t[1]) - si * 2.0 < 6.0:
+					break
+				t = [float(t[0]) + si, float(t[1]) + si, float(t[2]) - si, float(t[3]) - si, float(t[5]),
+					float(t[5]) + step_h]
+				tiers.append(t)
+	if form == "campanile":
+		# A slim bell/clock tower rising off one corner of the roof.
+		var side := frng.randf_range(9.0, 12.0)
+		var cx := x0 if frng.randf() < 0.5 else x1 - side
+		var cz := z0 if frng.randf() < 0.5 else z1 - side
+		var top: float = tiers[-1][5]
+		var th := maxf(top + frng.randf_range(28.0, 48.0), frng.randf_range(78.0, 105.0))
+		var tt: Array = [[cx, cz, cx + side, cz + side, top, th - 7.0],
+			[cx + 1.6, cz + 1.6, cx + side - 1.6, cz + side - 1.6, th - 7.0, th]]
+		var tb := _building(tt, Style.SANDSTONE if style == Style.BRICK else style, col.lightened(0.05), "normal")
+		tb["seed"] = frng.randf()
+		extra.append(tb)
+		blocked.append(Rect2(cx - 3.0, cz - 3.0, side + 6.0, side + 6.0))
+		# A slim spire on top: the highest anchor in its neighbourhood.
+		var sp := 1.2
+		var mx := cx + side * 0.5
+		var mz := cz + side * 0.5
+		extra.append(_building([[mx - sp, mz - sp, mx + sp, mz + sp, th + 0.5, th + frng.randf_range(9.0, 16.0)]],
+			style, col.lightened(0.15), "spire"))
 	var b := _building(tiers, style, col, "normal")
 	b["seed"] = brng.randf()
+	if not blocked.is_empty():
+		b["roof_blocked"] = true  # (no rooftop spawns: towers stand on it)
 	_add(b)
-	# Rooftop furniture.
+	for e in extra:
+		_add(e)
+	_roof_furniture(b, tiers, style, h, col, brng, blocked)
+	for e in extra:
+		if e["kind"] == "normal" and form == "twin":
+			_roof_furniture(e, e["tiers"], style, float(e["tiers"][-1][5]), col, frng, [])
+
+
+## Grain silos (docks): a row of tall concrete bins under a headhouse.
+func _silos(r: Rect2, frng: RandomNumberGenerator) -> void:
+	var along_x := r.size.x >= r.size.y
+	var L := r.size.x if along_x else r.size.y
+	var D := minf(r.size.x if not along_x else r.size.y, 13.0)
+	var n := clampi(int(L / (D + 0.8)), 2, 6)
+	var w := (L - 0.8 * (n - 1)) / n
+	var h := frng.randf_range(46.0, 62.0)
+	var concrete := Color(0.72, 0.7, 0.65).lightened(frng.randf_range(-0.08, 0.04))
+	var c := r.get_center()
+	for i in n:
+		var a := (r.position.x if along_x else r.position.y) + i * (w + 0.8)
+		var t: Array = [a, c.y - D * 0.5, a + w, c.y + D * 0.5, -6.0, h] if along_x \
+			else [c.x - D * 0.5, a, c.x + D * 0.5, a + w, -6.0, h]  # (footed below the street: slopes)
+		var bin := _building([t], Style.MODERN, concrete, "plain")
+		bin["lift_at"] = c
+		_add(bin)
+	# Headhouse over the bins (solid, flat roof you can land on), a gallery
+	# on its long side.
+	var hh := frng.randf_range(7.0, 11.0)
+	var hl := L * frng.randf_range(0.35, 0.6)
+	var h0 := (r.position.x if along_x else r.position.y) + frng.randf_range(0.0, L - hl)
+	var ht: Array = [h0, c.y - D * 0.5 - 0.5, h0 + hl, c.y + D * 0.5 + 0.5, h, h + hh] if along_x \
+		else [c.x - D * 0.5 - 0.5, h0, c.x + D * 0.5 + 0.5, h0 + hl, h, h + hh]
+	var head := _building([ht], Style.WAREHOUSE, Color(0.5, 0.27, 0.2), "plain")
+	head["lift_at"] = c
+	_add(head)
+	# Conveyor gallery from the headhouse down the length of the row.
+	var gt: Array = [r.position.x, c.y - 1.6, r.end.x, c.y + 1.6, h, h + 3.0] if along_x \
+		else [c.x - 1.6, r.position.y, c.x + 1.6, r.end.y, h, h + 3.0]
+	var gal := _building([gt], Style.MODERN, Color(0.45, 0.46, 0.47), "plain")
+	gal["lift_at"] = c
+	_add(gal)
+
+
+func _roof_furniture(b: Dictionary, tiers: Array, style: int, h: float, col: Color, brng: RandomNumberGenerator,
+		blocked: Array) -> void:
+	var free := func(x: float, z: float) -> bool:
+		for q in blocked:
+			if (q as Rect2).has_point(Vector2(x, z)):
+				return false
+		return true
 	var top_t: Array = tiers[-1]
 	var rx: float = (top_t[0] + top_t[2]) * 0.5
 	var rz: float = (top_t[1] + top_t[3]) * 0.5
@@ -522,26 +790,33 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 		var sz := 1.0 if hrng.randf() < 0.5 else -1.0
 		var hx := rx + sx * (tw * 0.5 - 3.6)
 		var hz := rz + sz * (td * 0.5 - 4.0)
-		var yaw := 0.0 if sz < 0.0 else PI  # door faces into the roof
-		props.append(["roof_hut", Transform3D(Basis(Vector3.UP, yaw), Vector3(hx, ry, hz))])
-		buildings.append({"tiers": [[hx - 1.7, hz - 2.1, hx + 1.7, hz + 2.1, ry, ry + 3.1]], "style": Style.MODERN,
-			"color": Color.WHITE, "kind": "structure", "seed": 0.0})
+		if free.call(hx, hz):
+			var yaw := 0.0 if sz < 0.0 else PI  # door faces into the roof
+			props.append(["roof_hut", Transform3D(Basis(Vector3.UP, yaw), Vector3(hx, ry, hz))])
+			buildings.append({"tiers": [[hx - 1.7, hz - 2.1, hx + 1.7, hz + 2.1, ry, ry + 3.1]], "style": Style.MODERN,
+				"color": Color.WHITE, "kind": "structure", "seed": 0.0})
 	if (style == Style.BRICK or style == Style.STONE or style == Style.SANDSTONE) and h < 80.0 and brng.randf() < 0.55:
-		props.append(["water_tower", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)),
-			Vector3(rx + brng.randf_range(-tw, tw) * 0.25, ry, rz + brng.randf_range(-td, td) * 0.25))])
+		var wx := rx + brng.randf_range(-tw, tw) * 0.25
+		var wz := rz + brng.randf_range(-td, td) * 0.25
+		if free.call(wx, wz):
+			props.append(["water_tower", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)), Vector3(wx, ry, wz))])
 	if h > 235.0 and tw > 16.0 and td > 16.0:
 		# Supertall crown: a slim spire, the highest anchor in the city.
 		var sp := brng.randf_range(2.5, 3.5)
 		_add(_building([[rx - sp, rz - sp, rx + sp, rz + sp, ry, ry + brng.randf_range(28.0, 48.0)]], style,
 			col.lightened(0.15), "spire"))
-	elif h > 100.0 and brng.randf() < 0.55:
+	elif h > 100.0 and brng.randf() < 0.55 and free.call(rx, rz):
 		props.append(["antenna", Transform3D(Basis(), Vector3(rx, ry, rz))])
-	if h > 14.0 and h < 75.0 and tiers.size() == 1 and minf(tw, td) > 16.0 and brng.randf() < 0.16:
+	if h > 14.0 and h < 75.0 and tiers.size() == 1 and minf(tw, td) > 16.0 and blocked.is_empty() \
+			and brng.randf() < 0.16:
 		_billboard(tiers[0], ry, brng)
 	for i in brng.randi_range(0, 3):
 		if tw > 10.0 and td > 10.0:
-			props.append(["ac_unit", Transform3D(Basis(Vector3.UP, (brng.randi() % 2) * PI * 0.5),
-				Vector3(rx + brng.randf_range(-tw, tw) * 0.32, ry, rz + brng.randf_range(-td, td) * 0.32))])
+			var ax := rx + brng.randf_range(-tw, tw) * 0.32
+			var az := rz + brng.randf_range(-td, td) * 0.32
+			if free.call(ax, az):
+				props.append(["ac_unit", Transform3D(Basis(Vector3.UP, (brng.randi() % 2) * PI * 0.5),
+					Vector3(ax, ry, az))])
 
 
 func _building(tiers: Array, style: int, col: Color, kind: String) -> Dictionary:
@@ -948,9 +1223,9 @@ func _in_park(p: Vector3) -> bool:
 
 
 func _land() -> void:
-	var rects: Array = [Rect2(RIVER_EDGE, MIN_Z - 200, MAX_X + 400 - RIVER_EDGE, (MAX_Z - MIN_Z) + 400)]
+	var rects: Array = [island]
 	for w in water:
-		if w.position.x < 0.0:
+		if w.position.x < 0.0 or w in sea:
 			continue
 		var next: Array = []
 		for r in rects:

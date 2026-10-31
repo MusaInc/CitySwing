@@ -1,4 +1,25 @@
-# Status: 2026-10-31 (terrain: a city with geography)
+# Status: 2026-10-31 (island city, every district swingable)
+
+## Island + map pass (latest)
+
+User: "turn it into an island so there's not just empty open space … other parts of the map the buildings aren't tall enough to swing … more different size, different shaped buildings, personality … the business place is the best place to swing, I don't want to go anywhere else" + wind streaks lower opacity.
+
+**Island** (`CityLayout.island`, `_island()`, `_sea()`): the low filler blocks that ran 760 m past the city on three sides are gone; the city is an island. Sea on the north, east and south (`CityLayout.sea`, also in `water`, so falling in splashes/respawns); the strait (old river) and the suspension bridge to the mainland stay in the west. One more avenue was added past the last block column (no random draw), so the eastern blocks and the cathedral are whole. Past the outermost streets an 18 m esplanade runs to a sea wall with a stone railing (`BuildingMesher._coast`, drawn = collision).
+- **Shoreline** (`BuildingMesher.shore_samples/shore_profile/_shore`, `KIND_SHORE` shaded in ground.gdshader): an apron round the perimeter (wrapping the corners): layered rock headlands and coves where the land is high (the Heights meet the sea in 25–35 m cliffs on the east), sand beaches under the sea wall where it's low; the docks keep a plain quay. Ragged outline from 1-D noise, jagged facets, bedding-plane rock shading, wet line. Collides (same triangles).
+
+**Heights** (`_height_for`): every district is now swingable. Share of roof area ≥ 45 m above its street (new `test_every_district_is_swingable`): waterfront 95%, Old Town 92%, midtown 98%, docks 81%, CBD 94% (before, by map raycast: Old Town ~21%, docks ~30% of built area). Old Town = mansion blocks 36–60 m with 62–155 m towers; docks = warehouses + loft/residential towers to 150 m; waterfront 52–175 m. Fewer parks in Old Town/midtown.
+
+**Shapes** (`_form_for`, own seeded stream per building): pencil towers, slabs, twin towers on a podium with a sky bridge, cantilevers (top block hanging out over a recessed body; undersides drawn via `BuildingMesher._overhangs`), offset setbacks stepped to one side, stepped deco crowns, Old Town campaniles (bell/clock tower off a roof corner + spire), dock grain-silo rows with headhouse and gallery (`_silos`). Mixed per district so each has its own skyline. Roof props avoid towers (`_roof_furniture(..., blocked)`); roofs with towers aren't spawns (`roof_blocked`).
+
+**Bug found + fixed**: the first cut used `Array.shuffle()` (global RNG) → the city differed every launch. Now seeded; `test_whole_layout_repeats_exactly` compares two full generations.
+
+**Measured**: spawn audit 0/24 knockouts; collision audit vs previous commit: over 549 → 8, sink 234 → 0 (old outskirts), ghost 273 → 301 (roof huts/crane jibs, known category), 2 new minor wall flags at the north street edge. `tools/map_view.gd` = top-down height map + per-district stats. Render stats at the fixed views not worse (fixed cameras aren't height-matched to the new ground, so not a like-for-like saving). Not measured on a device.
+
+**Tests**: 96/98. Courses re-recorded (8/8). Open: `test_spawn_and_reattach_transitions_are_smooth` – seed 9's roof gives a 1.9–2.3 m camera pop (seeds 10–13: 0.2–0.4 m), a real pop beside a new tall neighbour, not yet fixed; `test_swing_launches_cleanly…` – 6/8 (two rooftop launches catch a web and rise 14–23 m but travel 13–15 m against a 15 m bar).
+
+**Wind streaks**: peak opacity 0.22 → 0.09 (`SpeedTrail.ALPHA`), gold flash on a perfect release kept.
+
+# Earlier 2026-10-31 (terrain: a city with geography)
 
 ## Terrain overhaul (latest)
 
