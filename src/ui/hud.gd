@@ -313,7 +313,7 @@ func _draw_gadget_status(white: Color, shadow: Color) -> void:
 		return
 	var c := size - Vector2(70, 70)
 	var ready := gadgets.ready_to_use()
-	draw_circle(c, 40.0, Color(0, 0, 0, 0.35))
+	draw_circle(c, 40.0, Color(UiStyle.INK, 0.45))
 	var k := gadgets.charge()
 	draw_arc(c, 38.0, -PI / 2, -PI / 2 + TAU * k, maxi(4, int(40 * k)), UiStyle.GOLD if ready else Color(1, 1, 1, 0.5),
 		4.0, true)
@@ -348,7 +348,7 @@ func _draw_speed_gauge(c: Vector2, white: Color, shadow: Color) -> void:
 	var a0 := PI * 0.75
 	var sweep := PI * 1.5
 	var k := clampf(_speed_smooth / 40.0, 0.0, 1.0)
-	draw_circle(c, r + 6.0, Color(0, 0, 0, 0.28))
+	draw_circle(c, r + 6.0, Color(UiStyle.INK, 0.45))
 	draw_arc(c, r, a0, a0 + sweep, 48, Color(1, 1, 1, 0.16), 6.0, true)
 	if k > 0.005:
 		var hot := clampf((_speed_smooth - SPEED_LINES_FROM) / (SPEED_LINES_FULL - SPEED_LINES_FROM), 0.0, 1.0)

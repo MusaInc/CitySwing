@@ -18,12 +18,27 @@ func _go() -> void:
 	for id in CourseBuilder.COURSES:
 		if not only.is_empty() and not id in only:
 			continue
+		# Swings are chaotic: a DNF is retried from a start nudged a few cm
+		# (the exact start is stored, so replays stay bit-for-bit).
+		for attempt in 6:
+			if await _record(id, attempt, out):
+				break
+	var f := FileAccess.open(CourseBuilder.PATH, FileAccess.WRITE)
+	f.store_string(JSON.stringify(out, "  ", true, true))
+	f.close()
+	print("wrote ", CourseBuilder.PATH, " with ", out.keys())
+	quit(0 if out.size() == CourseBuilder.COURSES.size() else 1)
+
+
+func _record(id: String, attempt: int, out: Dictionary) -> bool:
+	if true:
 		# A fresh world per course: replays (tests) build theirs the same way,
 		# and Jolt is only deterministic for identical world histories.
 		var world := CityWorld.new()
 		root.add_child(world)
 		await physics_frame
 		var r := CourseBuilder.route(id, world.layout)
+		r["start"] += Vector3(0.11, 0.0, 0.07) * attempt
 		var p := Player.new()
 		p.params = load("res://config/swing_params.tres").duplicate()
 		root.add_child(p)
@@ -49,8 +64,8 @@ func _go() -> void:
 				ok = true
 				break
 		var gates := CourseBuilder.gates_from_path(world.layout, path)
-		print("%-10s %s in %.1f s, %d gates, waypoint %d/%d, street contact: %s" % [id, "OK " if ok else "DNF",
-			t, gates.size(), follower.i + 1, follower.wps.size(), street[0]])
+		print("%-10s %s in %.1f s, %d gates, waypoint %d/%d, street contact: %s (try %d)" % [id, "OK " if ok else "DNF",
+			t, gates.size(), follower.i + 1, follower.wps.size(), street[0], attempt + 1])
 		if ok:
 			var gs: Array = []
 			for g in gates:
@@ -64,11 +79,8 @@ func _go() -> void:
 		p.queue_free()
 		world.queue_free()
 		await process_frame
-	var f := FileAccess.open(CourseBuilder.PATH, FileAccess.WRITE)
-	f.store_string(JSON.stringify(out, "  ", true, true))
-	f.close()
-	print("wrote ", CourseBuilder.PATH, " with ", out.keys())
-	quit(0 if out.size() == CourseBuilder.COURSES.size() else 1)
+		return ok
+	return false
 
 
 static func _a(v: Vector3) -> Array:

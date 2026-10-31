@@ -418,6 +418,7 @@ func set_sky_colors(top: Color, horizon: Color) -> void:
 	for m in [building_mat, water_mat]:
 		m.set_shader_parameter("sky_top", top)
 		m.set_shader_parameter("sky_horizon", horizon)
+	building_mat.set_shader_parameter("sun_dir", Atmosphere.sun_direction())
 
 
 func _load_mesh(name: String) -> Mesh:
@@ -657,6 +658,10 @@ func _furniture_arrays(key: Vector2i):
 ## roofs at the height they're drawn, cornices, parapets, plinths and awnings
 ## solid, the street at 0 and the raised pavements at their kerb height.
 func _build_collision() -> void:
+	# Fill every building's feature cache here, on the main thread, before
+	# any chunk task reads them.
+	for b in layout.buildings:
+		BuildingMesher.features(b)
 	var by_chunk := _by_chunk
 	for key in by_chunk:
 		var body := StaticBody3D.new()

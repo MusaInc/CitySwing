@@ -1,8 +1,20 @@
-# Status: 2026-10-30 (shop, coins, gadgets)
+# Status: 2026-10-31 (art direction: lighting, architecture, hero, HUD)
+
+## Art-direction pass (latest)
+
+- **Lighting** (`atmosphere.gd`): warmer, stronger sun (2.3) against a cool blue sky fill (ambient 0.62), so lit and shaded faces finally contrast; deeper blue zenith, cleaner horizon. Fog is now depth fog (clear to 180 m, soft blue veil to 2.6 km) instead of an exponential grey wash over everything. A procedural 17³ grade LUT (`Atmosphere.grade`): gentle S-curve, cool shadows, warm highlights, mid saturation.
+- **Fixed a long-standing shader bug**: the facade shader compared an interpolated surface kind with `==`, so parts of every roof and cornice ran the window code: that was the "gravel" grain and streaks on roofs. `v_kind` is now a `flat` varying.
+- **Facades** (`building.gdshader`): recessed windows whose reveals cast the sun's shadow on the correct side (`sun_dir` uniform from `Atmosphere.sun_direction()`), stone sills (+ brick lintels), stone quoins on masonry corners and a fine shaded arris on every corner (walls now pass face position/width in UV2, see `BuildingMesher._face_span`; the per-building seed is snapped to 1/256 so interpolation can't scramble window hashes), calmer glass (fewer beige blinds and daytime-lit windows), darker shopfronts, ground contact shading and a facade height gradient. Roofs get soft weathering patches and paver walkways.
+- **Architecture** (`BuildingMesher.features(b)`, cached in the building dict, drawn in the detailed LOD and collided via `collision_boxes`): iron fire escapes on brick/warehouse blocks (platforms at window-sill height over two window columns, zig-zag stairs, drop ladder; collision = the escape's volume plus the top platform's railing), classical entrance portals with lamps on masonry and steel-and-glass canopies on modern/glass towers (on a shop-bay centre; awnings skip them), vertical fins on ~60% of glass towers (collision 0.24 m proud), chimney stacks on brick/sandstone roofs, crowns of piers on tall deco/stone towers. Collision audit: no new hole/float/wall flags.
+- **Hero**: the character shader takes the sRGB-authored palette to linear (^2): the suit is deep crimson instead of salmon, trousers true navy; a two-tone rim (warm sun side, cool sky side) keeps the silhouette readable on any facade.
+- **Speed trail** (`src/player/speed_trail.gd`): thin wind ribbons off the feet above ~60 km/h tracing the swing arc; they flash gold and widen on a perfect release.
+- **HUD**: one panel language: `UiStyle.pill` draws slanted Night Ink tags with a hairline edge (near-black panels are mapped to Night Ink); Swing/Jump/pause/stick are Night Ink glass with hairline rings, gold only for "a web will land" (ring, brackets, label), filled gold while held. No more big yellow disc.
+- **Autopilot / courses**: `SwingBot` gets stuck recovery (grounded and not displaced 2 m for 1.5 s with nothing to web: one hop, then turn back off the ledge), measured by displacement since a body pinned on a wall still reports speed. `make_courses.gd` retries a DNF up to 6× from a start nudged a few cm (the exact start is stored, replays stay exact). All 8 courses re-recorded against the new architecture.
+- Cost: startup layout+collision ≈ 1.0 s on the VPS (was ≈ 0.75 s; ~1.3k more collision boxes). Not measured on a device.
 
 # Status: 2026-10-30 (map set pieces, exact collision, mask, wall reactions)
 
-## Map, collision and contact pass (latest)
+## Map, collision and contact pass
 
 - **Collision = what's drawn.** `BuildingMesher.collision_boxes(b)` builds every building's collision from the same numbers the mesher draws with: walls, the cornice/roof slab (roofs used to float 30 cm above glass roofs, and feet sank into masonry ones), parapet ring (now 0.3 m, under STEP_MAX, so a run steps onto it), plinth band, shop awnings (solid: you can land on them), construction frames with columns, hoarding and edge barrier. Ledges stand 8 cm proud (visual only). Roof props sit on the drawn roof (`BuildingMesher.roof_y`).
 - **No more falling through the ground**: the street collision now covers all the drawn ground (city, outskirts to +1 km, far shore). Previously it stopped ~200–400 m out while the outskirts' ground went on ~760 m. All outskirt and far-shore buildings collide. Pavements (kerb 0.15 m), quay rings and the river wall collide; the street sits exactly at 0.

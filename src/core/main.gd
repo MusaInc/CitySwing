@@ -79,6 +79,11 @@ func _ready() -> void:
 	add_child(rope)
 	rope.player = player
 	rope.hand = rig.launcher
+	var trail := SpeedTrail.new()
+	trail.name = "SpeedTrail"
+	trail.player = player
+	trail.rig = rig
+	add_child(trail)
 	coins = CoinMeter.new()
 	coins.name = "Coins"
 	add_child(coins)

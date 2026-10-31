@@ -201,11 +201,9 @@ func _process(_dt: float) -> void:
 
 func _draw() -> void:
 	var white := Color(1, 1, 1, 0.85)
-	var faint := Color(1, 1, 1, 0.16)
 	var shade := Color(0, 0, 0, 0.22)
 	if _has_kind("stick"):
-		draw_circle(_stick_origin, STICK_RADIUS + 3.0, shade)
-		draw_circle(_stick_origin, STICK_RADIUS, faint)
+		draw_circle(_stick_origin, STICK_RADIUS, Color(UiStyle.INK, 0.3))
 		draw_arc(_stick_origin, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.35), 2.0, true)
 		var d := _stick_pos - _stick_origin
 		if d.length() > 14.0:
@@ -237,25 +235,28 @@ func _draw() -> void:
 		var b: Dictionary = buttons[action]
 		var c := button_center(action)
 		var down := web_down if action == "grapple" else jump_down
-		var fill := Color(1, 1, 1, 0.32 if down else 0.08)
-		if action == "grapple" and (ready or down) and Settings.aim_mode != "tap":
-			fill = Color(1.0, 0.78, 0.35, 0.55 if down else 0.28)
-		draw_circle(c, b["r"] + 3.0, shade)
+		# Same family as the HUD panels: Night Ink glass, a hairline ring, and
+		# gold only to say "a web will land" (ring + label), filled when held.
+		var hot: bool = action == "grapple" and ready and Settings.aim_mode != "tap"
+		var fill := Color(UiStyle.INK, 0.62 if down else 0.38)
+		if down and action == "grapple":
+			fill = Color(UiStyle.GOLD, 0.5)
 		draw_circle(c, b["r"], fill)
-		var ring := white if down else Color(1, 1, 1, 0.42)
-		if action == "grapple" and ready and Settings.aim_mode != "tap":
+		var ring := Color(UiStyle.WEB, 0.9 if down else 0.38)
+		if hot:
 			ring = Color(UiStyle.GOLD, 0.95)
-			draw_arc(c, b["r"] + 9.0, 0, TAU, 56, Color(UiStyle.GOLD, 0.35), 3.0, true)
-		draw_arc(c, b["r"], 0, TAU, 48, ring, 3.0, true)
-		var fs := 26 if action == "grapple" else 16
+			draw_arc(c, b["r"] + 7.0, -PI * 0.75, -PI * 0.25, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
+			draw_arc(c, b["r"] + 7.0, PI * 0.25, PI * 0.75, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
+		draw_arc(c, b["r"], 0, TAU, 48, ring, 2.5 if not hot else 4.0, true)
+		var fs := 22 if action == "grapple" else 15
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string(_font, c + Vector2(-tw / 2.0 + 1, fs * 0.35 + 2), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.35))
-		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, white)
+		var label_col := UiStyle.GOLD if hot and not down else white
+		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, label_col)
 	if _gadget_shown():
 		_draw_gadget(_safe.end + GADGET_POS, white, shade)
 	var pp := Vector2(_safe.end.x - 44, _safe.position.y + 44)
-	draw_circle(pp, 26, shade)
-	draw_circle(pp, 24, faint)
+	draw_circle(pp, 24, Color(UiStyle.INK, 0.38))
+	draw_arc(pp, 24, 0, TAU, 32, Color(UiStyle.WEB, 0.3), 1.5, true)
 	draw_rect(Rect2(pp + Vector2(-8, -9), Vector2(5, 18)), white)
 	draw_rect(Rect2(pp + Vector2(3, -9), Vector2(5, 18)), white)
 

@@ -9,7 +9,7 @@ shader_type spatial;
 render_mode cull_back, diffuse_burley;
 
 uniform vec3 rim_color : source_color = vec3(1.0, 0.88, 0.72);
-uniform float rim_strength = 0.35;
+uniform float rim_strength = 0.55;
 // Same space as the baked vertex colours.
 uniform vec3 suit_color = vec3(0.796, 0.098, 0.09);
 uniform vec3 pants_color = vec3(0.118, 0.141, 0.2);
@@ -50,10 +50,19 @@ void vertex() {
 
 void fragment() {
 	float glow = 1.0 - COLOR.a;
-	vec3 base = COLOR.rgb;
+	// The palette was authored in display (sRGB) values; take it most of the
+	// way to linear so the suit reads deep crimson under the warm sun instead
+	// of a pale salmon, and the trousers a true dark navy.
+	vec3 base = pow(COLOR.rgb, vec3(2.0));
 	ALBEDO = base;
-	ROUGHNESS = mix(0.72, 0.3, glow);
-	EMISSION = base * glow * 2.5;
-	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
-	EMISSION += rim_color * rim * rim_strength * (1.0 - glow);
+	// Suit fabric has a soft sheen; trainers and gloves stay matte.
+	ROUGHNESS = mix(0.6, 0.3, glow);
+	EMISSION = COLOR.rgb * glow * 2.5;
+	// Two-tone rim: warm on the sun side, cool sky-blue elsewhere, so the
+	// silhouette separates from both lit and shaded facades at a distance.
+	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
+	vec3 n_w = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
+	float sun_side = clamp(dot(n_w, normalize(vec3(0.73, 0.62, -0.29))) * 0.5 + 0.5, 0.0, 1.0);
+	vec3 rim_c = mix(vec3(0.55, 0.75, 1.0), rim_color, sun_side);
+	EMISSION += rim_c * rim * rim_strength * (1.0 - glow);
 }

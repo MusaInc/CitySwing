@@ -19,6 +19,9 @@ var goal_fn: Callable
 var _hold := false
 var _cooldown := 0.0
 var _ground_time := 0.0
+var _stuck := 0.0  # s grounded, slow and with nothing to web
+var _hopped := false
+var _stuck_at := Vector3.ZERO
 var _idle_held := false  # the button was down last frame with no line out
 var _stall := 0.0
 var _trust := 0.0  # s left trusting a web fired to avoid a wall
@@ -54,6 +57,22 @@ func drive(p: Player, dt: float) -> Dictionary:
 			out["jump"] = true
 		if _ground_time > 0.5 and p.targeting.has_target:
 			_hold = true
+		# Boxed in (a ledge against a tower, a dead-end corner) with nothing
+		# to web: hop, then turn back and drop off the edge.
+		# Measured by real displacement (pinned against a wall the velocity
+		# still reads high); _stuck survives the hops that reset _ground_time.
+		var moved := Vector2(pos.x - _stuck_at.x, pos.z - _stuck_at.z).length()
+		if moved > 2.0:
+			_stuck = 0.0
+			_hopped = false
+			_stuck_at = pos
+		else:
+			_stuck += dt
+		if _stuck > 1.5 and not _hopped:
+			out["jump"] = true
+			_hopped = true
+		elif _hopped:
+			out["move"] = -dir
 		out["grapple"] = _repress(_hold) if p.line_state == Player.Line.IDLE else _hold
 		return out
 	_ground_time = 0.0

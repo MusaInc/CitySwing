@@ -30,6 +30,9 @@ const PLINTH_OUT := 0.15   # m: ground-floor plinth band
 const PLINTH_H := 0.9
 const AWNING_Y := 3.25
 const AWNING_OUT := 1.3
+const IRON := [Color(0.11, 0.12, 0.12), Color(0.1, 0.16, 0.13), Color(0.3, 0.12, 0.09)]
+const ESCAPE_DEPTH := 1.35   # m: fire-escape platforms stand this far out
+const FIN_OUT := 0.24        # m: glass-tower fins
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -83,7 +86,21 @@ func walls(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col
 		var w := a.distance_to(b)
 		quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
 			Vector2(u, vy1), Vector2(u + w, vy1), Vector2(u + w, vy0), Vector2(u, vy0), col, kind, style, seed)
+		_face_span(w, style, seed)
 		u += w
+
+
+## Tells the shader where a wall face's corners are, for corner quoins and
+## edge shading: UV2.x = style + 0..1 across the face, UV2.y = width (¼ m
+## steps) + seed. Quads without it (roofs, undersides) read as width 0.
+func _face_span(w: float, style: float, seed: float) -> void:
+	var n := uv2s.size()
+	# Seed in 1/256 steps, centred, so interpolation noise can't change it.
+	var wy := floorf(w * 4.0) + (floorf(seed * 256.0) + 0.5) / 256.0
+	uv2s[n - 4] = Vector2(style, wy)
+	uv2s[n - 3] = Vector2(style + 0.999, wy)
+	uv2s[n - 2] = Vector2(style + 0.999, wy)
+	uv2s[n - 1] = Vector2(style, wy)
 
 
 func top(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, kind: float, style: float, seed: float) -> void:
@@ -263,6 +280,13 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
 			top(x0, z0, x1, z1, y1, roof, KIND_ROOF, style, seed)
+	if detailed:
+		var f := features(b)
+		for d in f["draw"]:
+			var bx: AABB = d[0]
+			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1])
+		for bm in f["beams"]:
+			beam(bm[0], bm[1], bm[2], bm[3], bm[4])
 
 
 ## Cornice: how far the roof slab overhangs the walls, and its depth (it
@@ -347,7 +371,234 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		var lo := Vector3(minf(a.x, far.x), AWNING_Y - 0.38, minf(a.z, far.z))
 		var hi := Vector3(maxf(a.x, far.x), AWNING_Y + 0.18, maxf(a.z, far.z))
 		out.append(AABB(lo, hi - lo))
+	out.append_array(features(b)["col"])
 	return out
+
+
+# ------------------------------------------------------------ features
+## A wall face of a tier in the order walls() draws them (k = 0 +z, 1 +x,
+## 2 −z, 3 −x): [origin at the left end, along, outward, length, u at origin]
+## (u = the shader's metres round the building, so features can line up with
+## its window columns and shop bays).
+static func _face(t: Array, k: int) -> Array:
+	var w: float = t[2] - t[0]
+	var d: float = t[3] - t[1]
+	match k:
+		0: return [Vector3(t[0], 0, t[3]), Vector3.RIGHT, Vector3.BACK, w, 0.0]
+		1: return [Vector3(t[2], 0, t[3]), Vector3.FORWARD, Vector3.RIGHT, d, w]
+		2: return [Vector3(t[2], 0, t[1]), Vector3.LEFT, Vector3.FORWARD, w, w + d]
+	return [Vector3(t[0], 0, t[1]), Vector3.BACK, Vector3.LEFT, d, w * 2.0 + d]
+
+
+## World box from face-local ranges: along a0..a1, out o0..o1, height y0..y1.
+static func _fbox(f: Array, a0: float, a1: float, o0: float, o1: float, y0: float, y1: float) -> AABB:
+	var org: Vector3 = f[0]
+	var p: Vector3 = org + (f[1] as Vector3) * a0 + (f[2] as Vector3) * o0
+	var q: Vector3 = org + (f[1] as Vector3) * a1 + (f[2] as Vector3) * o1
+	var lo := Vector3(minf(p.x, q.x), y0, minf(p.z, q.z))
+	var hi := Vector3(maxf(p.x, q.x), y1, maxf(p.z, q.z))
+	return AABB(lo, hi - lo)
+
+
+static func _fpt(f: Array, a: float, o: float, y: float) -> Vector3:
+	return (f[0] as Vector3) + (f[1] as Vector3) * a + (f[2] as Vector3) * o + Vector3(0, y, 0)
+
+
+## Architectural features of a building, decided from its seed (so the mesher
+## and the collision agree without storing anything): fire escapes, entrance
+## portals and canopies, glass fins, chimneys and crowns.
+##   draw: [[AABB, Color]] solid boxes   beams: [[a, b, w, h, Color]]
+##   col:  [AABB] what you stand on / bump into (covers draw and beams)
+static func features(b: Dictionary) -> Dictionary:
+	if b.has("_features"):
+		return b["_features"]
+	var out := _features(b)
+	b["_features"] = out  # (the mesher, awnings and collision all ask)
+	return out
+
+
+static func _features(b: Dictionary) -> Dictionary:
+	var out := {"draw": [], "beams": [], "col": []}
+	if not _parapeted(b) or b["kind"] != "normal":
+		return out
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(float(b["seed"]) * 7919.0 * 1000.0) ^ 0x5f3
+	var style := int(b["style"])
+	var t0: Array = b["tiers"][0]
+	var col: Color = b["color"]
+	var trim := trim_color(b)
+	var single := (b["tiers"] as Array).size() == 1
+	var h0: float = t0[5]
+	# Fire escapes: brick flats and warehouses, 2nd floor to the top floor.
+	if style in [CityLayout.Style.BRICK, CityLayout.Style.WAREHOUSE] and float(t0[4]) == 0.0 \
+			and h0 > 13.0 and h0 < 75.0 and rng.randf() < 0.7:
+		var n := 1 + int(rng.randf() < 0.35)
+		var iron: Color = IRON[rng.randi() % IRON.size()]
+		var first := rng.randi() % 4
+		for i in n:
+			var k := (first + i * 2) % 4
+			_fire_escape(out, _face(t0, k), style, h0, iron, rng)
+	# Entrances: a stone portal on masonry, a steel canopy on modern/glass.
+	if float(t0[4]) == 0.0 and h0 > 24.0 and style != CityLayout.Style.WAREHOUSE:
+		var k := 0
+		var best := 0.0
+		for kk in 4:
+			var L: float = _face(t0, kk)[3]
+			if L > best + 0.5:
+				best = L
+				k = kk
+		if best > 18.0:
+			_portal(out, _face(t0, k), style, col, trim, rng)
+	# Fins up the glass towers (a vertical rhythm the shader alone can't give).
+	if _glassy(b) and rng.randf() < 0.6:
+		var fin_col := trim.darkened(rng.randf_range(0.0, 0.5))
+		for t in b["tiers"]:
+			if float(t[5]) - float(t[4]) < 24.0:
+				continue
+			var y0: float = maxf(float(t[4]), 4.6)
+			var y1: float = float(t[5]) - cornice_h(b) * 0.5
+			for k in 4:
+				var f := _face(t, k)
+				var L: float = f[3]
+				var u0: float = f[4]
+				var m := ceili((u0 + 0.9) / 3.2)
+				while m * 3.2 - u0 < L - 0.9:
+					var a := m * 3.2 - u0
+					out["draw"].append([_fbox(f, a - 0.07, a + 0.07, 0.0, FIN_OUT, y0, y1), fin_col])
+					m += 1
+			out["col"].append(_aabb(t[0] - FIN_OUT, t[1] - FIN_OUT, t[2] + FIN_OUT, t[3] + FIN_OUT, y0, y1))
+	var tt: Array = b["tiers"][-1]
+	var ry := roof_y(b)
+	var o := cornice_out(b)
+	# Chimney stacks near the corners of brick roofs.
+	if style in [CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE] and float(tt[5]) < 60.0:
+		var stack := col.darkened(0.25)
+		for c in 4:
+			if rng.randf() > 0.45:
+				continue
+			var f := _face(tt, c)
+			var a := 1.2 + rng.randf_range(0.0, 0.4)
+			var hgt := rng.randf_range(1.6, 2.8)
+			var bx := _fbox(f, a - 0.45, a + 0.45, -1.4, -0.6, ry, ry + hgt)
+			out["draw"].append([bx, stack])
+			var cap := bx.grow(0.08)
+			cap.position.y = ry + hgt
+			cap.size.y = 0.18
+			out["draw"].append([cap, trim])
+			out["col"].append(AABB(cap.position - Vector3(0, hgt, 0), Vector3(cap.size.x, hgt + 0.18, cap.size.z)))
+	# Crowns: corner and mid piers rising over the parapet of deco/stone towers.
+	if style in [CityLayout.Style.DECO, CityLayout.Style.STONE] and float(tt[5]) > 70.0 \
+			and float(tt[2]) - float(tt[0]) > 14.0 and float(tt[3]) - float(tt[1]) > 14.0:
+		var ph := rng.randf_range(3.5, 6.0)
+		var pc := trim.lightened(0.08)
+		for k in 4:
+			var f := _face(tt, k)
+			var L: float = f[3]
+			for a in [-o + 0.0, L * 0.5 - 0.6]:
+				var w := 1.6 if a < 0.0 else 1.2
+				var bx := _fbox(f, a, a + w, -w + o, o, ry, ry + (ph if a < 0.0 else ph * 0.7))
+				out["draw"].append([bx, pc])
+				out["col"].append(bx)
+	return out
+
+
+static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: Color,
+		rng: RandomNumberGenerator) -> void:
+	var L: float = f[3]
+	var u0: float = f[4]
+	if L < 12.0:
+		return
+	var col_w := 4.0 if style == CityLayout.Style.WAREHOUSE else 3.2
+	var floor_h := 4.4 if style == CityLayout.Style.WAREHOUSE else 3.0
+	var sill := 1.0 if style == CityLayout.Style.WAREHOUSE else 0.6
+	# Centred on a window-column boundary, so it spans two windows.
+	var c := roundf((u0 + rng.randf_range(4.0, L - 4.0)) / col_w) * col_w - u0
+	var hw := col_w + 0.2
+	if c - hw < 1.2 or c + hw > L - 1.2:
+		return
+	var d := ESCAPE_DEPTH
+	var levels: Array[float] = []
+	var k := 2 if style != CityLayout.Style.WAREHOUSE else 1
+	while k * floor_h + sill < h - 3.2:
+		levels.append(k * floor_h + sill)
+		k += 1
+	if levels.size() < 2:
+		return
+	for i in levels.size():
+		var y: float = levels[i]
+		out["draw"].append([_fbox(f, c - hw, c + hw, 0.0, d, y - 0.08, y), iron])
+		var r := 1.0
+		out["beams"].append([_fpt(f, c - hw, d - 0.03, y + r), _fpt(f, c + hw, d - 0.03, y + r), 0.06, 0.06, iron])
+		out["beams"].append([_fpt(f, c - hw, d - 0.03, y + r * 0.5), _fpt(f, c + hw, d - 0.03, y + r * 0.5), 0.03, 0.03, iron])
+		for e in [c - hw + 0.03, c + hw - 0.03]:
+			out["beams"].append([_fpt(f, e, 0.05, y + r), _fpt(f, e, d - 0.03, y + r), 0.06, 0.06, iron])
+			out["beams"].append([_fpt(f, e, d - 0.03, y), _fpt(f, e, d - 0.03, y + r), 0.05, 0.05, iron])
+		out["beams"].append([_fpt(f, c, d - 0.03, y), _fpt(f, c, d - 0.03, y + r), 0.04, 0.04, iron])
+		if i + 1 < levels.size():
+			# Zig-zag stair to the next platform, against the wall.
+			var y2: float = levels[i + 1]
+			var lr := 1.0 if i % 2 == 0 else -1.0
+			var a := _fpt(f, c - lr * (hw - 0.4), 0.45, y)
+			var e2 := _fpt(f, c + lr * (hw - 1.3), 0.45, y2 - 0.08)
+			out["beams"].append([a, e2, 0.7, 0.07, iron])
+			out["beams"].append([a + Vector3.UP * 0.9 + (f[2] as Vector3) * 0.32, e2 + Vector3.UP * 0.9 + (f[2] as Vector3) * 0.32,
+				0.04, 0.04, iron])
+	var ya: float = levels[0]
+	var yb: float = levels[-1]
+	out["col"].append(_fbox(f, c - hw, c + hw, 0.0, d, ya - 0.08, yb))
+	out["col"].append(_fbox(f, c - hw, c + hw, d - 0.1, d, yb, yb + 1.0))
+	out["col"].append(_fbox(f, c - hw, c - hw + 0.1, 0.0, d, yb, yb + 1.0))
+	out["col"].append(_fbox(f, c + hw - 0.1, c + hw, 0.0, d, yb, yb + 1.0))
+	# Counterweighted drop ladder under the lowest platform.
+	var lx := c + hw - 0.7
+	for s2 in [-0.22, 0.22]:
+		out["beams"].append([_fpt(f, lx + s2, d - 0.2, ya - 2.3), _fpt(f, lx + s2, d - 0.2, ya), 0.05, 0.05, iron])
+	for j in 6:
+		var yy := ya - 2.1 + j * 0.35
+		out["beams"].append([_fpt(f, lx - 0.22, d - 0.2, yy), _fpt(f, lx + 0.22, d - 0.2, yy), 0.03, 0.03, iron])
+	out["col"].append(_fbox(f, lx - 0.27, lx + 0.27, d - 0.25, d - 0.15, ya - 2.3, ya))
+
+
+static func _portal(out: Dictionary, f: Array, style: int, col: Color, trim: Color,
+		rng: RandomNumberGenerator) -> void:
+	var L: float = f[3]
+	var u0: float = f[4]
+	# On a shop-bay centre (the shader draws the door there), near the middle.
+	var bay := roundf((u0 + L * 0.5 - 3.0) / 6.0)
+	var c := bay * 6.0 + 3.0 - u0
+	if c < 5.0 or c > L - 5.0:
+		return
+	var glassy := style == CityLayout.Style.GLASS or style == CityLayout.Style.DARK_GLASS
+	var door := Color(0.07, 0.08, 0.1)
+	if glassy or style == CityLayout.Style.MODERN:
+		# Cantilevered steel-and-glass canopy over a full-height glazed lobby.
+		var steel := Color(0.78, 0.8, 0.82) if rng.randf() < 0.5 else Color(0.16, 0.17, 0.19)
+		var cw := rng.randf_range(4.5, 6.5)
+		out["draw"].append([_fbox(f, c - 2.8, c + 2.8, 0.0, 0.2, 0.0, 4.3), door])
+		var can := _fbox(f, c - cw, c + cw, 0.0, 3.2, 4.4, 4.75)
+		out["draw"].append([can, steel])
+		out["col"].append(_fbox(f, c - 2.8, c + 2.8, 0.0, 0.2, 0.0, 4.3))
+		out["col"].append(can)
+		return
+	# Classical portal: two pilasters, entablature and a cornice cap.
+	var stone := Color(0.8, 0.76, 0.68) if style == CityLayout.Style.BRICK else col.lightened(0.1)
+	var pw := 1.0
+	var ph := rng.randf_range(5.6, 6.6)
+	var parts := [
+		[_fbox(f, c - 2.6 - pw, c - 2.6, 0.0, 0.55, 0.0, ph), stone],
+		[_fbox(f, c + 2.6, c + 2.6 + pw, 0.0, 0.55, 0.0, ph), stone],
+		[_fbox(f, c - 2.9 - pw, c + 2.9 + pw, 0.0, 0.7, ph, ph + 1.1), stone],
+		[_fbox(f, c - 3.1 - pw, c + 3.1 + pw, 0.0, 0.88, ph + 1.1, ph + 1.35), stone.lightened(0.08)],
+		[_fbox(f, c - 2.6, c + 2.6, 0.0, 0.18, 0.0, ph - 0.9), door],
+		[_fbox(f, c - 2.6, c + 2.6, 0.0, 0.12, ph - 0.9, ph), stone.darkened(0.25)],
+	]
+	for pt in parts:
+		out["draw"].append(pt)
+		out["col"].append(pt[0])
+	# Brass lamps either side of the door.
+	for e in [c - 2.6 - pw * 0.5, c + 2.6 + pw * 0.5]:
+		out["draw"].append([_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5), Color(0.95, 0.78, 0.4)])
+		out["col"].append(_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5))
 
 
 static func _aabb(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float) -> AABB:
@@ -399,6 +650,10 @@ static func awning_runs(b: Dictionary) -> Array:
 	var z0: float = t[1]
 	var x1: float = t[2]
 	var z1: float = t[3]
+	var avoid: Array = []  # entrance portals take the ground floor where they stand
+	for bx: AABB in features(b)["col"]:
+		if bx.position.y < AWNING_Y + 1.0:
+			avoid.append(bx.grow(0.6))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(float(b["seed"]) * 1000003.0) ^ 0xa3
 	var out := AWNING_OUT
@@ -413,6 +668,13 @@ static func awning_runs(b: Dictionary) -> Array:
 			if rng.randf() < 0.55 and d + w < bb - 1.5:
 				var col: Color = AWNING_COLORS[rng.randi() % AWNING_COLORS.size()]
 				var e := d + w
+				var span: AABB
+				match side:
+					0, 2: span = _aabb(d, (z0 if side == 0 else z1) - out, e, (z0 if side == 0 else z1) + out, 2.5, 4.0)
+					_: span = _aabb((x1 if side == 1 else x0) - out, d, (x1 if side == 1 else x0) + out, e, 2.5, 4.0)
+				if avoid.any(func(a2: AABB) -> bool: return a2.intersects(span)):
+					d += w + rng.randf_range(0.6, 2.5)
+					continue
 				match side:
 					0: out_runs.append([Vector3(d, y, z0), Vector3(e, y, z0), Vector3.FORWARD * out, col])
 					1: out_runs.append([Vector3(x1, y, d), Vector3(x1, y, e), Vector3.RIGHT * out, col])
