@@ -124,26 +124,26 @@ func _probe_down(space: PhysicsDirectSpaceState3D, top: Vector3) -> void:
 		_note("sink@" + ("ground" if vy < 0.5 else "high"), Vector3(top.x, vy, top.z), " by %.2f %s" % [d, (vis["collider"] as Node).name])
 
 
-## Body-height rays along every street in the playable grid, both ways across:
-## a drawn wall that starts before the collision means the body slides inside it.
+## Body-height rays along every road, both ways across: a drawn wall that
+## starts before the collision means the body slides inside it.
 func _probe_walls(space: PhysicsDirectSpaceState3D, x0: float, x1: float, z0: float, z1: float, step: float) -> void:
 	for h in [0.4, 1.0, 1.7]:
-		for s in world.layout.x_streets:
-			var cx: float = s[0]
-			var z := maxf(z0, CityLayout.MIN_Z)
-			while z < minf(z1, CityLayout.MAX_Z):
-				for dir in [1.0, -1.0]:
-					var a := Vector3(cx, h + world.layout.terrain.road_y(cx, z), z)
-					_wall_pair(space, a, a + Vector3(dir * 60.0, 0, 0))
-				z += step
-		for s in world.layout.z_streets:
-			var cz: float = s[0]
-			var x := maxf(x0, CityLayout.RIVER_EDGE)
-			while x < minf(x1, CityLayout.MAX_X):
-				for dir in [1.0, -1.0]:
-					var a := Vector3(x, h + world.layout.terrain.road_y(x, cz), cz)
-					_wall_pair(space, a, a + Vector3(0, 0, dir * 60.0))
-				x += step
+		for r in world.layout.roads.roads:
+			var pts: PackedVector2Array = r["pts"]
+			for i in pts.size() - 1:
+				var a2: Vector2 = pts[i]
+				var b2: Vector2 = pts[i + 1]
+				var L := a2.distance_to(b2)
+				var d := (b2 - a2) / maxf(L, 0.001)
+				var n := Vector2(-d.y, d.x)
+				var t := 0.0
+				while t < L:
+					var p := a2 + d * t
+					if p.x >= x0 and p.x <= x1 and p.y >= z0 and p.y <= z1:
+						for sg: float in [1.0, -1.0]:
+							var a := Vector3(p.x, h + world.layout.terrain.road_y(p.x, p.y), p.y)
+							_wall_pair(space, a, a + Vector3(n.x, 0, n.y) * sg * 60.0)
+					t += step
 
 
 func _wall_pair(space: PhysicsDirectSpaceState3D, a: Vector3, b: Vector3) -> void:

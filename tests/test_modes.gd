@@ -86,9 +86,8 @@ func _fly_course(t, id: String, limit_s: float, offset: Vector3, check_gates: bo
 
 func _inside_building(p: Vector3) -> bool:
 	for b in world.layout.buildings:
-		for tt in b["tiers"]:
-			if p.x > tt[0] and p.x < tt[2] and p.z > tt[1] and p.z < tt[3] and p.y > tt[4] and p.y < tt[5]:
-				return true
+		if CityLayout.inside(b, p):
+			return true
 	return false
 
 

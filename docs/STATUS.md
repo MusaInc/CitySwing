@@ -1,4 +1,28 @@
-# Status: 2026-10-31 (island city, every district swingable)
+# Status: 2026-10-31 (organic road network)
+
+## Road network (latest)
+
+User: "the whole map is grid like, not realistic" → chose a fully organic street network.
+
+**Plan** (`src/world/city_roads.gd`, `CityRoads`): organic island outline (noisy rounded coast, straight strait quay in the west with a 40 m promenade for the viaduct and bridge anchorage), coastal ring road, named boulevards from smoothed control points – `diagonal` (bridge → CBD → past the cathedral), `spine` (north–south S), `valley` (along the railway), `heights`, `crescent` (Old Town), `inner` (closed ring round the CBD) – roundabouts where they cross (green islands), then every region carved into blocks by recursive street cuts styled per district (skewed grid CBD, angled midtown, quay-straight docks, winding small-block Old Town). Cuts end at the streets they meet (T-junctions) and avoid reserved footprints (landmarks, set pieces, beacon plaza, ship basin). `tools/roads_view.gd` previews it top-down.
+
+**Road field** (`CityRoads.bake_field`, 2 m texels, worker pool): nearest road's signed offset, ±half width (− = boulevard), distance along (mod 64), distance to the nearest other road's kerb (< 0 in junctions). ground.gdshader draws all paint from it (curving centre lines, boulevard lane dividers, zebras/stop lines at every junction mouth, drains, manholes, kerbs, paving); CPU `field_at` / `on_road` for placement and tests.
+
+**Terrain**: the landform is sampled on a regular 8 m grid (`CityTerrain.build(area)`), no longer at street junctions. `poly_level` for terraces.
+
+**Blocks** (`CityLayout.blocks`: dicts with poly, holes, district, kind block/plaza/park/piece/basin/esplanade, rot, pivot, level, basin): `block_at` (grid-indexed polygon lookup) → `ground_y`. The esplanade round the coast is one raised pavement with the ring road's kerb as its hole.
+
+**Buildings face their streets**: lots are laid along every frontage of a block (district lot sizes in `LOTS`), each in its own frame (`b["rot"]`, `b["pivot"]`; `CityLayout.bxf`), plus a courtyard tower where it fits. All layout code still works in axis-aligned local coordinates; `_to_world` turns what a lot/block generated into the world. The mesher applies the frame to every quad (`BuildingMesher._begin/_end`), collision uses oriented boxes (`CityWorld._add_box_xf`), and everything that asked "is this inside a building" uses `CityLayout.inside / top_center / base_center / tier_aabb`. Sky bridges/sky lobbies join any two tall neighbours 26–62 m apart if the tube is clear (`_skybridges`; the avenue-only "gateways" are gone).
+
+**Ground** (`BuildingMesher.add_ground`, built once per chunk on the worker pool at startup and reused for drawing = collision): the road surface over the land (Delaunay over grid + boundary points, clipped to the coast minus basins), every block's slab (sloping + kerb or level terrace), kerbs/retaining walls, basin quay walls, sea walls and the shore apron along the polygon coast.
+
+**Measured (VPS)**: 98/98 tests; all 8 courses re-recorded on the new roads (Grand Tour needed a 2nd try); spawn audit 0/24 knockouts (2/24 first swings touch the street); collision audit: ghost 225 (roof huts/crane jibs, was 301), over 7 (crane jibs), sink 17 (the el's rails, drawn without collision), 29 wall flags (container-yard kit + a few ground spots at Valley Road's east end – not chased), 1 "hole" = open sea. Startup layout+collision ≈ 1.9 s (was 0.85 s on the grid: road field 0.4 s, ground built on the worker pool). Not measured on a device.
+
+**Tests changed with the plan** (not loosened to pass): overlap test works on world footprint quads and checks nothing stands on a carriageway; the street-map test became a road-field test; street-launch spots on the spine skip roundabouts' open circles; the roof-run test runs across the roof (the spawn heading points off the edge, at the swing route). Fixed on the way: tokens weren't placed (inside() margin applied above roofs), the test bot shuttled (goal flipped with swing velocity – it now keeps its road and direction), spawn headings no longer face a roof prop.
+
+**Everything else on the new plan**: traffic lanes from road polylines (simplified segments, 2 lanes, 4 on boulevards), traffic lights where side streets meet their road, parked cars along minor streets, walkers round every block, street lights/trees and furniture along simplified block edges, elevated railway following Valley Road (deck segments, bents on the kerbs clear of junctions, train along the curve), set pieces at fixed rects (`SetPieces.rects()`; gasholder moved to (800, −555)), courses rebuilt on named roads (`CourseBuilder.route`), title autopilot loops the Inner Ring, the test bot follows boulevards (`CityWorld.bot_goal`, keeps its road and direction).
+
+# Earlier 2026-10-31 (island city, every district swingable)
 
 ## Island + map pass (latest)
 

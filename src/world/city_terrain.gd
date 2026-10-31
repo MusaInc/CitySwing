@@ -10,15 +10,14 @@ extends RefCounted
 ##   * A broad valley runs east from the docks along the railway (z ≈ 369):
 ##     the elevated line crosses it on its viaduct over the valley floor.
 ##
-## Streets: the design field is sampled once per junction (street-centre
-## crossing). Between junctions a street runs at a constant grade, like a real
-## street; the road surface is the bilinear interpolation of the junction
-## heights (so it is linear along every street line, gently crowned along
-## street centres). Beyond the street grid the surface carries on level from
-## the edge (clamped), which keeps the outskirts and the far shore continuous.
+## The landform is sampled on a regular 8 m grid (GRID) and the ground is
+## its bilinear interpolation: roads, pavements and lots all follow it.
+## Beyond the grid the surface carries on level from the edge (clamped),
+## which keeps the far shore continuous.
 ##
-## Blocks: each block is a level terrace at its highest corner (+ kerb), with
-## retaining walls down to the sloping streets – buildings stand level on it.
+## Blocks: pavements follow the ground (+ kerb); each building stands level
+## on its lot at the lot's highest corner, with a stone base course down the
+## slope. Set pieces and basins stand on level terraces (poly_level).
 
 const KERB := 0.15
 ## Design elevations (m).
@@ -36,17 +35,26 @@ var h := PackedFloat32Array()    # junction heights, index i * zs.size() + j
 var decks: Array = []
 
 
-func build(x_streets: Array, z_streets: Array) -> void:
+const GRID := 8.0   # m: height grid spacing (the landform is smooth; roads follow it)
+
+
+## Samples the landform on a regular GRID-metre lattice over `area` (the
+## island plus a margin). Beyond it road_y continues level (clamped).
+func build(area: Rect2) -> void:
 	xs.clear()
 	zs.clear()
-	for s in x_streets:
-		xs.append(float(s[0]))
-	for s in z_streets:
-		zs.append(float(s[0]))
+	var x := area.position.x
+	while x <= area.end.x + GRID:
+		xs.append(x)
+		x += GRID
+	var z := area.position.y
+	while z <= area.end.y + GRID:
+		zs.append(z)
+		z += GRID
 	h.resize(xs.size() * zs.size())
 	for i in xs.size():
 		for j in zs.size():
-			h[i * zs.size() + j] = snappedf(design(xs[i], zs[j]), 0.05)
+			h[i * zs.size() + j] = snappedf(design(xs[i], zs[j]), 0.01)
 
 
 ## The designed landform, sampled at junctions only (see build()).
@@ -104,6 +112,17 @@ func road_y(x: float, z: float) -> float:
 
 ## Terrace level of a block (its pavement top): the highest street corner plus
 ## the kerb, so every street round it is at or below the pavement.
+func poly_level(poly: PackedVector2Array) -> float:
+	var m := -INF
+	for p in poly:
+		m = maxf(m, road_y(p.x, p.y))
+	var c := Vector2.ZERO
+	for p in poly:
+		c += p
+	c /= maxf(poly.size(), 1)
+	return maxf(m, road_y(c.x, c.y)) + KERB
+
+
 func block_level(r: Rect2) -> float:
 	var m := -INF
 	for p in [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]:

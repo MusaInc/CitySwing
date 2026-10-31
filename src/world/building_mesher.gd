@@ -43,6 +43,21 @@ var colors := PackedColorArray()
 var uvs := PackedVector2Array()
 var uv2s := PackedVector2Array()
 var indices := PackedInt32Array()
+## Frame applied to everything drawn while set (a building's lot frame, see
+## CityLayout.bxf). Identity = world.
+var xf := Transform3D.IDENTITY
+var _xf_on := false
+
+
+func _begin(b: Dictionary) -> void:
+	if float(b.get("rot", 0.0)) != 0.0:
+		xf = CityLayout.bxf(b)
+		_xf_on = true
+
+
+func _end() -> void:
+	xf = Transform3D.IDENTITY
+	_xf_on = false
 
 
 func is_empty() -> bool:
@@ -64,6 +79,12 @@ func arrays() -> Array:
 ## Quad from four corners given clockwise as seen from the front.
 func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, ua: Vector2, ub: Vector2,
 		uc: Vector2, ud: Vector2, col: Color, kind: float, style: float, seed: float) -> void:
+	if _xf_on:
+		a = xf * a
+		b = xf * b
+		c = xf * c
+		d = xf * d
+		n = xf.basis * n
 	var i := verts.size()
 	verts.append_array([a, b, c, d])
 	normals.append_array([n, n, n, n])
@@ -225,8 +246,15 @@ static func trim_color(b: Dictionary) -> Color:
 			return c.lightened(0.12)
 
 
-## Detailed LOD: walls, cornice slabs with undersides, parapet roof.
+## Detailed LOD: walls, cornice slabs with undersides, parapet roof. Drawn in
+## the building's frame (rotated lots).
 func add_building(b: Dictionary, detailed: bool) -> void:
+	_begin(b)
+	_add_building(b, detailed)
+	_end()
+
+
+func _add_building(b: Dictionary, detailed: bool) -> void:
 	match b["kind"]:
 		"invisible", "structure":
 			return
@@ -299,6 +327,12 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 ## over a shorter range than the detailed LOD, since it is small detail.
 ## Fins only need their two sides and face (6 triangles, not 12).
 func add_features(b: Dictionary) -> void:
+	_begin(b)
+	_add_features(b)
+	_end()
+
+
+func _add_features(b: Dictionary) -> void:
 	var f := features(b)
 	for d in f["draw"]:
 		var bx: AABB = d[0]
@@ -317,10 +351,12 @@ func add_features(b: Dictionary) -> void:
 func add_skyline(b: Dictionary) -> void:
 	if b["kind"] != "normal":
 		return
+	_begin(b)
 	for d in features(b)["draw"]:
 		if d.size() > 2 and d[2] is String:
 			var bx: AABB = d[0]
 			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1])
+	_end()
 
 
 ## A thin vertical fin standing out of a wall along `out`: face + two sides.
@@ -986,6 +1022,11 @@ func prism(pts: PackedVector2Array, y0: float, y1: float, col: Color) -> void:
 
 
 func _tri(a: Vector3, b: Vector3, c: Vector3, n: Vector3, col: Color) -> void:
+	if _xf_on:
+		a = xf * a
+		b = xf * b
+		c = xf * c
+		n = xf.basis * n
 	if (b - a).cross(c - a).dot(n) > 0.0:
 		var t := b
 		b = c
@@ -1121,9 +1162,18 @@ func _bridge(s: Dictionary, detailed: bool) -> void:
 
 ## Ground for one chunk: asphalt, raised pavement blocks with kerbs, park
 ## lawns and dashed avenue centre lines, clipped to the chunk rectangle.
-const GROUND_STEP := 16.0  # m: road surface tessellation (bilinear between junctions; ≤ ~3 cm off)
+const GROUND_STEP := 16.0  # m: far-shore ground tessellation
+const SLAB_EDGE := 3.0     # m between boundary samples of a ground slab
+const KERB_STEP := 4.0     # m: kerb / wall pieces follow the ground in steps this long
 
 
+## One chunk of the island's ground (drawn = collision):
+##   * the road surface: the landform over all the land in the chunk (the
+##     coast minus the dock basins); everywhere a block isn't, this is road
+##     (or the esplanade's foot, which is covered by its pavement);
+##   * every block's pavement slab (sloping with the ground + kerb, or level
+##     on a terrace), cut to the chunk, with kerbs / retaining walls round it;
+##   * dock basins' quay walls, the sea walls and the shore apron.
 func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 	var asphalt := Color(0.2, 0.21, 0.23)
 	var pave := Color(0.58, 0.57, 0.55)
@@ -1131,64 +1181,196 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 	var grass := Color(0.32, 0.45, 0.24)
 	var wall := Color(0.5, 0.46, 0.4)
 	var T := layout.terrain
-	var r := chunk_rect.intersection(layout.island)
-	if r.has_area():
-		# Streets only: cut the land along every kerb line and skip the cells
-		# a block covers (its pavement or terrace is drawn over it).
-		var kx := _kerb_lines(layout.x_streets)
-		var kz := _kerb_lines(layout.z_streets)
-		for lr in layout.land:
-			var g := r.intersection(lr)
-			if not g.has_area():
-				continue
-			var cx := _cuts(g.position.x, g.end.x, kx)
-			var cz := _cuts(g.position.y, g.end.y, kz)
-			for i in cx.size() - 1:
-				for j in cz.size() - 1:
-					var cell := Rect2(cx[i], cz[j], cx[i + 1] - cx[i], cz[j + 1] - cz[j])
-					if not layout.block_at(cell.get_center().x, cell.get_center().y).has_area():
-						terrain_patch(T, cell, 0.0, asphalt)
+	var crect := CityLayout._rect_poly(chunk_rect)
+	# Road surface.
+	var outers: Array = []
+	for q in Geometry2D.intersect_polygons(crect, layout.coast):
+		if not Geometry2D.is_polygon_clockwise(q):
+			outers.append(q)
+	if not outers.is_empty():
+		var holes: Array = []
+		for bs in layout.basins:
+			if (bs as Rect2).intersects(chunk_rect):
+				holes.append(CityLayout._rect_poly(bs))
+		_slab(T, outers, holes, func(x: float, z: float) -> float: return T.road_y(x, z), asphalt)
+	# Blocks.
 	for blk in layout.blocks:
-		var g: Rect2 = (blk as Rect2).intersection(chunk_rect)
-		if not g.has_area():
+		var poly: PackedVector2Array = blk["poly"]
+		var bb := CityLayout._bbox(poly)
+		if not bb.intersects(chunk_rect):
 			continue
-		var is_park := false
-		for p in layout.parks:
-			if p == blk:
-				is_park = true
-		var is_basin := false
-		for w in layout.water:
-			if (w as Rect2).encloses(blk.grow(-7.0)) and w.position.x > 0.0:
-				is_basin = true
-		var level: float = layout.terraces.get(blk, NAN)
+		var level: float = blk["level"]
 		var flat := not is_nan(level)
-		if is_basin:
-			# Only the quay ring is paved; the middle is open water.
-			for q in CityLayout._subtract(blk, blk.grow(-6.0)):
-				var gq: Rect2 = (q as Rect2).intersection(chunk_rect)
-				if gq.has_area():
-					top(gq.position.x, gq.position.y, gq.end.x, gq.end.y, level, pave, KIND_ROOF, 0, 0)
-		elif flat:
-			top(g.position.x, g.position.y, g.end.x, g.end.y, level, grass if is_park else pave, KIND_ROOF, 0, 0)
-		else:
-			terrain_patch(T, g, CityTerrain.KERB, grass if is_park else pave)
-		# Kerb (sloping blocks) or retaining wall down to the street (terraces).
-		terrain_skirt(T, blk, chunk_rect, level, kerb if not flat else wall)
-		if is_basin:
-			# Quay walls down to the basin water.
-			var w2: Rect2 = blk.grow(-6.0).intersection(chunk_rect)
+		var kind: String = blk["kind"]
+		var col := grass if kind == "park" else pave
+		var b_outers: Array = []
+		for q in Geometry2D.intersect_polygons(crect, poly):
+			if not Geometry2D.is_polygon_clockwise(q):
+				b_outers.append(q)
+		if b_outers.is_empty():
+			continue
+		var b_holes: Array = blk["holes"].duplicate()
+		var basin: Rect2 = blk["basin"]
+		if basin.has_area():
+			b_holes.append(CityLayout._rect_poly(basin))
+		var hf := (func(x: float, z: float) -> float: return level) if flat \
+			else (func(x: float, z: float) -> float: return T.road_y(x, z) + CityTerrain.KERB)
+		_slab(T, b_outers, b_holes, hf, col)
+		if flat:
+			for g in layout.greens:
+				var gr: Rect2 = (g as Rect2).intersection(chunk_rect)
+				if gr.has_area() and Geometry2D.is_point_in_polygon((g as Rect2).get_center(), poly):
+					top(gr.position.x, gr.position.y, gr.end.x, gr.end.y, level + 0.02, grass, KIND_ROOF, 0, 0)
+		# Kerb (sloping) or retaining wall (terrace) round the block; the
+		# esplanade's kerb is round its hole (the ring road side).
+		var rings: Array = blk["holes"] if kind == "esplanade" else [poly]
+		for rg in rings:
+			_skirt(T, layout, rg, chunk_rect, level, kerb if not flat else wall, not flat, kind == "esplanade")
+		if basin.has_area():
+			var w2: Rect2 = basin.intersection(chunk_rect)
 			if w2.has_area():
 				_inner_walls(w2, -3.0, level + 0.01, Color(0.4, 0.33, 0.28))
 	_coast(layout, chunk_rect)
 	_shore(layout, chunk_rect)
-	# Waterfront promenade edge / river wall.
+	# The strait's quay wall (west promenade edge).
+	var I := layout.island
 	if chunk_rect.position.x <= CityLayout.RIVER_EDGE and chunk_rect.end.x > CityLayout.RIVER_EDGE:
-		var z0 := maxf(chunk_rect.position.y, layout.island.position.y)
-		var z1 := minf(chunk_rect.end.y, layout.island.end.y)
-		var x := CityLayout.RIVER_EDGE
-		quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
-			Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
-		solid(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33))
+		var z0 := maxf(chunk_rect.position.y, I.position.y)
+		var z1 := minf(chunk_rect.end.y, I.end.y)
+		if z1 > z0:
+			var x := CityLayout.RIVER_EDGE
+			quad(Vector3(x, 0.0, z0), Vector3(x, 0.0, z1), Vector3(x, -4.0, z1), Vector3(x, -4.0, z0), Vector3.LEFT,
+				Vector2(z0, 0), Vector2(z1, 0), Vector2(z1, -4), Vector2(z0, -4), Color(0.45, 0.4, 0.34), KIND_WALL, 5, 0.3)
+			solid(x, z0, x + 0.6, z1, 0.0, 1.1, Color(0.3, 0.32, 0.33))
+
+
+## A ground surface over polygons (minus holes), following height(x, z):
+## Delaunay over the landform's grid points inside plus the boundary sampled
+## every SLAB_EDGE m, keeping the triangles whose centre is inside.
+func _slab(T: CityTerrain, outers: Array, holes: Array, height: Callable, col: Color) -> void:
+	for o in outers:
+		var poly: PackedVector2Array = o
+		var pts := PackedVector2Array()
+		_densify(poly, SLAB_EDGE, pts)
+		var my_holes: Array = []
+		for h in holes:
+			var hp: PackedVector2Array = h
+			if CityLayout._bbox(hp).intersects(CityLayout._bbox(poly)):
+				my_holes.append(hp)
+				var cut: Array = Geometry2D.intersect_polygons(hp, poly)
+				for c in cut:
+					_densify(c, SLAB_EDGE, pts)
+		var bb := CityLayout._bbox(poly)
+		var g := CityTerrain.GRID
+		var x := ceilf(bb.position.x / g) * g
+		while x < bb.end.x:
+			var z := ceilf(bb.position.y / g) * g
+			while z < bb.end.y:
+				var p := Vector2(x, z)
+				if Geometry2D.is_point_in_polygon(p, poly) and not _in_any(p, my_holes):
+					pts.append(p)
+				z += g
+			x += g
+		if pts.size() < 3:
+			continue
+		var tri := Geometry2D.triangulate_delaunay(pts)
+		var hs := PackedFloat32Array()
+		hs.resize(pts.size())
+		for i in pts.size():
+			hs[i] = height.call(pts[i].x, pts[i].y)
+		for k in range(0, tri.size(), 3):
+			var a := pts[tri[k]]
+			var b := pts[tri[k + 1]]
+			var c := pts[tri[k + 2]]
+			var m := (a + b + c) / 3.0
+			if not Geometry2D.is_point_in_polygon(m, poly) or _in_any(m, my_holes):
+				continue
+			var A := Vector3(a.x, hs[tri[k]], a.y)
+			var B := Vector3(b.x, hs[tri[k + 1]], b.y)
+			var C := Vector3(c.x, hs[tri[k + 2]], c.y)
+			var n := (B - A).cross(C - A)
+			if n.y < 0.0:
+				var t := B
+				B = C
+				C = t
+				n = -n
+			_ground_tri(A, B, C, n.normalized(), col)
+
+
+## Upward-facing triangle with world-XZ UVs (ground shader), KIND_ROOF.
+func _ground_tri(a: Vector3, b: Vector3, c: Vector3, n: Vector3, col: Color) -> void:
+	# quad()'s convention is clockwise seen from the front; for a triangle,
+	# emit a degenerate quad (a, c, b, b) in that order.
+	var i := verts.size()
+	verts.append_array([a, c, b])
+	normals.append_array([n, n, n])
+	var cc := Color(col.r, col.g, col.b, KIND_ROOF / 8.0)
+	colors.append_array([cc, cc, cc])
+	uvs.append_array([Vector2(a.x, a.z), Vector2(c.x, c.z), Vector2(b.x, b.z)])
+	uv2s.append_array([Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])
+	indices.append_array([i, i + 1, i + 2])
+
+
+static func _in_any(p: Vector2, polys: Array) -> bool:
+	for q in polys:
+		if Geometry2D.is_point_in_polygon(p, q):
+			return true
+	return false
+
+
+## Appends the polygon's boundary, sampled every `step` m, to `out`.
+static func _densify(poly: PackedVector2Array, step: float, out: PackedVector2Array) -> void:
+	for i in poly.size():
+		var a := poly[i]
+		var b := poly[(i + 1) % poly.size()]
+		var n := maxi(1, ceili(a.distance_to(b) / step))
+		for k in n:
+			out.append(a.lerp(b, float(k) / n))
+
+
+## Kerb (sloping blocks: pavement + KERB down to under the road) or
+## retaining wall (terraces: from `level`) along a block ring, the pieces
+## whose middle is inside `clip`. `inward` = the face looks into the ring
+## (the esplanade's hole).
+func _skirt(T: CityTerrain, layout: CityLayout, ring: PackedVector2Array, clip: Rect2, level: float, col: Color,
+		sloping: bool, inward: bool) -> void:
+	var ccw := not Geometry2D.is_polygon_clockwise(ring)
+	for i in ring.size():
+		var a := ring[i]
+		var b := ring[(i + 1) % ring.size()]
+		var L := a.distance_to(b)
+		if L < 0.01:
+			continue
+		var d := (b - a) / L
+		# Outward normal of a ccw ring (Geometry2D's orientation) is to the right of travel.
+		var out := Vector2(d.y, -d.x) if ccw else Vector2(-d.y, d.x)
+		if not Geometry2D.is_point_in_polygon((a + b) * 0.5 - out * 0.5, ring):
+			out = -out  # (orientation convention guard)
+		if inward:
+			out = -out
+		var n := maxi(1, ceili(L / KERB_STEP))
+		for k in n:
+			var p := a.lerp(b, float(k) / n)
+			var q := a.lerp(b, float(k + 1) / n)
+			if not clip.has_point((p + q) * 0.5):
+				continue
+			var yp := T.road_y(p.x, p.y)
+			var yq := T.road_y(q.x, q.y)
+			var tp := yp + CityTerrain.KERB if sloping else level
+			var tq := yq + CityTerrain.KERB if sloping else level
+			var N := Vector3(out.x, 0.0, out.y)
+			var P0 := Vector3(p.x, tp, p.y)
+			var Q0 := Vector3(q.x, tq, q.y)
+			var P1 := Vector3(p.x, yp - 0.3, p.y)
+			var Q1 := Vector3(q.x, yq - 0.3, q.y)
+			var u0 := float(k) / n * L
+			var u1 := float(k + 1) / n * L
+			if (Q0 - P0).cross(P1 - P0).dot(N) < 0.0:  # (front = first triangle's cross against n, as top())
+				quad(P0, Q0, Q1, P1, N, Vector2(u0, tp), Vector2(u1, tq), Vector2(u1, yq - 0.3), Vector2(u0, yp - 0.3),
+					col, KIND_TRIM if sloping else KIND_WALL, 5, 0.42)
+			else:
+				quad(Q0, P0, P1, Q1, N, Vector2(u1, tq), Vector2(u0, tp), Vector2(u0, yp - 0.3), Vector2(u1, yq - 0.3),
+					col, KIND_TRIM if sloping else KIND_WALL, 5, 0.42)
 
 
 const SEA_WALL_LOW := -4.0   # m: sea walls run down under the water (drawn at -1.6)
@@ -1196,86 +1378,101 @@ const RAIL_H := 1.1           # m: esplanade railing
 const RAIL_T := 0.5
 
 
-## The island's sea walls on its north, east and south edges (inside
-## `clip`): a quay wall where the land is low, a cliff of dressed rock where
-## it's high (the Heights meet the sea in the east), with a railing along the
-## esplanade. Follows the terrain (road_y continues level past the grid), in
-## the same junction-aligned steps as the ground, so it meets it exactly.
+## The coast's edges (not the straight strait quay in the west), each as
+## [a, b, outward normal (2-D)], in order round from the north-west corner.
+static func coast_edges(coast: PackedVector2Array) -> Array:
+	var n := coast.size()
+	var out: Array = []
+	for i in n:
+		var a := coast[i]
+		var b := coast[(i + 1) % n]
+		if a.x < CityLayout.RIVER_EDGE + 0.5 and b.x < CityLayout.RIVER_EDGE + 0.5:
+			continue  # the strait quay
+		var d := (b - a).normalized()
+		var o := Vector2(d.y, -d.x)
+		if Geometry2D.is_point_in_polygon((a + b) * 0.5 + o * 0.5, coast):
+			o = -o
+		out.append([a, b, o])
+	return out
+
+
+## Sea walls round the coast (drawn = collision): a quay wall where the land
+## is low, the cliff's top course where it's high, with a stone railing.
 func _coast(layout: CityLayout, clip: Rect2) -> void:
 	var T := layout.terrain
-	var I := layout.island
 	var rail := Color(0.3, 0.32, 0.33)
-	# [a, b, outward normal]; walls() corner order (+z, +x, −z).
-	var edges := [
-		[Vector2(I.position.x, I.end.y), Vector2(I.end.x, I.end.y), Vector3.BACK],
-		[Vector2(I.end.x, I.end.y), Vector2(I.end.x, I.position.y), Vector3.RIGHT],
-		[Vector2(I.end.x, I.position.y), Vector2(I.position.x, I.position.y), Vector3.FORWARD],
-	]
-	for e in edges:
+	for e in coast_edges(layout.coast):
 		var a: Vector2 = e[0]
 		var b: Vector2 = e[1]
-		var n: Vector3 = e[2]
-		var along_x := absf(a.y - b.y) < 0.01
-		var u0 := a.x if along_x else a.y
-		var u1 := b.x if along_x else b.y
-		var cuts := T.splits(minf(u0, u1), maxf(u0, u1), T.xs if along_x else T.zs, GROUND_STEP)
-		if u0 > u1:
-			cuts.reverse()
-		var inward := Vector2(-n.x, -n.z)
-		for m in cuts.size() - 1:
-			var p := Vector2(cuts[m], a.y) if along_x else Vector2(a.x, cuts[m])
-			var q := Vector2(cuts[m + 1], a.y) if along_x else Vector2(a.x, cuts[m + 1])
+		var o: Vector2 = e[2]
+		var n3 := Vector3(o.x, 0.0, o.y)
+		var L := a.distance_to(b)
+		var m := maxi(1, ceili(L / KERB_STEP))
+		for k in m:
+			var p := a.lerp(b, float(k) / m)
+			var q := a.lerp(b, float(k + 1) / m)
 			if not clip.has_point((p + q) * 0.5):
 				continue
-			var yp := T.road_y(p.x, p.y)
-			var yq := T.road_y(q.x, q.y)
+			var yp := T.road_y(p.x, p.y) + CityTerrain.KERB
+			var yq := T.road_y(q.x, q.y) + CityTerrain.KERB
 			var high := maxf(yp, yq) > 6.0
 			var face := Color(0.47, 0.43, 0.38) if high else Color(0.45, 0.4, 0.34)
-			quad(Vector3(p.x, yp, p.y), Vector3(q.x, yq, q.y), Vector3(q.x, SEA_WALL_LOW, q.y),
-				Vector3(p.x, SEA_WALL_LOW, p.y), n, Vector2(cuts[m], yp), Vector2(cuts[m + 1], yq),
-				Vector2(cuts[m + 1], SEA_WALL_LOW), Vector2(cuts[m], SEA_WALL_LOW), face, KIND_WALL, 5, 0.3)
-			# Railing: a low stone wall just inside the edge, riding the slope.
-			var pi := p + inward * RAIL_T
-			var qi := q + inward * RAIL_T
-			var o := Vector3(0, RAIL_H, 0)
 			var P0 := Vector3(p.x, yp, p.y)
 			var Q0 := Vector3(q.x, yq, q.y)
-			var P1 := Vector3(pi.x, yp, pi.y)
-			var Q1 := Vector3(qi.x, yq, qi.y)
-			quad(P0 + o, Q0 + o, Q0, P0, n, Vector2(cuts[m], RAIL_H), Vector2(cuts[m + 1], RAIL_H),
-				Vector2(cuts[m + 1], 0), Vector2(cuts[m], 0), rail, KIND_TRIM, 0, 0)
-			quad(Q1 + o, P1 + o, P1, Q1, -n, Vector2(cuts[m + 1], RAIL_H), Vector2(cuts[m], RAIL_H),
-				Vector2(cuts[m], 0), Vector2(cuts[m + 1], 0), rail, KIND_TRIM, 0, 0)
-			quad(P1 + o, Q1 + o, Q0 + o, P0 + o, Vector3.UP, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
+			var P1 := Vector3(p.x, SEA_WALL_LOW, p.y)
+			var Q1 := Vector3(q.x, SEA_WALL_LOW, q.y)
+			_vface(P0, Q0, Q1, P1, n3, face, KIND_WALL)
+			# Railing: a low stone wall just inside the edge, riding the slope.
+			var pi := p - o * RAIL_T
+			var qi := q - o * RAIL_T
+			var up := Vector3(0, RAIL_H, 0)
+			var Pi := Vector3(pi.x, yp, pi.y)
+			var Qi := Vector3(qi.x, yq, qi.y)
+			_vface(P0 + up, Q0 + up, Q0, P0, n3, rail, KIND_TRIM)
+			_vface(Pi + up, Qi + up, Qi, Pi, -n3, rail, KIND_TRIM)
+			var top := [Pi + up, Qi + up, Q0 + up, P0 + up]
+			var tn: Vector3 = ((top[1] - top[0]) as Vector3).cross(top[3] - top[0])
+			if tn.y > 0.0:
+				top.reverse()
+			quad(top[0], top[1], top[2], top[3], Vector3.UP, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO,
 				rail.lightened(0.1), KIND_TRIM, 0, 0)
 
 
+## A vertical face with the winding quad() wants for normal n.
+func _vface(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col: Color, kind: float) -> void:
+	if (b - a).cross(d - a).dot(n) > 0.0:
+		quad(b, a, d, c, n, Vector2(b.x + b.z, b.y), Vector2(a.x + a.z, a.y), Vector2(d.x + d.z, d.y), Vector2(c.x + c.z, c.y),
+			col, kind, 5, 0.3)
+	else:
+		quad(a, b, c, d, n, Vector2(a.x + a.z, a.y), Vector2(b.x + b.z, b.y), Vector2(c.x + c.z, c.y), Vector2(d.x + d.z, d.y),
+			col, kind, 5, 0.3)
+
+
 const SHORE_STEP := 8.0      # m between shoreline samples
-const DOCK_SHORE_X := 560.0  # west of this the south coast is the docks' quay: no apron
 
 
-## The shoreline: the island's perimeter (north edge, round the north-east
-## corner, east edge, round the south-east corner, south edge) as [point on
-## the sea wall, outward normal, arc length]. The two corners are fans, so
-## the apron wraps round them.
-static func shore_samples(I: Rect2) -> Array:
+## The shoreline: samples along the coast (not the strait quay) as
+## [point on the sea wall, outward normal, arc length].
+static func shore_samples(coast: PackedVector2Array) -> Array:
 	var out: Array = []
 	var s := 0.0
-	var add_edge := func(a: Vector2, b: Vector2, n: Vector2) -> void:
+	var edges := coast_edges(coast)
+	for ei in edges.size():
+		var e: Array = edges[ei]
+		var a: Vector2 = e[0]
+		var b: Vector2 = e[1]
+		var o: Vector2 = e[2]
+		# Smooth normals across the joints.
+		var prev: Vector2 = edges[ei - 1][2] if ei > 0 else o
 		var L := a.distance_to(b)
 		var k := maxi(1, ceili(L / SHORE_STEP))
 		for i in k:
-			out.append([a.lerp(b, float(i) / k), n, s + L * float(i) / k])
+			var f := float(i) / k
+			var nn := (prev.lerp(o, clampf(0.5 + f, 0.0, 1.0)) if i == 0 else o).normalized()
+			out.append([a.lerp(b, f), nn, s + L * f])
 		s += L
-	var add_corner := func(c: Vector2, n0: Vector2, n1: Vector2) -> void:
-		for i in 7:
-			out.append([c, n0.slerp(n1, i / 6.0).normalized(), s])
-	add_edge.call(Vector2(I.position.x, I.position.y), Vector2(I.end.x, I.position.y), Vector2(0, -1))
-	add_corner.call(Vector2(I.end.x, I.position.y), Vector2(0, -1), Vector2(1, 0))
-	add_edge.call(Vector2(I.end.x, I.position.y), Vector2(I.end.x, I.end.y), Vector2(1, 0))
-	add_corner.call(Vector2(I.end.x, I.end.y), Vector2(1, 0), Vector2(0, 1))
-	add_edge.call(Vector2(I.end.x, I.end.y), Vector2(I.position.x, I.end.y), Vector2(0, 1))
-	out.append([Vector2(I.position.x, I.end.y), Vector2(0, 1), s])
+	if not edges.is_empty():
+		out.append([edges[-1][1], edges[-1][2], s])
 	return out
 
 
@@ -1289,24 +1486,21 @@ static func _snoise(x: float) -> float:
 
 
 ## Profile across the apron at one shoreline sample: [distance out, height]
-## rows from the sea wall's foot to under the water. High ground meets the
-## sea in rocky slopes under the cliffs; low ground in a sand beach under the
-## sea wall; the docks keep a plain quay wall (no apron).
-static func shore_profile(T: CityTerrain, I: Rect2, smp: Array) -> Array:
+## rows from the sea wall's foot to under the water, then the rock share.
+## High ground meets the sea in rocky slopes under the cliffs; low ground in
+## a sand beach under the sea wall; the docks keep a plain quay wall.
+static func shore_profile(layout: CityLayout, smp: Array) -> Array:
+	var T := layout.terrain
 	var p: Vector2 = smp[0]
 	var s: float = smp[2]
 	var H := T.road_y(p.x, p.y)
 	var x_taper := smoothstep(CityLayout.RIVER_EDGE + 10.0, CityLayout.RIVER_EDGE + 90.0, p.x)
-	var dock := 1.0 - smoothstep(DOCK_SHORE_X - 50.0, DOCK_SHORE_X + 30.0, p.x) if p.y >= I.end.y - 0.1 else 0.0
+	var dock := 1.0 - smoothstep(500.0, 590.0, p.x) if p.y > 250.0 else 0.0
 	var n1 := _snoise(s / 70.0)
 	var n2 := _snoise(s / 23.0 + 40.0)
 	var amt := x_taper * (1.0 - dock)
-	# Rock (wide, ragged headlands and coves) blending into a sand beach
-	# under the sea wall where the land is low; always five rows, so the two
-	# meet without a gap.
 	var r := smoothstep(4.0, 9.0, H)
 	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
-	# Jagged facets on the rock: every row wanders in and out and up and down.
 	var j := func(k: int) -> float: return (_snoise(s / 9.0 + k * 17.3) - 0.5) * r
 	var rock := [[0.0, H - 0.5], [w * 0.07 + 2.0 * j.call(1), H * 0.66 + H * 0.14 * j.call(2)],
 		[w * 0.3 + 6.0 * j.call(3), H * 0.32 + H * 0.2 * j.call(4)],
@@ -1321,17 +1515,15 @@ static func shore_profile(T: CityTerrain, I: Rect2, smp: Array) -> Array:
 
 
 func _shore(layout: CityLayout, clip: Rect2) -> void:
-	var T := layout.terrain
-	var I := layout.island
-	var smp := shore_samples(I)
-	var rows: Array = []  # per sample: Array[Vector3]
-	var rocky: Array = []  # per sample: 0 = sand, 1 = rock
+	var smp := shore_samples(layout.coast)
+	var rows: Array = []
+	var rocky: Array = []
 	for sm in smp:
-		var prof := shore_profile(T, I, sm)
+		var prof := shore_profile(layout, sm)
 		var p: Vector2 = sm[0]
 		var n: Vector2 = sm[1]
-		var r: Array = []
 		rocky.append(prof.pop_back())
+		var r: Array = []
 		for k in prof.size():
 			var d: float = prof[k][0]
 			r.append(Vector3(p.x + n.x * d, prof[k][1], p.y + n.y * d))
@@ -1355,10 +1547,10 @@ func _shore(layout: CityLayout, clip: Rect2) -> void:
 			var d: Vector3 = A[k + 1]
 			var col := rock if high else sand
 			if not high and k == A.size() - 2:
-				col = sand.darkened(0.25)  # wet sand into the water
+				col = sand.darkened(0.25)
 			var nn := (c - a).cross(b - d)
 			if nn.length_squared() < 1e-8:
-				nn = (c - a).cross(d - b)  # degenerate (corner fan): use the other diagonal pair
+				nn = (c - a).cross(d - b)
 			if nn.dot(Vector3.UP + out_n) < 0.0:
 				var t := b
 				b = d
@@ -1366,25 +1558,6 @@ func _shore(layout: CityLayout, clip: Rect2) -> void:
 				nn = -nn
 			quad(a, b, c, d, nn.normalized(), Vector2(a.x, a.z), Vector2(b.x, b.z), Vector2(c.x, c.z),
 				Vector2(d.x, d.z), col, KIND_SHORE, 0, 0)
-
-
-static func _kerb_lines(streets: Array) -> PackedFloat32Array:
-	var out := PackedFloat32Array()
-	for st in streets:
-		out.append(float(st[0]) - float(st[1]) * 0.5)
-		out.append(float(st[0]) + float(st[1]) * 0.5)
-	return out
-
-
-## a, b and every line strictly between them, ascending.
-static func _cuts(a: float, b: float, lines: PackedFloat32Array) -> PackedFloat32Array:
-	var out := PackedFloat32Array([a])
-	for l in lines:
-		if l > a + 0.01 and l < b - 0.01:
-			out.append(l)
-	out.append(b)
-	out.sort()
-	return out
 
 
 ## The ground over `r`, dy above the road surface (CityTerrain.road_y): a

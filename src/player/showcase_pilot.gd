@@ -27,27 +27,18 @@ func _init(world: Node) -> void:
 	goal_fn = _goal
 
 
-## Corner loop: the outermost wide avenues that aren't at the map's edge.
+## The loop: the Inner Ring boulevard round the business district, as
+## straight legs (towers on both sides the whole way round).
 func _build_loop(layout: CityLayout) -> void:
-	var xs := _inner_avenues(layout.x_streets, CityLayout.MIN_X, CityLayout.MAX_X)
-	var zs := _inner_avenues(layout.z_streets, CityLayout.MIN_Z, CityLayout.MAX_Z)
-	if xs.size() < 2 or zs.size() < 2:
+	var ring: Dictionary = layout.roads.by_name.get("inner", {})
+	if ring.is_empty():
 		return
-	var x0: Array = xs[0]
-	var x1: Array = xs[-1]
-	var z0: Array = zs[0]
-	var z1: Array = zs[-1]
-	# Down the east avenue, west along the north one, up the west, east along the south.
-	_loop = [Vector2(x1[0], z0[0]), Vector2(x0[0], z0[0]), Vector2(x0[0], z1[0]), Vector2(x1[0], z1[0])]
-	_half = [x1[1] * 0.5, z0[1] * 0.5, x0[1] * 0.5, z1[1] * 0.5]
-
-
-static func _inner_avenues(streets: Array, lo: float, hi: float) -> Array:
-	var out := []
-	for s in streets:
-		if s[1] > 20.0 and s[0] - lo > 100.0 and hi - s[0] > 100.0:
-			out.append(s)
-	return out
+	var pts := CityRoads._simplify(ring["pts"], 5.0)
+	_loop = []
+	_half = []
+	for i in pts.size() - 1:  # (the last point closes the loop)
+		_loop.append(pts[i])
+		_half.append(float(ring["w"]) * 0.5)
 
 
 ## A mid-air start part-way down a random leg: [position, velocity]. The

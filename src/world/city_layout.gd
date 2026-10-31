@@ -1,6 +1,9 @@
 class_name CityLayout
 extends RefCounted
-## Deterministic city plan (pure data – no nodes). Loosely Liverpool: a river
+## Deterministic city plan (pure data – no nodes). An island city: the road
+## network (CityRoads) is organic – boulevards, roundabouts, district street
+## patterns – and every block lays its buildings out in its own frame, turned
+## to face its main street (b["rot"], b["pivot"]; see bxf). Loosely Liverpool: a river
 ## to the west, a waterfront of three domed/clock-towered landmarks, a dense
 ## glass business district peaking around a radio beacon, brick docks with
 ## basins and cranes to the north, low Georgian terraces to the east under a
@@ -49,114 +52,905 @@ const STYLE_COLORS := {
 
 var seed := 1207
 var rng := RandomNumberGenerator.new()
-var buildings: Array = []      # Dictionary specs (see _building)
-var blocks: Array = []         # Rect2 (x,z) of raised pavement blocks
-var parks: Array = []          # Rect2
-var water: Array = []          # Rect2 water surfaces (river + basins)
+var buildings: Array = []      # Dictionary specs (see _building); "rot"/"pivot" = the lot's frame (see bxf)
+## Blocks: {poly (world), holes, district, kind ("block"|"plaza"|"park"|"piece"|"basin"|"esplanade"),
+## rot, pivot (the frame lots and buildings are laid out in), level (terrace level or NAN), basin (Rect2)}
+var blocks: Array = []
+var water: Array = []          # Rect2 water surfaces (basins, the strait, the sea)
+var basins: Array = []         # Rect2 dock basins (also in water)
+var greens: Array = []         # Rect2 grass on terraced blocks (the stadium pitch)
 var props: Array = []          # [kind:String, Transform3D]
-var lanes: Array = []          # [from:Vector3, to:Vector3]
-var x_streets: Array = []      # [centre, width]
-var z_streets: Array = []
-var land: Array = []           # Rect2 ground collision (land minus basins)
+var lanes: Array = []          # [from:Vector3, to:Vector3] traffic lane segments
 var landmarks: Array = []      # [scene:String, Transform3D]
 var spawn := Vector3(330, 0, -60)
-var island := Rect2()           # the island's land (sea wall to sea wall; west edge = the strait's quay wall)
-var sea: Array = []             # Rect2 sea round the island (also in `water`)
-var reserved: Array = []      # Rect2 footprints owned by landmarks
-var structures: Array = []    # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
-var anchor_lines: Array = []  # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
-var crossings: Array = []     # [x, z] street intersection centres
+var island := Rect2()          # bounding box of the coast
+var coast := PackedVector2Array()  # the island outline (sea wall), from CityRoads
+var sea: Array = []            # Rect2 (also in `water`); the island is cut out by is_water
+var reserved: Array = []       # Rect2 footprints owned by landmarks and set pieces (world, axis-aligned)
+var structures: Array = []     # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
+var anchor_lines: Array = []   # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
 ## Set-piece collision that isn't an axis-aligned box: [Transform3D, size]
 ## oriented boxes (beams) and convex hulls (PackedVector3Array).
 var kit_obbs: Array = []
 var kit_hulls: Array = []
 var pieces: SetPieces
-## The ground (see CityTerrain): junction heights, road surface, terraces.
+var roads: CityRoads
+## The ground (see CityTerrain): the landform on a regular grid.
 var terrain := CityTerrain.new()
-## Blocks levelled into a terrace (set pieces, basins): Rect2 -> pavement level.
-## Every other block's pavement follows the street slope (road_y + kerb).
-var terraces := {}
-var _sites: Array = []        # [Rect2, district] construction lots, built after the blocks
+var _sites: Array = []         # [Rect2 (local), district, rot, pivot] construction lots, built after the blocks
+var _block_grid := {}          # Vector2i (BLOCK_CELL cells) -> block indices
+const BLOCK_CELL := 40.0
+const BOUNDS := Rect2(30.0, -656.0, 1000.0, 1271.0)
 
 
 func generate(p_seed := 1207) -> CityLayout:
 	seed = p_seed
 	rng.seed = seed
-	_streets()
-	_island()
-	terrain.build(x_streets, z_streets)
+	pieces = SetPieces.new(self)
 	var ls := _snap()
 	_landmarks()
+	var keep_out: Array = []
+	for r in reserved:
+		keep_out.append(_rect_poly((r as Rect2).grow(5.0)))
+	for r in pieces.rects().values():
+		keep_out.append(_rect_poly((r as Rect2).grow(5.0)))
+	keep_out.append(_rect_poly(Rect2(CBD_CENTER.x - 40 - 22, CBD_CENTER.y + 60 - 22, 44, 44)))  # beacon plaza
+	keep_out.append(_rect_poly(Rect2(SetPieces.SHIP_AT - Vector2(50, 32), Vector2(100, 64))))  # the ship's basin
+	roads = CityRoads.new().generate(seed, district, BOUNDS, keep_out)
+	roads.bake_field(2.0)
+	coast = roads.coast
+	island = _bbox(coast)
+	terrain.build(island.grow(80.0))
 	_lift_on_slope(ls)
 	_bridge()
-	pieces = SetPieces.new(self)
 	_blocks()
 	_construction()
 	_viaduct()
 	_skybridges()
-	_causeway()
 	pieces.elevated_rail()
-	pieces.gateways()
 	pieces.lighthouse()
 	_traffic()
 	_sea()
-	_land()
 	return self
 
 
-# ------------------------------------------------------------------ grid
-func _streets() -> void:
-	var x := MIN_X
-	var i := 0
-	var xs: Array = []
-	while x < MAX_X:
-		var w := 26.0 if i % 3 == 0 else 16.0
-		xs.append([x + w * 0.5, w])
-		var bw := rng.randf_range(66.0, 100.0)
-		x += w + bw
-		i += 1
-	x_streets = xs
-	var z := MIN_Z
-	i = 0
-	var zs: Array = []
-	while z < MAX_Z:
-		var w := 28.0 if i % 3 == 1 else 16.0
-		zs.append([z + w * 0.5, w])
-		var bd := rng.randf_range(64.0, 100.0)
-		z += w + bd
-		i += 1
-	z_streets = zs
-	# The island's east edge: one more avenue past the last block column, so
-	# the eastern blocks (and the cathedral) are whole and the esplanade runs
-	# along a street. No random draw: the rest of the plan is unchanged.
-	if x_streets.size() > 0:
-		x_streets.append([x + 8.0, 16.0])
-	for xs_ in x_streets:
-		for zs_ in z_streets:
-			crossings.append([xs_[0], zs_[0]])
-
-
-func _island() -> void:
-	var lx: Array = x_streets[-1]
-	var fz: Array = z_streets[0]
-	var lz: Array = z_streets[-1]
-	var east := float(lx[0]) + float(lx[1]) * 0.5 + ESPLANADE
-	var north := float(fz[0]) - float(fz[1]) * 0.5 - ESPLANADE
-	var south := float(lz[0]) + float(lz[1]) * 0.5 + ESPLANADE
-	island = Rect2(RIVER_EDGE, north, east - RIVER_EDGE, south - north)
-
-
-## Sea on the three open sides (the strait in the west is the river rect).
 func _sea() -> void:
-	var i := island
-	sea = [
-		Rect2(i.end.x, -SEA_REACH, SEA_REACH, SEA_REACH * 2.0),                       # east
-		Rect2(RIVER_EDGE, -SEA_REACH, i.end.x - RIVER_EDGE, i.position.y + SEA_REACH),  # north
-		Rect2(RIVER_EDGE, i.end.y, i.end.x - RIVER_EDGE, SEA_REACH - i.end.y),          # south
-	]
+	# The strait (west, the old river) and the open sea everywhere else; the
+	# island's land is cut out of it by is_water().
+	water.append(Rect2(FAR_SHORE, -2500, RIVER_EDGE - FAR_SHORE, 5000))
+	sea = [Rect2(RIVER_EDGE, -SEA_REACH, SEA_REACH, SEA_REACH * 2.0)]
 	water.append_array(sea)
 
 
+# ------------------------------------------------------------ frames
+## A building's frame: layout code works in an axis-aligned local frame per
+## block; b["rot"] (radians) about b["pivot"] (x, z) turns it into the world.
+## 2-D: world = pivot + (local - pivot).rotated(rot).
+static func bxf(b: Dictionary) -> Transform3D:
+	var rot: float = b.get("rot", 0.0)
+	if rot == 0.0:
+		return Transform3D.IDENTITY
+	var pv: Vector2 = b["pivot"]
+	var B := Basis(Vector3.UP, -rot)
+	var P := Vector3(pv.x, 0.0, pv.y)
+	return Transform3D(B, P - B * P)
+
+
+static func to_world2(v: Vector2, rot: float, pivot: Vector2) -> Vector2:
+	return pivot + (v - pivot).rotated(rot)
+
+
+static func to_local2(v: Vector2, rot: float, pivot: Vector2) -> Vector2:
+	return pivot + (v - pivot).rotated(-rot)
+
+
+## World-space bounding box of one tier of a building.
+static func tier_aabb(b: Dictionary, t: Array) -> AABB:
+	var box := AABB(Vector3(t[0], t[4], t[1]), Vector3(t[2] - t[0], t[5] - t[4], t[3] - t[1]))
+	if float(b.get("rot", 0.0)) == 0.0:
+		return box
+	return bxf(b) * box
+
+
+## World position of the centre of a building's top (y = top of the top tier).
+static func top_center(b: Dictionary) -> Vector3:
+	var t: Array = b["tiers"][-1]
+	return bxf(b) * Vector3((t[0] + t[2]) * 0.5, t[5], (t[1] + t[3]) * 0.5)
+
+
+static func base_center(b: Dictionary) -> Vector2:
+	var t: Array = b["tiers"][0]
+	var p := bxf(b) * Vector3((t[0] + t[2]) * 0.5, 0.0, (t[1] + t[3]) * 0.5)
+	return Vector2(p.x, p.z)
+
+
+## True if the world point is inside any tier of b (grown by `margin`
+## sideways and below, by `above` over the top; above < 0 = margin).
+static func inside(b: Dictionary, p: Vector3, margin := 0.0, above := -1.0) -> bool:
+	var q := p
+	if float(b.get("rot", 0.0)) != 0.0:
+		q = bxf(b).affine_inverse() * p
+	var up := margin if above < 0.0 else above
+	for t in b["tiers"]:
+		if q.x > t[0] - margin and q.x < t[2] + margin and q.z > t[1] - margin and q.z < t[3] + margin \
+				and q.y > t[4] - margin and q.y < t[5] + up:
+			return true
+	return false
+
+
+## Turns what a block generated (since `snap`) in its local frame into the world.
+func _to_world(snap: Array, rot: float, pivot: Vector2) -> void:
+	if rot == 0.0:
+		return
+	var B := Basis(Vector3.UP, -rot)
+	var P := Vector3(pivot.x, 0.0, pivot.y)
+	var X := Transform3D(B, P - B * P)
+	for i in range(snap[0], buildings.size()):
+		buildings[i]["rot"] = rot
+		buildings[i]["pivot"] = pivot
+	for i in range(snap[1], props.size()):
+		props[i][1] = X * (props[i][1] as Transform3D)
+	for i in range(snap[2], structures.size()):
+		var s: Dictionary = structures[i]
+		if s["type"] == "tower_crane":
+			var w := to_world2(Vector2(s["x"], s["z"]), rot, pivot)
+			s["x"] = w.x
+			s["z"] = w.y
+			s["dir"] = (s["dir"] as Vector2).rotated(rot)
+	for i in range(snap[3], anchor_lines.size()):
+		anchor_lines[i] = [X * (anchor_lines[i][0] as Vector3), X * (anchor_lines[i][1] as Vector3)]
+	for i in range(snap[4], kit_obbs.size()):
+		kit_obbs[i][0] = X * (kit_obbs[i][0] as Transform3D)
+	for i in range(snap[5], kit_hulls.size()):
+		var hull: PackedVector3Array = kit_hulls[i]
+		for k in hull.size():
+			hull[k] = X * hull[k]
+		kit_hulls[i] = hull
+	for i in range(snap[6], landmarks.size()):
+		landmarks[i][1] = X * (landmarks[i][1] as Transform3D)
+
+
+# ---------------------------------------------------------------- blocks
+func _blocks() -> void:
+	# The esplanade round the coast: one raised pavement (a hole = the land
+	# inside the ring road's outer kerb).
+	var rc := roads._ring_coast()
+	var hole: PackedVector2Array = Geometry2D.offset_polygon(rc, -CityRoads.ESPLANADE)[0]
+	blocks.append({"poly": coast, "holes": [hole], "district": "waterfront", "kind": "esplanade", "rot": 0.0,
+		"pivot": Vector2.ZERO, "level": NAN, "basin": Rect2()})
+	var beacon := Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)
+	for rb in roads.blocks:
+		var poly: PackedVector2Array = rb["poly"]
+		var dist: String = rb["district"]
+		var c := CityRoads._centroid(poly)
+		var brng := RandomNumberGenerator.new()
+		brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ seed
+		var blk := {"poly": poly, "holes": [], "district": dist, "kind": rb["kind"], "rot": 0.0, "pivot": c,
+			"level": NAN, "basin": Rect2()}
+		blocks.append(blk)
+		var snap := _snap()
+		if rb["kind"] == "green":
+			blk["kind"] = "park"
+			_park_props(poly, brng)
+			_lift_on_slope(snap)
+			continue
+		if rb["kind"] == "plaza":
+			_lift_on_slope(snap)
+			continue
+		if Geometry2D.is_point_in_polygon(beacon, poly):
+			blk["kind"] = "park"
+			_park_props(poly, brng, [Rect2(beacon - Vector2(16, 16), Vector2(32, 32))])
+			_lift_on_slope(snap)
+			continue
+		# Set pieces (axis-aligned rects) in this block.
+		var mine: Array = []
+		for name in pieces.rects():
+			var r: Rect2 = pieces.rects()[name]
+			if Geometry2D.is_point_in_polygon(r.get_center(), poly):
+				mine.append([name, r])
+		var has_reserved := not mine.is_empty()
+		for r in reserved:
+			if Geometry2D.is_point_in_polygon((r as Rect2).get_center(), poly):
+				has_reserved = true
+		var is_basin := dist == "docks" and (Geometry2D.is_point_in_polygon(SetPieces.SHIP_AT, poly)
+			or brng.randf() < 0.4 and c.x < 470.0)
+		# The block's frame: along its longest edge (buildings face that
+		# street); axis-aligned where landmarks, set pieces or basins are.
+		var rot := 0.0 if has_reserved or is_basin else _frame_angle(poly)
+		blk["rot"] = rot
+		var lp := PackedVector2Array()
+		for v in poly:
+			lp.append(to_local2(v, rot, c))
+		if not mine.is_empty():
+			for m in mine:
+				pieces.build(m[0], m[1])
+			blk["kind"] = "piece"
+			_fill_block(poly, dist, brng, rot, c)
+			blk["level"] = terrain.poly_level(poly)
+			_lift(snap, float(blk["level"]) - CityTerrain.KERB)
+			continue
+		if is_basin:
+			var basin := _inscribed(lp).grow(-6.0)
+			if basin.size.x > 30.0 and basin.size.y > 30.0:
+				blk["kind"] = "basin"
+				blk["basin"] = basin
+				water.append(basin)
+				basins.append(basin)
+				_quay_cranes(basin, brng)
+				pieces.ship(basin)
+				blk["level"] = terrain.poly_level(poly)
+				_lift(snap, float(blk["level"]) - CityTerrain.KERB)
+				continue
+		if dist == "georgian" and brng.randf() < 0.07 or dist == "midtown" and brng.randf() < 0.05:
+			blk["kind"] = "park"
+			_park_props(poly, brng)
+			_lift_on_slope(snap)
+			continue
+		var snap_p := _snap()
+		_street_props(lp, brng)
+		_to_world(snap_p, rot, c)  # (street props were laid out in the block's frame)
+		_fill_block(poly, dist, brng, rot, c)
+		_lift_on_slope(snap)
+	_index_blocks()
+
+
+## Direction (radians, in (-45°, 45°]) of the block's longest edge.
+func _frame_angle(poly: PackedVector2Array) -> float:
+	var best := 0.0
+	var best_l := 0.0
+	for i in poly.size():
+		var e := poly[(i + 1) % poly.size()] - poly[i]
+		if e.length() > best_l:
+			best_l = e.length()
+			best = e.angle()
+	best = fposmod(best + PI * 0.25, PI * 0.5) - PI * 0.25
+	return 0.0 if absf(best) < deg_to_rad(0.5) else best
+
+
+## A large axis-aligned rectangle inside a polygon (shrunk from its bounds).
+static func _inscribed(poly: PackedVector2Array) -> Rect2:
+	return _fit_rect(_bbox(poly), poly)
+
+
+## Shrinks r until its corners are inside poly and no poly vertex is inside it.
+static func _fit_rect(r: Rect2, poly: PackedVector2Array) -> Rect2:
+	var x0 := r.position.x
+	var z0 := r.position.y
+	var x1 := r.end.x
+	var z1 := r.end.y
+	for it in 60:
+		if x1 - x0 < 6.0 or z1 - z0 < 6.0:
+			return Rect2()
+		var c := [Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)]
+		var bad := [not Geometry2D.is_point_in_polygon(c[0], poly), not Geometry2D.is_point_in_polygon(c[1], poly),
+			not Geometry2D.is_point_in_polygon(c[2], poly), not Geometry2D.is_point_in_polygon(c[3], poly)]
+		if not (bad[0] or bad[1] or bad[2] or bad[3]):
+			var poke := false
+			for v in poly:
+				if v.x > x0 + 0.01 and v.x < x1 - 0.01 and v.y > z0 + 0.01 and v.y < z1 - 0.01:
+					poke = true
+					# Cut the rect on the side nearest the poking vertex.
+					var d := [v.x - x0, x1 - v.x, v.y - z0, z1 - v.y]
+					var k := 0
+					for q in 4:
+						if d[q] < d[k]:
+							k = q
+					match k:
+						0: x0 = v.x
+						1: x1 = v.x
+						2: z0 = v.y
+						3: z1 = v.y
+					break
+			if not poke:
+				return Rect2(x0, z0, x1 - x0, z1 - z0)
+			continue
+		var sx := (x1 - x0) * 0.04 + 0.4
+		var sz := (z1 - z0) * 0.04 + 0.4
+		if bad[0] or bad[3]: x0 += sx
+		if bad[1] or bad[2]: x1 -= sx
+		if bad[0] or bad[1]: z0 += sz
+		if bad[2] or bad[3]: z1 -= sz
+	return Rect2()
+
+
+static func _bbox(poly: PackedVector2Array) -> Rect2:
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for v in poly:
+		lo = lo.min(v)
+		hi = hi.max(v)
+	return Rect2(lo, hi - lo)
+
+
+static func _rect_poly(r: Rect2) -> PackedVector2Array:
+	return PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
+
+
+func _index_blocks() -> void:
+	_block_grid.clear()
+	for i in blocks.size():
+		if blocks[i]["kind"] == "esplanade":
+			continue
+		var bb := _bbox(blocks[i]["poly"])
+		for gx in range(floori(bb.position.x / BLOCK_CELL), floori(bb.end.x / BLOCK_CELL) + 1):
+			for gz in range(floori(bb.position.y / BLOCK_CELL), floori(bb.end.y / BLOCK_CELL) + 1):
+				var k := Vector2i(gx, gz)
+				if not _block_grid.has(k):
+					_block_grid[k] = PackedInt32Array()
+				_block_grid[k].append(i)
+
+
+## Index of the block (raised pavement) containing (x, z), or -1 on a road
+## or off the island. The esplanade counts as a block.
+func block_at(x: float, z: float) -> int:
+	var p := Vector2(x, z)
+	for i in _block_grid.get(Vector2i(floori(x / BLOCK_CELL), floori(z / BLOCK_CELL)), PackedInt32Array()):
+		if Geometry2D.is_point_in_polygon(p, blocks[i]["poly"]):
+			return i
+	if not blocks.is_empty() and blocks[0]["kind"] == "esplanade" and Geometry2D.is_point_in_polygon(p, coast) \
+			and not Geometry2D.is_point_in_polygon(p, blocks[0]["holes"][0]):
+		return 0
+	return -1
+
+
+## Height of what you'd stand on at (x, z): a block's pavement or the road.
+## (Basins are water: their quay ring is the block level.)
+func ground_y(x: float, z: float) -> float:
+	var i := block_at(x, z)
+	if i >= 0:
+		var lv: float = blocks[i]["level"]
+		return lv if not is_nan(lv) else terrain.road_y(x, z) + CityTerrain.KERB
+	return terrain.road_y(x, z)
+
+
+func _reserved(r: Rect2) -> bool:
+	for q in reserved:
+		if r.grow(4.0).intersects(q):
+			return true
+	for q in pieces.rects().values():
+		if r.grow(3.0).intersects(q):
+			return true
+	return false
+
+
+func _park_props(poly: PackedVector2Array, brng: RandomNumberGenerator, avoid: Array = []) -> void:
+	var bb := _bbox(poly)
+	var n := int(CityRoads._area(poly) / 420.0)
+	for i in n:
+		var p := Vector2(brng.randf_range(bb.position.x + 5, bb.end.x - 5), brng.randf_range(bb.position.y + 5, bb.end.y - 5))
+		var s := brng.randf_range(0.8, 1.35)
+		var yaw := brng.randf_range(0, TAU)
+		if not Geometry2D.is_point_in_polygon(p, Geometry2D.offset_polygon(poly, -4.0)[0] if poly.size() > 2 else poly):
+			continue
+		var blocked := false
+		for r in avoid:
+			if (r as Rect2).has_point(p):
+				blocked = true
+		if not blocked:
+			props.append(["tree", Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * s), Vector3(p.x, 0.15, p.y))])
+
+
+## Streetlights along the block's edges (local frame), facing the road.
+func _street_props(lp: PackedVector2Array, brng: RandomNumberGenerator) -> void:
+	var inner := Geometry2D.offset_polygon(lp, -1.2)
+	if inner.is_empty():
+		return
+	var ring: PackedVector2Array = CityRoads._simplify(_closed(inner[0]), 1.5)
+	ring.remove_at(ring.size() - 1)
+	var trees := brng.randf() < 0.5
+	for i in ring.size():
+		var a := ring[i]
+		var b := ring[(i + 1) % ring.size()]
+		var L := a.distance_to(b)
+		if L < 14.0:
+			continue
+		var d := (b - a) / L
+		var out := Vector2(d.y, -d.x)  # (ccw ring: right of travel is outside)
+		var yaw := atan2(-out.x, -out.y) + PI * 0.5
+		var t := 8.0
+		while t < L - 6.0:
+			var p := a + d * t
+			props.append(["streetlight", Transform3D(Basis(Vector3.UP, yaw), Vector3(p.x, 0.15, p.y))])
+			if trees and t + 16.0 < L - 6.0:
+				var q := a + d * (t + 16.0) - out * 0.8
+				props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.7), Vector3(q.x, 0.15, q.y))])
+			t += 32.0
+
+
+## Lot sizes per district: [frontage min, max, depth min, max] (m).
+const LOTS := {
+	"cbd": [20.0, 34.0, 24.0, 38.0],
+	"midtown": [18.0, 32.0, 22.0, 34.0],
+	"waterfront": [18.0, 30.0, 20.0, 30.0],
+	"docks": [20.0, 36.0, 20.0, 32.0],
+	"georgian": [13.0, 22.0, 16.0, 24.0],
+}
+
+
+## Buildings round a block (world polygon): lots along every street
+## frontage, each turned to face its own street, then a tower in the
+## courtyard if there's room. Each lot is built in its own frame.
+func _fill_block(poly: PackedVector2Array, dist: String, brng: RandomNumberGenerator, rot: float, pivot: Vector2) -> void:
+	var ins := Geometry2D.offset_polygon(poly, -3.5)
+	if ins.is_empty():
+		return
+	var inner: PackedVector2Array = CityRoads._simplify(_closed(ins[0]), 1.2)
+	inner.remove_at(inner.size() - 1)
+	var size: Array = LOTS.get(dist, LOTS["midtown"])
+	var placed: Array = []
+	var lots: Array = []   # [local Rect2, rot, pivot]
+	for i in inner.size():
+		var a := inner[i]
+		var b := inner[(i + 1) % inner.size()]
+		var L := a.distance_to(b)
+		if L < 12.0:
+			continue
+		var d := (b - a) / L
+		var n := Vector2(-d.y, d.x)
+		var side := 1.0
+		if not Geometry2D.is_point_in_polygon((a + b) * 0.5 + n * 1.0, inner):
+			n = -n
+			side = -1.0
+		var t := 0.0
+		while t < L - 9.0:
+			var w := minf(brng.randf_range(size[0], size[1]), L - t)
+			var depth := brng.randf_range(size[2], size[3])
+			var ok := false
+			for attempt in 3:
+				var q := PackedVector2Array([a + d * t, a + d * (t + w), a + d * (t + w) + n * depth, a + d * t + n * depth])
+				if _quad_fits(q, inner, placed):
+					placed.append(q)
+					var pv := a + d * t
+					var r := Rect2(pv.x, pv.y, w, depth) if side > 0.0 else Rect2(pv.x, pv.y - depth, w, depth)
+					lots.append([r, d.angle(), pv])
+					ok = true
+					break
+				depth *= 0.72
+				if depth < 9.0:
+					break
+			t += w if ok else 4.0
+	# A courtyard tower: the biggest square that still fits in the middle.
+	var c := CityRoads._centroid(inner)
+	var side2 := 46.0
+	while side2 >= 16.0:
+		var q := PackedVector2Array()
+		for k in 4:
+			q.append(c + Vector2(cos(rot + PI * 0.25 + k * PI * 0.5), sin(rot + PI * 0.25 + k * PI * 0.5)) * side2 * 0.7071)
+		if _quad_fits(q, inner, placed):
+			placed.append(q)
+			var pv2 := q[2]  # (the corner whose local frame has the square at +x, +y)
+			var best := q[0]
+			for v in q:
+				var lv := to_local2(v, rot, c)
+				if lv.x < to_local2(best, rot, c).x - 0.01 or (absf(lv.x - to_local2(best, rot, c).x) < 0.01 and lv.y < to_local2(best, rot, c).y):
+					best = v
+			pv2 = best
+			lots.append([Rect2(pv2.x, pv2.y, side2, side2), rot, pv2])
+			break
+		side2 -= 6.0
+	# Construction sites (cbd/midtown): the biggest lot gets a half-built
+	# frame and a tower crane instead of a building.
+	var site := -1
+	if dist in ["cbd", "midtown"] and _sites.size() < 9 and brng.randf() < 0.17:
+		var best_a := 0.0
+		for li in lots.size():
+			var r0: Rect2 = lots[li][0]
+			if r0.get_area() > best_a and minf(r0.size.x, r0.size.y) > 24.0:
+				best_a = r0.get_area()
+				site = li
+		if site >= 0:
+			_sites.append([lots[site][0], dist, lots[site][1], lots[site][2]])
+	for li in lots.size():
+		if li == site:
+			continue
+		var r: Rect2 = (lots[li][0] as Rect2).grow(-0.8)
+		var snap := _snap()
+		var lrot: float = lots[li][1]
+		var lpv: Vector2 = lots[li][2]
+		if rot == 0.0 and _reserved(r) and absf(lrot) < 0.001:
+			continue
+		_make_building(r, dist, brng)
+		_to_world(snap, lrot, lpv)
+
+
+## The quad (world) is inside `inner` and clear of every placed quad.
+func _quad_fits(q: PackedVector2Array, inner: PackedVector2Array, placed: Array) -> bool:
+	for v in q:
+		if not Geometry2D.is_point_in_polygon(v, inner):
+			return false
+	for v in inner:
+		if Geometry2D.is_point_in_polygon(v, q):
+			return false
+	var shrunk: PackedVector2Array = Geometry2D.offset_polygon(q, -0.6)[0] if not Geometry2D.offset_polygon(q, -0.6).is_empty() else q
+	for p in placed:
+		if not Geometry2D.intersect_polygons(shrunk, p).is_empty():
+			return false
+	for r in reserved:
+		if not Geometry2D.intersect_polygons(q, _rect_poly((r as Rect2).grow(2.0))).is_empty():
+			return false
+	for r in pieces.rects().values():
+		if not Geometry2D.intersect_polygons(q, _rect_poly((r as Rect2).grow(2.0))).is_empty():
+			return false
+	return true
+
+
+static func _closed(p: PackedVector2Array) -> PackedVector2Array:
+	var q := p.duplicate()
+	q.append(p[0])
+	return q
+
+
+## Lifts what was added to the layout since `snap` (see _snap) by dy metres:
+## buildings, props, structures (their y0), anchors, set-piece collision and
+## landmark models (terraced blocks: set pieces, basins).
+
+## Lifts what a sloping block's generation added since `snap` (already in
+## the world): each building stands level on its own lot at the lot's highest
+## corner (its base course shows down the slope: b["foot"]); whatever stands
+## on or in a building (roof props, huts, spires, signs) rises with that
+## building; the rest (street lights, trees) stands on the ground where it is.
+func _lift_on_slope(snap: Array) -> void:
+	var feet: Array = []  # [building, local footprint Rect2, dy]
+	for i in range(snap[0], buildings.size()):
+		var b: Dictionary = buildings[i]
+		if not b["kind"] in ["normal", "landmark"]:
+			continue
+		var t: Array = b["tiers"][0]
+		var fp := Rect2(t[0], t[1], t[2] - t[0], t[3] - t[1])
+		var inside_other := false
+		for f in feet:
+			if float((f[0] as Dictionary).get("rot", 0.0)) == float(b.get("rot", 0.0)) \
+					and (f[1] as Rect2).grow(0.05).encloses(fp):
+				inside_other = true  # stands on an earlier building (towers on podiums)
+		if inside_other:
+			continue
+		var hi := -INF
+		var lo := INF
+		var X := bxf(b)
+		for cn: Vector2 in [fp.position, fp.end, Vector2(fp.end.x, fp.position.y), Vector2(fp.position.x, fp.end.y)]:
+			var w := X * Vector3(cn.x, 0.0, cn.y)
+			var y := terrain.road_y(w.x, w.z)
+			hi = maxf(hi, y)
+			lo = minf(lo, y)
+		feet.append([b, fp, hi])
+		b["foot"] = lo
+	var dy_at := func(x: float, z: float, rot: float, pivot: Vector2) -> float:
+		for f in feet:
+			var fb: Dictionary = f[0]
+			var q := Vector2(x, z)
+			if float(fb.get("rot", 0.0)) != 0.0:
+				q = to_local2(q, fb["rot"], fb["pivot"])
+			if (f[1] as Rect2).grow(0.05).has_point(q):
+				return f[2]
+		return terrain.road_y(x, z)
+	for i in range(snap[0], buildings.size()):
+		var b: Dictionary = buildings[i]
+		var t: Array = b["tiers"][0]
+		var at: Vector2 = b.get("lift_at", Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5))
+		var w := bxf(b) * Vector3(at.x, 0.0, at.y)
+		var dy: float = dy_at.call(w.x, w.z, 0.0, Vector2.ZERO)
+		for tt in b["tiers"]:
+			tt[4] += dy
+			tt[5] += dy
+		if b.has("roof"):
+			b["roof"] += dy
+		if b.has("foot"):
+			b["foot"] = minf(b["foot"], dy)
+		b["base"] = float(b.get("base", 0.0)) + dy
+	for i in range(snap[1], props.size()):
+		var xf: Transform3D = props[i][1]
+		props[i][1] = xf.translated(Vector3(0, dy_at.call(xf.origin.x, xf.origin.z, 0.0, Vector2.ZERO), 0))
+	for i in range(snap[3], anchor_lines.size()):
+		var m: Vector3 = (anchor_lines[i][0] + anchor_lines[i][1]) * 0.5
+		var up := Vector3(0, dy_at.call(m.x, m.z, 0.0, Vector2.ZERO), 0)
+		anchor_lines[i] = [anchor_lines[i][0] + up, anchor_lines[i][1] + up]
+	for i in range(snap[6], landmarks.size()):
+		var o: Vector3 = (landmarks[i][1] as Transform3D).origin
+		landmarks[i][1] = (landmarks[i][1] as Transform3D).translated(Vector3(0, dy_at.call(o.x, o.z, 0.0, Vector2.ZERO), 0))
+
+
+func _snap() -> Array:
+	return [buildings.size(), props.size(), structures.size(), anchor_lines.size(), kit_obbs.size(),
+		kit_hulls.size(), landmarks.size()]
+
+
+## Half-built towers on the construction lots picked while filling blocks:
+## concrete core, open floor slabs, and a tower crane whose jib clears the
+## neighbours (it's placed to swing from: the jib reaches out over a street).
+func _construction() -> void:
+	for entry in _sites:
+		var snap := _snap()
+		var rot: float = entry[2]
+		var pivot: Vector2 = entry[3]
+		_site(entry)
+		_to_world(snap, rot, pivot)
+		# Rigid (the crane's collision must stay with the crane), on the lot's
+		# highest corner; the frame's foot reaches down the slope.
+		var lot: Rect2 = entry[0]
+		var hi := -INF
+		var lo := INF
+		for c: Vector2 in [lot.position, lot.end, Vector2(lot.end.x, lot.position.y), Vector2(lot.position.x, lot.end.y)]:
+			var w := to_world2(c, rot, pivot)
+			hi = maxf(hi, terrain.road_y(w.x, w.y))
+			lo = minf(lo, terrain.road_y(w.x, w.y))
+		_lift(snap, hi)
+		for i in range(snap[0], buildings.size()):
+			buildings[i]["foot"] = lo
+
+
+## One construction site (frame, core, crane), built at street level 0 in
+## the block's local frame.
+func _site(entry: Array) -> void:
+	var lot: Rect2 = (entry[0] as Rect2).grow(-1.2)
+	var dist: String = entry[1]
+	_site_frame = [entry[2], entry[3], buildings.size()]
+	var brng := RandomNumberGenerator.new()
+	brng.seed = hash(Vector2i(int(lot.position.x), int(lot.position.y))) ^ seed
+	var c := lot.get_center()
+	var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 34.0, 120.0)
+	var f := lot.grow(-4.0)
+	var floors: Array = []
+	var y := 4.2
+	while y <= h:
+		floors.append([f.position.x, f.position.y, f.end.x, f.end.y, y - 0.45, y])
+		y += 4.2
+	var top: float = floors[-1][5]
+	var fb := _building(floors, Style.MODERN, Color(0.66, 0.65, 0.62), "frame")
+	_add(fb)
+	_add(_building([[c.x - 4.5, c.y - 4.5, c.x + 4.5, c.y + 4.5, 0.0, top + 6.0]], Style.MODERN,
+		Color(0.62, 0.61, 0.58), "plain"))
+	props.append(["ac_unit", Transform3D(Basis(), Vector3(c.x + 6.0, top, c.y + 6.0))])
+	_tower_crane(lot, top, brng)
+
+
+var _site_frame: Array = [0.0, Vector2.ZERO, 0]
+
+
+## Tallest building/structure top whose footprint touches the strip a→b
+## (width w), both in the current construction site's local frame.
+func _max_height_along(a: Vector2, b: Vector2, w: float) -> float:
+	var rot: float = _site_frame[0]
+	var pv: Vector2 = _site_frame[1]
+	var wa := to_world2(a, rot, pv)
+	var wb := to_world2(b, rot, pv)
+	var r := Rect2(wa, Vector2.ZERO).expand(wb).grow(w * 0.5)
+	var best := 0.0
+	for i in mini(int(_site_frame[2]), buildings.size()):
+		var bd: Dictionary = buildings[i]
+		for t in bd["tiers"]:
+			var bx := tier_aabb(bd, t)
+			if Rect2(bx.position.x, bx.position.z, bx.size.x, bx.size.z).intersects(r):
+				best = maxf(best, t[5] - float(bd.get("base", 0.0)))
+	return best
+
+
+## Sky bridges between tall neighbours (any orientation): a glass tube from
+## one tower's core to the other's at 40–60% of the lower one's height,
+## clear of every other building. In the CBD a few are four-storey "sky
+## lobbies" (gateways) high over the boulevards.
+func _skybridges() -> void:
+	var tall: Array = []
+	for b in buildings:
+		if b["kind"] != "normal":
+			continue
+		var c := base_center(b)
+		var top := float(b["tiers"][-1][5]) - float(b.get("base", 0.0))
+		if top > 80.0 and district(c.x, c.y) in ["cbd", "midtown"]:
+			tall.append([b, c, top])
+	var grid := _building_grid()
+	var made := 0
+	var lobbies := 0
+	var used := {}
+	for i in tall.size():
+		for j in range(i + 1, tall.size()):
+			if made >= 22:
+				return
+			var A: Array = tall[i]
+			var Bt: Array = tall[j]
+			if used.has(i) or used.has(j):
+				continue
+			var d: float = (A[1] as Vector2).distance_to(Bt[1])
+			if d < 26.0 or d > 62.0:
+				continue
+			var lobby := lobbies < 6 and district(A[1].x, A[1].y) == "cbd" and minf(A[2], Bt[2]) > 120.0
+			var base := maxf(float(A[0].get("base", 0.0)), float(Bt[0].get("base", 0.0)))
+			var y := base + minf(A[2], Bt[2]) * (0.42 if lobby else rng.randf_range(0.4, 0.6))
+			var hh := 15.0 if lobby else 5.0
+			# Both ends must be inside their towers over the whole height.
+			var wa := _tier_width_at(A[0], y, hh)
+			var wb := _tier_width_at(Bt[0], y, hh)
+			var width := minf(minf(wa, wb) * 0.6, 22.0 if lobby else 7.0)
+			if width < 5.0:
+				continue
+			var a2: Vector2 = A[1]
+			var b2: Vector2 = Bt[1]
+			if not _span_clear(grid, a2, b2, y, hh, width, [A[0], Bt[0]]):
+				continue
+			var mid := (a2 + b2) * 0.5
+			var rot := (b2 - a2).angle()
+			var bd := _building([[mid.x - d * 0.5, mid.y - width * 0.5, mid.x + d * 0.5, mid.y + width * 0.5, y, y + hh]],
+				Style.DARK_GLASS, Color(0.2, 0.24, 0.28), "bridge")
+			bd["rot"] = rot
+			bd["pivot"] = mid
+			_add(bd)
+			used[i] = true
+			used[j] = true
+			made += 1
+			if lobby:
+				lobbies += 1
+
+
+## Smallest horizontal size of the tier of b spanning [y, y + h] (0 if none).
+static func _tier_width_at(b: Dictionary, y: float, h: float) -> float:
+	for t in b["tiers"]:
+		if y >= float(t[4]) and y + h <= float(t[5]):
+			return minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	return 0.0
+
+
+func _building_grid() -> Dictionary:
+	var g := {}
+	for b in buildings:
+		if not b["kind"] in ["normal", "landmark", "plain", "frame", "bridge", "spire"]:
+			continue
+		for t in b["tiers"]:
+			var bx := tier_aabb(b, t)
+			for gx in range(floori(bx.position.x / 50.0), floori(bx.end.x / 50.0) + 1):
+				for gz in range(floori(bx.position.z / 50.0), floori(bx.end.z / 50.0) + 1):
+					var k := Vector2i(gx, gz)
+					if not g.has(k):
+						g[k] = []
+					if (g[k] as Array).is_empty() or not is_same(g[k][-1], b):
+						g[k].append(b)
+	return g
+
+
+## The box from a to b (heights y..y+h, width w) passes through nothing but
+## the two towers it joins.
+func _span_clear(grid: Dictionary, a: Vector2, b: Vector2, y: float, h: float, w: float, own: Array) -> bool:
+	var dir := (b - a).normalized()
+	var side := Vector2(-dir.y, dir.x)
+	var n := int(a.distance_to(b) / 2.0) + 1
+	for i in n + 1:
+		var p := a.lerp(b, float(i) / n)
+		for s: float in [-0.5, 0.0, 0.5]:
+			for yy: float in [y + 0.5, y + h * 0.5, y + h - 0.5]:
+				var q := p + side * w * s
+				var P := Vector3(q.x, yy, q.y)
+				for bd in grid.get(Vector2i(floori(q.x / 50.0), floori(q.y / 50.0)), []):
+					if is_same(bd, own[0]) or is_same(bd, own[1]):
+						continue
+					if inside(bd, P, 1.0):
+						return false
+	return true
+
+
+# --------------------------------------------------------------- traffic
+## Two lanes on every road (one each way, 3.2 m off the centre line), four
+## on the boulevards; simplified into straight segments for the GPU traffic.
+## Traffic lights where side streets meet the road they end on.
+func _traffic() -> void:
+	for r in roads.roads:
+		var pts := CityRoads._simplify(r["pts"], 0.8)
+		if pts.size() < 2:
+			continue
+		var offs := [3.2] if r["kind"] == "minor" else [3.2, 7.0]
+		if float(r["w"]) < 14.0:
+			offs = [2.6]
+		for o in offs:
+			for sgn: float in [1.0, -1.0]:
+				var line := _offset_line(pts, o * sgn)
+				if sgn < 0.0:
+					line.reverse()
+				for i in line.size() - 1:
+					lanes.append([Vector3(line[i].x, 0.0, line[i].y), Vector3(line[i + 1].x, 0.0, line[i + 1].y)])
+	for r in roads.roads:
+		if r["kind"] != "minor":
+			continue
+		var pts: PackedVector2Array = r["pts"]
+		var hw: float = float(r["w"]) * 0.5
+		for e in 2:
+			var end := pts[0] if e == 0 else pts[-1]
+			var inner := pts[1] if e == 0 else pts[-2]
+			var dir := (end - inner).normalized()  # travelling towards the junction
+			var right := Vector2(-dir.y, dir.x)
+			var p := end - dir * 2.0 + right * (hw + 1.0)
+			var yaw := atan2(dir.x, dir.y)
+			var at := Vector3(p.x, 0.0, p.y)
+			at.y = ground_y(p.x, p.y)
+			if block_at(p.x, p.y) >= 0 and blocks[block_at(p.x, p.y)]["kind"] in ["block", "plaza"]:
+				props.append(["traffic_light", Transform3D(Basis(Vector3.UP, yaw), at)])
+
+
+## A polyline shifted sideways by `o` (+ = right of travel), mitred.
+static func _offset_line(pts: PackedVector2Array, o: float) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in pts.size():
+		var a := pts[maxi(i - 1, 0)]
+		var b := pts[mini(i + 1, pts.size() - 1)]
+		var d := (b - a).normalized()
+		var n := Vector2(-d.y, d.x)
+		out.append(pts[i] + n * o)
+	return out
+
+
+static func _subtract(r: Rect2, hole: Rect2) -> Array:
+	if not r.intersects(hole):
+		return [r]
+	var out: Array = []
+	var h := r.intersection(hole)
+	if h.position.y > r.position.y:
+		out.append(Rect2(r.position.x, r.position.y, r.size.x, h.position.y - r.position.y))
+	if h.end.y < r.end.y:
+		out.append(Rect2(r.position.x, h.end.y, r.size.x, r.end.y - h.end.y))
+	if h.position.x > r.position.x:
+		out.append(Rect2(r.position.x, h.position.y, h.position.x - r.position.x, h.size.y))
+	if h.end.x < r.end.x:
+		out.append(Rect2(h.end.x, h.position.y, r.end.x - h.end.x, h.size.y))
+	return out
+
+
+static func chunk_of(p: Vector2) -> Vector2i:
+	return Vector2i(floori(p.x / CHUNK), floori(p.y / CHUNK))
+
+
+func buildings_by_chunk() -> Dictionary:
+	var out := {}
+	for b in buildings:
+		var k := chunk_of(base_center(b))
+		if not out.has(k):
+			out[k] = []
+		out[k].append(b)
+	return out
+
+
+func props_by_chunk() -> Dictionary:
+	var out := {}
+	for p in props:
+		var o: Vector3 = p[1].origin
+		var k := chunk_of(Vector2(o.x, o.z))
+		if not out.has(k):
+			out[k] = []
+		out[k].append(p)
+	return out
+
+
+func is_water(p: Vector3) -> bool:
+	var q := Vector2(p.x, p.z)
+	for w in basins:
+		if (w as Rect2).has_point(q):
+			return true
+	if p.x < RIVER_EDGE:
+		return p.x > FAR_SHORE
+	return not Geometry2D.is_point_in_polygon(q, coast)
+
+
+func is_park(p: Vector2) -> bool:
+	var i := block_at(p.x, p.y)
+	return i >= 0 and blocks[i]["kind"] == "park"
+
+
+func mean_height_near(p: Vector2, radius: float) -> float:
+	var total := 0.0
+	var n := 0
+	for b in buildings:
+		if b["kind"] != "normal":
+			continue
+		if base_center(b).distance_to(p) < radius:
+			total += b["tiers"][-1][5]
+			n += 1
+	return total / n if n > 0 else 0.0
+
+
+func tallest_near(p: Vector2, radius: float) -> float:
+	var best := 0.0
+	for b in buildings:
+		if base_center(b).distance_to(p) < radius:
+			best = maxf(best, b["tiers"][-1][5])
+	return best
+
+
+# ------------------------------------------------- buildings, kit, structures
 func district(x: float, z: float) -> String:
 	if x < 250.0 and z > -330.0 and z < 260.0:
 		return "waterfront"
@@ -171,6 +965,8 @@ func district(x: float, z: float) -> String:
 
 
 # ------------------------------------------------------------- landmarks
+
+
 func _landmarks() -> void:
 	# Clock building: stone block, two clock towers crowned with domes + birds.
 	_add(_building([[92, -112, 162, -40, 0, 50]], Style.SANDSTONE, Color(0.76, 0.74, 0.7), "landmark"))
@@ -235,220 +1031,6 @@ func _lift(snap: Array, dy: float) -> void:
 		kit_hulls[i] = hull
 	for i in range(snap[6], landmarks.size()):
 		landmarks[i][1] = (landmarks[i][1] as Transform3D).translated(Vector3(0, dy, 0))
-
-
-## Lifts what a sloping block's generation added since `snap`: each building
-## stands level on its own lot at the lot's highest street-level corner (its
-## base course shows down the slope: b["foot"]); whatever stands on or in a
-## building (roof props, huts, spires, signs) rises with that building; the
-## rest (street lights, trees) stands on the ground where it is.
-func _lift_on_slope(snap: Array) -> void:
-	var feet: Array = []  # [Rect2 footprint, dy]
-	for i in range(snap[0], buildings.size()):
-		var b: Dictionary = buildings[i]
-		if not b["kind"] in ["normal", "landmark"]:
-			continue
-		var t: Array = b["tiers"][0]
-		var fp := Rect2(t[0], t[1], t[2] - t[0], t[3] - t[1])
-		var inside := false
-		for f in feet:
-			if (f[0] as Rect2).grow(0.05).encloses(fp):
-				inside = true  # stands on an earlier building (landmark towers)
-		if inside:
-			continue
-		var hi := -INF
-		var lo := INF
-		for c in [fp.position, fp.end, Vector2(fp.end.x, fp.position.y), Vector2(fp.position.x, fp.end.y)]:
-			var y := terrain.road_y(c.x, c.y)
-			hi = maxf(hi, y)
-			lo = minf(lo, y)
-		feet.append([fp, hi])
-		b["foot"] = lo
-	var dy_at := func(x: float, z: float) -> float:
-		for f in feet:
-			if (f[0] as Rect2).grow(0.05).has_point(Vector2(x, z)):
-				return f[1]
-		return terrain.road_y(x, z)
-	for i in range(snap[0], buildings.size()):
-		var b: Dictionary = buildings[i]
-		var t: Array = b["tiers"][0]
-		var at: Vector2 = b.get("lift_at", Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5))
-		var dy: float = dy_at.call(at.x, at.y)
-		for tt in b["tiers"]:
-			tt[4] += dy
-			tt[5] += dy
-		if b.has("roof"):
-			b["roof"] += dy
-		if b.has("foot"):
-			b["foot"] = minf(b["foot"], dy)
-		b["base"] = float(b.get("base", 0.0)) + dy
-	for i in range(snap[1], props.size()):
-		var xf: Transform3D = props[i][1]
-		props[i][1] = xf.translated(Vector3(0, dy_at.call(xf.origin.x, xf.origin.z), 0))
-	for i in range(snap[3], anchor_lines.size()):
-		var m: Vector3 = (anchor_lines[i][0] + anchor_lines[i][1]) * 0.5
-		var up := Vector3(0, dy_at.call(m.x, m.z), 0)
-		anchor_lines[i] = [anchor_lines[i][0] + up, anchor_lines[i][1] + up]
-	for i in range(snap[6], landmarks.size()):
-		var o: Vector3 = (landmarks[i][1] as Transform3D).origin
-		landmarks[i][1] = (landmarks[i][1] as Transform3D).translated(Vector3(0, dy_at.call(o.x, o.z), 0))
-
-
-func _snap() -> Array:
-	return [buildings.size(), props.size(), structures.size(), anchor_lines.size(), kit_obbs.size(),
-		kit_hulls.size(), landmarks.size()]
-
-
-## The block (pavement rectangle between streets) containing (x, z), or an
-## empty Rect2 on a street or off the grid.
-func block_at(x: float, z: float) -> Rect2:
-	var xr := Vector2.ZERO
-	var zr := Vector2.ZERO
-	for i in x_streets.size() - 1:
-		var a: float = x_streets[i][0] + x_streets[i][1] * 0.5
-		var b: float = x_streets[i + 1][0] - x_streets[i + 1][1] * 0.5
-		if x >= a and x <= b:
-			xr = Vector2(a, b)
-	for j in z_streets.size() - 1:
-		var a: float = z_streets[j][0] + z_streets[j][1] * 0.5
-		var b: float = z_streets[j + 1][0] - z_streets[j + 1][1] * 0.5
-		if z >= a and z <= b:
-			zr = Vector2(a, b)
-	if xr == Vector2.ZERO or zr == Vector2.ZERO:
-		return Rect2()
-	return Rect2(xr.x, zr.x, xr.y - xr.x, zr.y - zr.x)
-
-
-## How far a block's contents are lifted: its terrace (pavement) level less
-## the kerb, so a flat block at 0 is exactly the old city.
-func block_lift(r: Rect2) -> float:
-	return terrain.block_level(r) - CityTerrain.KERB
-
-
-## Height of what you'd stand on at (x, z): a block's pavement or the road.
-## (Basins are water: their quay ring is the block level.)
-func ground_y(x: float, z: float) -> float:
-	var r := block_at(x, z)
-	if r.has_area():
-		if terraces.has(r):
-			return terraces[r]
-		return terrain.road_y(x, z) + CityTerrain.KERB
-	return terrain.road_y(x, z)
-
-
-func _reserved(r: Rect2) -> bool:
-	for q in reserved:
-		if r.grow(4.0).intersects(q):
-			return true
-	return false
-
-
-# ---------------------------------------------------------------- blocks
-func _blocks() -> void:
-	var bx := []
-	for i in x_streets.size() - 1:
-		var a: Array = x_streets[i]
-		var b: Array = x_streets[i + 1]
-		bx.append([a[0] + a[1] * 0.5, b[0] - b[1] * 0.5])
-	var bz := []
-	for i in z_streets.size() - 1:
-		var a: Array = z_streets[i]
-		var b: Array = z_streets[i + 1]
-		bz.append([a[0] + a[1] * 0.5, b[0] - b[1] * 0.5])
-	var cbd_plaza_done := false
-	for xr in bx:
-		for zr in bz:
-			var rect := Rect2(xr[0], zr[0], xr[1] - xr[0], zr[1] - zr[0])
-			var snap := _snap()
-			var n_struct := structures.size()
-			_block(rect, cbd_plaza_done)
-			if parks.size() > 0 and parks[-1] == rect and rect.grow(10).has_point(Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)):
-				cbd_plaza_done = true
-			if structures.size() > n_struct or water.size() > 0 and water[-1] == rect.grow(-6.0):
-				# Set pieces and dock basins stand on a level terrace with
-				# retaining walls down to the streets.
-				terraces[rect] = terrain.block_level(rect)
-				_lift(snap, block_lift(rect))
-			else:
-				_lift_on_slope(snap)
-
-
-## One block's contents, generated at street level 0 (_blocks lifts them).
-func _block(rect: Rect2, cbd_plaza_done: bool) -> void:
-	blocks.append(rect)
-	var c := rect.get_center()
-	var dist := district(c.x, c.y)
-	var brng := RandomNumberGenerator.new()
-	brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ seed
-	# A plaza near the beacon: the beacon stands in it, and it's a big launch gap.
-	if not cbd_plaza_done and rect.grow(10).has_point(Vector2(CBD_CENTER.x - 40, CBD_CENTER.y + 60)):
-		parks.append(rect)
-		_park_props(rect, brng)
-		return
-	var piece := pieces.piece_for(rect)
-	if piece != "":
-		pieces.build(piece, rect)
-		if piece in ["wheel", "yard"]:
-			_street_props(rect, brng)
-		return
-	if dist == "docks" and brng.randf() < 0.4 and c.x < 470.0:
-		var basin := rect.grow(-6.0)
-		water.append(basin)
-		_quay_cranes(basin, brng)
-		pieces.ship(basin)
-		return
-	if dist == "georgian" and brng.randf() < 0.07 or dist == "midtown" and brng.randf() < 0.05:
-		parks.append(rect)
-		_park_props(rect, brng)
-		return
-	_fill_block(rect, dist, brng)
-	_street_props(rect, brng)
-
-
-func _park_props(rect: Rect2, brng: RandomNumberGenerator) -> void:
-	var n := int(rect.get_area() / 420.0)
-	for i in n:
-		var p := Vector3(brng.randf_range(rect.position.x + 5, rect.end.x - 5), 0.15,
-			brng.randf_range(rect.position.y + 5, rect.end.y - 5))
-		var s := brng.randf_range(0.8, 1.35)
-		props.append(["tree", Transform3D(Basis(Vector3.UP, brng.randf_range(0, TAU)).scaled(Vector3.ONE * s), p)])
-
-
-func _street_props(rect: Rect2, brng: RandomNumberGenerator) -> void:
-	# Streetlights along the long edges, facing the road.
-	var step := 32.0
-	var x := rect.position.x + 8.0
-	while x < rect.end.x - 6.0:
-		props.append(["streetlight", Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(x, 0.15, rect.position.y + 1.2))])
-		props.append(["streetlight", Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(x, 0.15, rect.end.y - 1.2))])
-		x += step
-	if brng.randf() < 0.5:
-		var z := rect.position.y + 10.0
-		while z < rect.end.y - 6.0:
-			props.append(["tree", Transform3D(Basis().scaled(Vector3.ONE * 0.7), Vector3(rect.position.x + 2.0, 0.15, z))])
-			z += 18.0
-
-
-func _fill_block(rect: Rect2, dist: String, brng: RandomNumberGenerator) -> void:
-	var inner := rect.grow(-3.5)
-	var lots: Array = []
-	_split(inner, lots, brng, 26.0 if dist in ["georgian", "docks"] else 34.0, 0)
-	# Construction sites (cbd/midtown): the biggest lot gets a half-built
-	# frame and a tower crane instead of a building.
-	var site := Rect2()
-	if dist in ["cbd", "midtown"] and _sites.size() < 9 and brng.randf() < 0.17:
-		for lot in lots:
-			if lot.get_area() > site.get_area() and minf(lot.size.x, lot.size.y) > 26.0 and not _reserved(lot):
-				site = lot
-		if site.has_area():
-			_sites.append([site, dist])
-	for lot in lots:
-		if lot == site or _reserved(lot):
-			continue
-		var r: Rect2 = lot.grow(-1.2)
-		if r.size.x < 9.0 or r.size.y < 9.0:
-			continue
-		_make_building(r, dist, brng)
 
 
 func _split(r: Rect2, out: Array, brng: RandomNumberGenerator, min_size: float, depth: int) -> void:
@@ -831,6 +1413,8 @@ func _add(b: Dictionary) -> void:
 
 
 # ------------------------------------------------------------ structures
+
+
 ## Collision-only box (the visuals come from `structures` specs).
 func _box(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float) -> void:
 	buildings.append({"tiers": [[minf(x0, x1), minf(z0, z1), maxf(x0, x1), maxf(z0, z1), y0, y1]],
@@ -842,6 +1426,8 @@ func _anchor(a: Vector3, b: Vector3) -> void:
 
 
 # ------------------------------------------------------------- set-piece kit
+
+
 ## A kit: one structure spec the mesher draws ("solids", "beams", "prisms")
 ## whose collision is made from the very same list.
 func _kit(name: String) -> Dictionary:
@@ -928,49 +1514,6 @@ func _billboard(t: Array, roof: float, brng: RandomNumberGenerator) -> void:
 	_add(b)
 
 
-## Half-built towers on the construction lots picked while filling blocks:
-## concrete core, open floor slabs, and a tower crane whose jib clears the
-## neighbours (it's placed to swing from: the jib reaches out over a street).
-func _construction() -> void:
-	for entry in _sites:
-		var snap := _snap()
-		_site(entry)
-		# Rigid (the crane's collision must stay with the crane), on the lot's
-		# highest street corner; the frame's foot reaches down the slope.
-		var lot: Rect2 = entry[0]
-		var hi := -INF
-		var lo := INF
-		for c in [lot.position, lot.end, Vector2(lot.end.x, lot.position.y), Vector2(lot.position.x, lot.end.y)]:
-			hi = maxf(hi, terrain.road_y(c.x, c.y))
-			lo = minf(lo, terrain.road_y(c.x, c.y))
-		_lift(snap, hi)
-		for i in range(snap[0], buildings.size()):
-			buildings[i]["foot"] = lo
-
-
-## One construction site (frame, core, crane), built at street level 0.
-func _site(entry: Array) -> void:
-	var lot: Rect2 = (entry[0] as Rect2).grow(-1.2)
-	var dist: String = entry[1]
-	var brng := RandomNumberGenerator.new()
-	brng.seed = hash(Vector2i(int(lot.position.x), int(lot.position.y))) ^ seed
-	var c := lot.get_center()
-	var h := clampf(_height_for(dist, c, brng) * brng.randf_range(0.4, 0.6), 34.0, 120.0)
-	var f := lot.grow(-4.0)
-	var floors: Array = []
-	var y := 4.2
-	while y <= h:
-		floors.append([f.position.x, f.position.y, f.end.x, f.end.y, y - 0.45, y])
-		y += 4.2
-	var top: float = floors[-1][5]
-	var fb := _building(floors, Style.MODERN, Color(0.66, 0.65, 0.62), "frame")
-	_add(fb)
-	_add(_building([[c.x - 4.5, c.y - 4.5, c.x + 4.5, c.y + 4.5, 0.0, top + 6.0]], Style.MODERN,
-		Color(0.62, 0.61, 0.58), "plain"))
-	props.append(["ac_unit", Transform3D(Basis(), Vector3(c.x + 6.0, top, c.y + 6.0))])
-	_tower_crane(lot, top, brng)
-
-
 func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> void:
 	var jib := 52.0
 	var counter := 16.0
@@ -1027,17 +1570,6 @@ func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> v
 		"trolley": trolley, "hook": hook})
 
 
-## Tallest building/structure top whose footprint touches the strip a→b (width w).
-func _max_height_along(a: Vector2, b: Vector2, w: float) -> float:
-	var r := Rect2(a, Vector2.ZERO).expand(b).grow(w * 0.5)
-	var best := 0.0
-	for bd in buildings:
-		for t in bd["tiers"]:
-			if Rect2(t[0], t[1], t[2] - t[0], t[3] - t[1]).intersects(r):
-				best = maxf(best, t[5])
-	return best
-
-
 ## Suspension bridge from the waterfront to the far shore: two red towers,
 ## sagging main cables (anchor lines) and a deck to land on.
 func _bridge() -> void:
@@ -1091,6 +1623,8 @@ func _bridge() -> void:
 
 
 # ------------------------------------------------------- elevated & bridges
+
+
 func _viaduct() -> void:
 	# Elevated railway along the waterfront – a long, low, grappleable line.
 	var z := MIN_Z + 20.0
@@ -1098,211 +1632,3 @@ func _viaduct() -> void:
 		landmarks.append(["viaduct", Transform3D(Basis(Vector3.UP, PI), Vector3(48, 0, z + 25.0))])
 		z += 25.0
 	_add(_building([[43.5, MIN_Z + 20.0, 52.5, z, 9.8, 12.0]], Style.MODERN, Color(0.2, 0.24, 0.26), "invisible"))
-
-
-func _skybridges() -> void:
-	# Glass skybridges across streets between tall neighbours in the CBD.
-	var tall: Array = []
-	for b in buildings:
-		if b["kind"] != "normal":
-			continue
-		var t: Array = b["tiers"][0]
-		var top: float = b["tiers"][-1][5]
-		if top > 80.0 and district((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5) in ["cbd", "midtown"]:
-			tall.append(b)
-	var made := 0
-	for i in tall.size():
-		for j in range(i + 1, tall.size()):
-			if made >= 20:
-				return
-			var a: Array = tall[i]["tiers"][0]
-			var b2: Array = tall[j]["tiers"][0]
-			var ov_z0 := maxf(a[1], b2[1])
-			var ov_z1 := minf(a[3], b2[3])
-			var gap: float = b2[0] - a[2]
-			if ov_z1 - ov_z0 > 12.0 and gap > 10.0 and gap < 34.0:
-				var y := minf(tall[i]["tiers"][-1][5], tall[j]["tiers"][-1][5]) * rng.randf_range(0.4, 0.6)
-				var zc := (ov_z0 + ov_z1) * 0.5
-				_add(_building([[a[2] - 1.0, zc - 3.5, b2[0] + 1.0, zc + 3.5, y, y + 5.0]], Style.DARK_GLASS,
-					Color(0.22, 0.26, 0.3), "bridge"))
-				made += 1
-
-
-# --------------------------------------------------------------- traffic
-func _traffic() -> void:
-	for s in x_streets:
-		var x: float = s[0]
-		lanes.append([Vector3(x - 3.2, 0.0, MIN_Z), Vector3(x - 3.2, 0.0, MAX_Z)])
-		lanes.append([Vector3(x + 3.2, 0.0, MAX_Z), Vector3(x + 3.2, 0.0, MIN_Z)])
-	for s in z_streets:
-		var z: float = s[0]
-		lanes.append([Vector3(MIN_X, 0.0, z + 3.2), Vector3(MAX_X, 0.0, z + 3.2)])
-		lanes.append([Vector3(MAX_X, 0.0, z - 3.2), Vector3(MIN_X, 0.0, z - 3.2)])
-	water.append(Rect2(FAR_SHORE, -2500, RIVER_EDGE - FAR_SHORE, 5000))
-	# Traffic lights on two opposite corners of every junction, arms over the road.
-	for xs in x_streets:
-		for zs in z_streets:
-			var hx: float = xs[1] * 0.5 + 1.0
-			var hz: float = zs[1] * 0.5 + 1.0
-			var a := Vector3(xs[0] + hx, 0.0, zs[0] - hz)
-			var b := Vector3(xs[0] - hx, 0.0, zs[0] + hz)
-			a.y = ground_y(a.x, a.z)
-			b.y = ground_y(b.x, b.z)
-			if not is_nan(terrain.deck_y(xs[0], zs[0])):
-				continue  # (no lights under the causeway)
-			if not is_water(a) and not _in_park(a):
-				props.append(["traffic_light", Transform3D(Basis(Vector3.UP, PI), a)])
-			if not is_water(b) and not _in_park(b):
-				props.append(["traffic_light", Transform3D(Basis(), b)])
-
-
-## The Valley Causeway: the avenue nearest x = 715 carried across the rail
-## valley on a road deck from the north rim junction to the south bank, at
-## street level at both ends. The valley streets pass under it and the
-## railway over it – three levels at one crossing.
-func _causeway() -> void:
-	var st: Array = x_streets[0]
-	for s in x_streets:
-		if absf(float(s[0]) - 715.0) < absf(float(st[0]) - 715.0):
-			st = s
-	var x: float = st[0]
-	var half: float = float(st[1]) * 0.5 - 4.0  # deck: the carriageway, pavements stay below
-	var zn: Array = z_streets[0]
-	var zsth: Array = z_streets[-1]
-	for s in z_streets:
-		if absf(float(s[0]) - 171.0) < absf(float(zn[0]) - 171.0):
-			zn = s
-		if absf(float(s[0]) - 581.0) < absf(float(zsth[0]) - 581.0):
-			zsth = s
-	var za: float = float(zn[0]) + float(zn[1]) * 0.5
-	var zb: float = float(zsth[0]) - float(zsth[1]) * 0.5
-	var ya := terrain.road_y(x, za)
-	var yb := terrain.road_y(x, zb)
-	terrain.decks.append({"x": x, "half": half, "za": za, "zb": zb, "ya": ya, "yb": yb})
-	var k := _kit("causeway")
-	var concrete := Color(0.62, 0.6, 0.56)
-	var dark := Color(0.38, 0.37, 0.36)
-	var at := func(z: float) -> float: return lerpf(ya, yb, (z - za) / (zb - za))
-	# Deck in spans between piers; parapets; piers mid-block (clear of the
-	# valley streets crossing underneath).
-	var piers: Array[float] = [za]
-	for j in z_streets.size() - 1:
-		var mid: float = (float(z_streets[j][0]) + float(z_streets[j + 1][0])) * 0.5
-		if mid > za + 20.0 and mid < zb - 20.0:
-			piers.append(mid)
-	piers.append(zb)
-	const T := 1.1  # deck thickness
-	for i in piers.size() - 1:
-		var a := Vector3(x, at.call(piers[i]) - T * 0.5, piers[i])
-		var b := Vector3(x, at.call(piers[i + 1]) - T * 0.5, piers[i + 1])
-		_kbeam(k, a, b, half * 2.0, T, concrete)
-		for sd in [-1.0, 1.0]:
-			var off := Vector3(sd * (half - 0.2), T * 0.5 + 0.55, 0.0)
-			_kbeam(k, a + off, b + off, 0.4, 1.1, dark)
-			# Edge girders under the deck, so the underside reads as a bridge.
-			var g := Vector3(sd * (half - 1.2), -T * 0.5 - 0.5, 0.0)
-			_kbeam(k, a + g, b + g, 0.8, 1.0, dark)
-		_anchor(a + Vector3(-half, T * 0.5 + 1.1, 0), b + Vector3(-half, T * 0.5 + 1.1, 0))
-		_anchor(a + Vector3(half, T * 0.5 + 1.1, 0), b + Vector3(half, T * 0.5 + 1.1, 0))
-	for i in range(1, piers.size() - 1):
-		var z := piers[i]
-		var top: float = at.call(z) - T - 1.0
-		for sd in [-1.0, 1.0]:
-			var px: float = x + sd * (half - 2.5)
-			var gy := terrain.road_y(px, z)
-			if top - gy > 1.0:
-				_ksolid(k, px - 0.9, z - 0.9, px + 0.9, z + 0.9, gy - 0.3, top, concrete)
-		_ksolid(k, x - half + 1.0, z - 1.0, x + half - 1.0, z + 1.0, top - 1.0, top + 0.05, concrete)
-
-
-func _in_park(p: Vector3) -> bool:
-	for r in parks:
-		if (r as Rect2).grow(2.0).has_point(Vector2(p.x, p.z)):
-			return true
-	return false
-
-
-func _land() -> void:
-	var rects: Array = [island]
-	for w in water:
-		if w.position.x < 0.0 or w in sea:
-			continue
-		var next: Array = []
-		for r in rects:
-			next.append_array(_subtract(r, w))
-		rects = next
-	# Far shore (where the bridge lands): plain ground, so it isn't "water".
-	rects.append(Rect2(FAR_SHORE - 1500.0, -2500.0, 1500.0, 5000.0))
-	land = rects
-
-
-static func _subtract(r: Rect2, hole: Rect2) -> Array:
-	if not r.intersects(hole):
-		return [r]
-	var out: Array = []
-	var h := r.intersection(hole)
-	if h.position.y > r.position.y:
-		out.append(Rect2(r.position.x, r.position.y, r.size.x, h.position.y - r.position.y))
-	if h.end.y < r.end.y:
-		out.append(Rect2(r.position.x, h.end.y, r.size.x, r.end.y - h.end.y))
-	if h.position.x > r.position.x:
-		out.append(Rect2(r.position.x, h.position.y, h.position.x - r.position.x, h.size.y))
-	if h.end.x < r.end.x:
-		out.append(Rect2(h.end.x, h.position.y, r.end.x - h.end.x, h.size.y))
-	return out
-
-
-# ----------------------------------------------------------------- queries
-static func chunk_of(p: Vector2) -> Vector2i:
-	return Vector2i(floori(p.x / CHUNK), floori(p.y / CHUNK))
-
-
-func buildings_by_chunk() -> Dictionary:
-	var out := {}
-	for b in buildings:
-		var t: Array = b["tiers"][0]
-		var k := chunk_of(Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5))
-		if not out.has(k):
-			out[k] = []
-		out[k].append(b)
-	return out
-
-
-func props_by_chunk() -> Dictionary:
-	var out := {}
-	for p in props:
-		var o: Vector3 = p[1].origin
-		var k := chunk_of(Vector2(o.x, o.z))
-		if not out.has(k):
-			out[k] = []
-		out[k].append(p)
-	return out
-
-
-func is_water(p: Vector3) -> bool:
-	for w in water:
-		if (w as Rect2).has_point(Vector2(p.x, p.z)):
-			return true
-	return false
-
-
-func mean_height_near(p: Vector2, radius: float) -> float:
-	var total := 0.0
-	var n := 0
-	for b in buildings:
-		if b["kind"] != "normal":
-			continue
-		var t: Array = b["tiers"][0]
-		if Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5).distance_to(p) < radius:
-			total += b["tiers"][-1][5]
-			n += 1
-	return total / n if n > 0 else 0.0
-
-
-func tallest_near(p: Vector2, radius: float) -> float:
-	var best := 0.0
-	for b in buildings:
-		var t: Array = b["tiers"][0]
-		if Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5).distance_to(p) < radius:
-			best = maxf(best, b["tiers"][-1][5])
-	return best

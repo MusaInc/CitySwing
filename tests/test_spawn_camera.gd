@@ -62,8 +62,9 @@ func test_player_stands_on_spawn_roof(t) -> void:
 	add_child(p)
 	p.bot = _Idle.new()
 	var ok := 0
+	var spot := {}
 	for i in 6:
-		var spot := world.random_rooftop(rng)
+		spot = world.random_rooftop(rng)
 		p.respawn(spot["position"])
 		for f in 45:
 			await get_tree().physics_frame
@@ -73,13 +74,27 @@ func test_player_stands_on_spawn_roof(t) -> void:
 		else:
 			t.note("spawn %s ended at %s floor=%s" % [spot["position"], p.global_position, p.is_on_floor()])
 	t.check(ok == 6, "standing naturally on the roof every time (%d/6)" % ok)
-	# Walk, run and jump from the rooftop.
+	# Walk, run and jump from the rooftop, along the spawn heading (the roof's
+	# clear run-up; lots are turned to their streets, so not always north).
 	var start := p.global_position
-	p.bot = _Run.new()
+	var run := _Run.new()
+	# Across the roof: the first of 8 headings with roof under it 6 m ahead
+	# (the spawn heading itself points off the edge, at the swing route).
+	var space := get_viewport().world_3d.direct_space_state
+	for k in 8:
+		var d := Vector3.FORWARD.rotated(Vector3.UP, float(spot.get("yaw", 0.0)) + PI + k * TAU / 8.0)
+		var q := PhysicsRayQueryParameters3D.create(start + d * 6.0 + Vector3.UP, start + d * 6.0 + Vector3.DOWN * 3.0)
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty() and absf((hit["position"] as Vector3).y - (start.y - 0.95)) < 0.5:
+			run.dir = d
+			break
+	p.bot = run
 	var jumped := false
 	for f in 60:
 		await get_tree().physics_frame
 		jumped = jumped or p.global_position.y > start.y + 0.8
+	t.note("spot %s; roof run from %s yaw %.0f° to %s (floor=%s)" % [(spot["position"] as Vector3).snapped(Vector3.ONE * 0.1), start.snapped(Vector3.ONE * 0.1), rad_to_deg(float(spot.get("yaw", 0.0))),
+		p.global_position.snapped(Vector3.ONE * 0.1), p.is_on_floor()])
 	t.check(Vector2(p.global_position.x - start.x, p.global_position.z - start.z).length() > 4.0, "can run on the roof")
 	t.check(jumped, "can jump on the roof")
 	p.queue_free()
@@ -277,14 +292,21 @@ func test_swing_launches_cleanly_from_the_street_and_rooftops(t) -> void:
 	add_child(p)
 	p.bot = _Idle.new()
 	var spots: Array = []  # [position, heading, on_street]
-	var avenues: Array = []
-	for st in world.layout.x_streets:
-		if st[1] > 20.0 and st[0] > 300.0 and st[0] < 1000.0:
-			avenues.append(st[0])
-	for k in 5:
-		var sx: float = avenues[k % avenues.size()]
-		var sz := -400.0 + k * 130.0
-		spots.append([Vector3(sx, world.layout.ground_y(sx, sz) + 1.2, sz), Vector3(0, 0, -1), true])
+	# On the Central Spine boulevard between its junctions (not out in a
+	# roundabout's open circle), facing along it (north), ~130 m apart.
+	var all: Array = world.layout.roads.along("spine", 10.0, 200.0)
+	var spine: Array = []
+	for i in all.size() - 1:
+		var q0: Vector2 = all[i]
+		var clear: bool = world.layout.roads.roundabouts.all(func(rb): return (rb["c"] as Vector2).distance_to(q0) > 70.0)
+		if clear and world.layout.roads.field_at(q0).w > 8.0 \
+				and (spine.is_empty() or (spine[-1][0] as Vector2).distance_to(q0) > 130.0):
+			spine.append([q0, all[i + 1]])
+	for k in mini(5, spine.size()):
+		var q: Vector2 = spine[k][0]
+		var nxt: Vector2 = spine[k][1]
+		var fwd := Vector3(q.x - nxt.x, 0.0, q.y - nxt.y).normalized()  # (the spine runs north → south)
+		spots.append([Vector3(q.x, world.layout.ground_y(q.x, q.y) + 1.2, q.y), fwd, true])
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 6
 	for k in 3:
@@ -337,9 +359,10 @@ class _Idle:
 class _Run:
 	extends RefCounted
 	var f := 0
+	var dir := Vector3.FORWARD
 	func drive(_p, _dt) -> Dictionary:
 		f += 1
-		return {"move": Vector3.FORWARD, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": f == 25}
+		return {"move": dir, "aim": dir, "grapple": false, "reel": 0.0, "jump": f == 25}
 
 
 class _Aim:

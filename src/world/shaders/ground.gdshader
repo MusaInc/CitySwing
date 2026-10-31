@@ -1,17 +1,18 @@
 // Streets, pavements, lawns. COLOR.rgb tint; UV = world XZ metres on the
 // flat surfaces (kerb faces keep their own UVs).
-// With the street maps (CityWorld._bake_street_maps) the asphalt gets its
-// lane paint, zebra crossings and stop lines, tyre wear, gutters, drains,
-// manholes and patch repairs; pavements get a kerb edge, flagstones by the
-// road and larger paving / brick in the courtyards behind; lawns get mowing
-// stripes and a gravel path round the edge. All of it is maths on two 1-D
-// lookups – no geometry, no image textures.
+// With the road field (CityRoads.bake_field: per texel the nearest road's
+// signed offset, half width (negative = boulevard), distance along it and the
+// distance to the nearest other road's kerb) the asphalt gets its lane paint
+// (following curves), zebra crossings and stop lines at every junction
+// mouth, tyre wear, gutters, drains, manholes and patch repairs; pavements
+// get a kerb edge, flagstones by the road and larger paving / brick in the
+// courtyards behind; lawns get mowing stripes and a gravel path round the
+// edge. All of it is maths on one 2-D lookup – no extra geometry.
 shader_type spatial;
 render_mode cull_back, diffuse_burley;
 
-uniform sampler2D street_x : filter_nearest, repeat_disable;
-uniform sampler2D street_z : filter_nearest, repeat_disable;
-uniform vec4 street_map = vec4(-640.0, 2600.0, -1500.0, 3000.0);  // x origin, x texels, z origin, z texels
+uniform sampler2D road_field : filter_linear, repeat_disable;
+uniform vec4 road_rect = vec4(0.0, 0.0, 1.0, 1.0);  // x, z origin, x, z size (m)
 uniform bool has_streets = false;
 
 varying float v_up;
@@ -29,14 +30,6 @@ float vnoise(vec2 p) {
 	vec2 f = fract(p);
 	f = f * f * (3.0 - 2.0 * f);
 	return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
-}
-
-// (signed offset from the nearest street's centre line, half width, avenue).
-vec3 street(sampler2D tex, float p, float origin, float n) {
-	float i = clamp(floor(p - origin), 0.0, n - 1.0);
-	vec3 s = texture(tex, vec2((i + 0.5) / n, 0.5)).rgb;
-	s.x += p - (origin + i + 0.5);
-	return s;
 }
 
 // 1 inside a band of half-width h around 0, antialiased by aa.
@@ -89,12 +82,13 @@ void fragment() {
 	} else if (c.r > 0.85) {
 		albedo = c * (0.9 + 0.1 * n);  // old painted geometry (prototype world)
 	} else if (has_streets && flat_top) {
-		vec3 sx = street(street_x, p.x, street_map.x, street_map.y);
-		vec3 sz = street(street_z, p.y, street_map.z, street_map.w);
-		bool on_x = abs(sx.x) < sx.y;
-		bool on_z = abs(sz.x) < sz.y;
+		vec4 rf = texture(road_field, (p - road_rect.xy) / road_rect.zw);
+		float hw = abs(rf.y);
+		float a = abs(rf.x);
+		bool on = a < hw;
+		float other = rf.w;                     // metres from the nearest other road's kerb (< 0: junction)
 		// Metres from the nearest kerb line (negative on the road).
-		float kerb = min(abs(sx.x) - sx.y, abs(sz.x) - sz.y);
+		float kerb = min(a - hw, other);
 		if (asphalt) {
 			// Darker, slightly cool tarmac so paint and kerbs read in full sun.
 			albedo = c * (0.95 + 0.08 * n) * vec3(0.54, 0.56, 0.6);  // flatter mottling: the cel pass bands noise into blotches
@@ -102,55 +96,55 @@ void fragment() {
 			vec2 pc = floor(p / vec2(5.0, 3.0));
 			float patch = step(0.86, hash12(pc + 17.0));
 			albedo *= 1.0 + (hash12(pc) - 0.5) * 0.12 * patch * near;
-			if (on_x != on_z) {
-				float across = on_x ? sx.x : sz.x;
-				float hw = on_x ? sx.y : sz.y;
-				float avenue = on_x ? sx.z : sz.z;
-				float along = on_x ? p.y : p.x;
-				float rel = on_x ? sz.x : sx.x;                // from the nearest cross street's centre
-				float from_j = abs(rel) - (on_x ? sz.y : sx.y);  // metres past the junction mouth
-				float a = abs(across);
+			if (on && other > 0.0) {
+				float across = rf.x;
+				float avenue = rf.y < 0.0 ? 1.0 : 0.0;
+				float along = rf.z;                 // metres along the road (mod 64)
+				float from_j = other;               // metres past the junction mouth
 				// Tyre tracks: two polished bands per 3.5 m lane.
 				float lane_d = abs(fract(a / 3.5) - 0.5) * 3.5;
 				float tracks = band(lane_d - 0.85, 0.28, 0.25) * step(0.9, hw - a) * near;
 				albedo *= 1.0 - 0.07 * tracks;
 				rough -= 0.12 * tracks;
-				// Gutter: grimy last 0.5 m along the kerb, drain grates every 22 m.
+				// Gutter: grimy last 0.5 m along the kerb, drain grates every 16 m.
 				float gutter = smoothstep(hw - 0.7, hw - 0.3, a);
 				albedo *= 1.0 - 0.22 * gutter;
-				float grate = band(fract(along / 22.0 + 0.5) * 22.0 - 11.0, 0.45, aa) * band(a - (hw - 0.45), 0.25, aa);
+				float grate = band(fract(along / 16.0 + 0.5) * 16.0 - 8.0, 0.45, aa) * band(a - (hw - 0.45), 0.25, aa);
 				albedo = mix(albedo, vec3(0.06), grate * near);
 				// Manholes in the lanes now and then.
-				float cell = floor(along / 26.0);
+				float cell = floor(along / 32.0);
 				float mh_on = step(0.55, hash12(vec2(cell, hw + sign(across))));
-				vec2 mh = vec2(fract(along / 26.0) * 26.0 - 13.0, a - min(1.9, hw * 0.5));
+				vec2 mh = vec2(fract(along / 32.0) * 32.0 - 16.0, a - min(1.9, hw * 0.5));
 				float ring = length(mh);
 				albedo *= 1.0 - 0.25 * band(ring, 0.38, aa) * mh_on * near;
 				albedo *= 1.0 - 0.35 * band(ring - 0.38, 0.04, aa) * mh_on * near;
-				// Paint: centre line (double yellow on avenues, dashed white on
-				// streets), zebra crossings and stop lines at every junction.
+				// Paint: centre line (double yellow on boulevards, dashed white on
+				// streets), zebra crossings and stop lines at every junction mouth.
 				vec3 white = vec3(0.9, 0.9, 0.86);
 				vec3 yellow = vec3(0.92, 0.76, 0.25);
 				float wear = 0.82 + 0.18 * vnoise(p * 1.7);
 				float centre = avenue > 0.5
 					? band(a - 0.22, 0.07, aa) * step(4.6, from_j)
-					: band(across, 0.07, aa) * step(5.0, from_j) * step(fract((from_j - 5.0) / 8.0), 0.375);
+					: band(across, 0.07, aa) * step(5.0, from_j) * step(fract(along / 8.0), 0.375);
 				albedo = mix(albedo, (avenue > 0.5 ? yellow : white) * wear, centre);
+				// Boulevards: dashed lane dividers between the two lanes each way.
+				float divider = avenue * step(10.0, hw) * band(a - 5.1, 0.07, aa) * step(5.0, from_j)
+					* step(fract(along / 9.0), 0.33);
+				albedo = mix(albedo, white * wear, divider);
 				float zebra_u = fract((across + hw - 1.5) / 1.2);
 				float zebra = band(zebra_u - 0.5, 0.25, aa / 1.2) * step(from_j, 4.0) * step(1.0, from_j)
 					* step(a, hw - 1.0);
-				float stop_side = on_x ? sign(across) * sign(rel) : -sign(across) * sign(rel);
-				float stop = band(from_j - 4.8, 0.22, aa) * step(0.0, stop_side) * step(0.3, a) * step(a, hw - 0.3);
+				float stop = band(from_j - 4.8, 0.22, aa) * step(0.3, a) * step(a, hw - 0.3);
 				albedo = mix(albedo, white * wear, max(zebra, stop));
 				rough = mix(rough, 0.7, max(centre, max(zebra, stop)));
-			} else if (on_x && on_z) {
+			} else if (on) {
 				albedo *= 1.03;  // junctions: a touch lighter, worn smooth
 			}
 		} else if (pave) {
 			c *= vec3(0.8, 0.83, 0.88);
 			if (kerb < 0.32) {
 				// Kerb stones: lighter granite with joints.
-				float j = step(0.94, fract((abs(sx.x) < abs(sz.x) + sx.y - sz.y ? p.y : p.x) / 0.9));
+				float j = step(0.94, fract((p.x + p.y) / 0.9));
 				albedo = c * 1.12 * (1.0 - 0.15 * j * near);
 			} else if (kerb < 3.3) {
 				// Pavement flagstones by the road, each a slightly different tone.

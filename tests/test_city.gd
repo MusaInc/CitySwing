@@ -18,8 +18,8 @@ func test_layout_has_districts_landmarks_and_swing_heights(t) -> void:
 	var tall := 0
 	var low := 0
 	for b in l.buildings:
-		var tt: Array = b["tiers"][0]
-		var d := l.district((tt[0] + tt[2]) * 0.5, (tt[1] + tt[3]) * 0.5)
+		var bc := CityLayout.base_center(b)
+		var d := l.district(bc.x, bc.y)
 		counts[d] = counts.get(d, 0) + 1
 		var h: float = b["tiers"][-1][5]
 		if h > 100.0:
@@ -36,31 +36,42 @@ func test_layout_has_districts_landmarks_and_swing_heights(t) -> void:
 		kinds[lm[0]] = true
 	for k in ["clock_crown", "harbour_dome", "beacon", "cathedral_top", "viaduct"]:
 		t.check(kinds.has(k), "landmark %s placed" % k)
-	t.check(l.parks.size() > 3, "parks / plazas give wide launch gaps")
+	t.check(l.blocks.filter(func(bk): return bk["kind"] in ["park", "plaza"]).size() > 3,
+		"parks / plazas give wide launch gaps")
 
 
 func test_buildings_do_not_overlap_streets_or_each_other(t) -> void:
+	# Footprints (world quads, turned lots included) never overlap each other
+	# and never stand on a carriageway.
 	var l := CityLayout.new().generate()
-	var rects: Array = []
+	var quads: Array = []
 	for b in l.buildings:
 		if b["kind"] != "normal":
 			continue
 		var tt: Array = b["tiers"][0]
 		if not BuildingMesher._on_ground(b, tt):
 			continue  # towers standing on a podium / bell towers on a roof
-		rects.append(Rect2(tt[0], tt[1], tt[2] - tt[0], tt[3] - tt[1]))
+		var X := CityLayout.bxf(b)
+		var q := PackedVector2Array()
+		for c in [Vector2(tt[0] + 0.5, tt[1] + 0.5), Vector2(tt[2] - 0.5, tt[1] + 0.5), Vector2(tt[2] - 0.5, tt[3] - 0.5),
+				Vector2(tt[0] + 0.5, tt[3] - 0.5)]:
+			var w := X * Vector3(c.x, 0.0, c.y)
+			q.append(Vector2(w.x, w.z))
+		quads.append(q)
 	var overlaps := 0
-	for i in rects.size():
-		for j in range(i + 1, rects.size()):
-			if (rects[i] as Rect2).grow(-0.5).intersects(rects[j].grow(-0.5)):
+	for i in quads.size():
+		var bi := CityLayout._bbox(quads[i])
+		for j in range(i + 1, quads.size()):
+			if bi.intersects(CityLayout._bbox(quads[j])) and not Geometry2D.intersect_polygons(quads[i], quads[j]).is_empty():
 				overlaps += 1
 	t.check(overlaps == 0, "%d overlapping building footprints" % overlaps)
-	var in_street := 0
-	for r in rects:
-		for s in l.x_streets:
-			if absf(r.get_center().x - s[0]) < s[1] * 0.5:
-				in_street += 1
-	t.check(in_street == 0, "%d buildings centred in a street" % in_street)
+	var on_road := 0
+	for q in quads:
+		for v in q:
+			if l.roads.on_road(v):
+				on_road += 1
+				break
+	t.check(on_road == 0, "%d buildings standing on a road" % on_road)
 
 
 func test_whole_layout_repeats_exactly(t) -> void:
@@ -79,10 +90,11 @@ func test_island_has_sea_round_it(t) -> void:
 	for p in [Vector2(I.end.x + 60.0, I.get_center().y), Vector2(I.get_center().x, I.position.y - 60.0),
 			Vector2(I.get_center().x, I.end.y + 60.0), Vector2(I.end.x + 900.0, I.end.y + 900.0)]:
 		t.check(l.is_water(Vector3(p.x, -2.0, p.y)), "sea at %s" % p)
+	t.check(not l.is_water(Vector3(560, 0, -170)), "dry land in the middle")
 	for b in l.buildings:
-		var tt: Array = b["tiers"][0]
-		if b["kind"] in ["normal", "landmark"] and not I.grow(0.5).encloses(Rect2(tt[0], tt[1], tt[2] - tt[0], tt[3] - tt[1])):
-			t.check(false, "building at (%.0f, %.0f) stands off the island" % [tt[0], tt[1]])
+		var c := CityLayout.base_center(b)
+		if b["kind"] in ["normal", "landmark"] and not Geometry2D.is_point_in_polygon(c, l.coast):
+			t.check(false, "building at (%.0f, %.0f) stands off the island" % [c.x, c.y])
 			return
 
 
@@ -99,12 +111,14 @@ func test_every_district_is_swingable(t) -> void:
 		if b["kind"] == "normal" and not BuildingMesher._on_ground(b, t0):
 			continue
 		var top := BuildingMesher.tiers_top(b)
+		var bc := CityLayout.base_center(b)
 		for e in l.buildings:  # a tower on it counts for its roof
 			var et: Array = e["tiers"][0]
-			if e != b and e["kind"] == "normal" and Rect2(t0[0], t0[1], t0[2] - t0[0], t0[3] - t0[1]).encloses(
-					Rect2(et[0], et[1], et[2] - et[0], et[3] - et[1])) and absf(float(et[4]) - float(b["tiers"][-1][5])) < 0.6:
+			if not is_same(e, b) and e["kind"] == "normal" and absf(float(e.get("rot", 0.0)) - float(b.get("rot", 0.0))) < 1e-6 \
+					and Rect2(t0[0], t0[1], t0[2] - t0[0], t0[3] - t0[1]).encloses(Rect2(et[0], et[1], et[2] - et[0], et[3] - et[1])) \
+					and absf(float(et[4]) - float(b["tiers"][-1][5])) < 0.6:
 				top = maxf(top, BuildingMesher.tiers_top(e))
-		var d := l.district((t0[0] + t0[2]) * 0.5, (t0[1] + t0[3]) * 0.5)
+		var d := l.district(bc.x, bc.y)
 		var a: float = (t0[2] - t0[0]) * (t0[3] - t0[1])
 		area[d] = area.get(d, 0.0) + a
 		if top - BuildingMesher.base_of(b) >= 45.0:
@@ -150,29 +164,34 @@ func test_world_builds_collision_and_streams(t) -> void:
 	await get_tree().process_frame
 
 
-func test_street_maps_match_the_street_plan(t) -> void:
-	# ground.gdshader draws lane paint, crossings and kerbs from these strips:
-	# decode them the way the shader does and compare with the plan.
+func test_road_field_matches_the_roads(t) -> void:
+	# ground.gdshader draws lane paint, crossings and kerbs from the road
+	# field: probe it across every road and check offset and width.
 	var w := CityWorld.new()
 	add_child(w)
 	await get_tree().process_frame
+	var R := w.layout.roads
+	t.check(w.ground_mat.get_shader_parameter("road_field") != null, "the ground material has the road field")
 	var bad := 0
 	var probes := 0
-	for axis in 2:
-		var tex: ImageTexture = w.ground_mat.get_shader_parameter("street_x" if axis == 0 else "street_z")
-		var img := tex.get_image()
-		var m: Vector2 = CityWorld.STREET_MAP_X if axis == 0 else CityWorld.STREET_MAP_Z
-		for st in (w.layout.x_streets if axis == 0 else w.layout.z_streets):
-			for off in [-0.4, 0.0, 0.37, float(st[1]) * 0.5 - 0.3]:
-				var p: float = st[0] + off
-				var i := int(floor(p - m.x))
-				var c := img.get_pixel(i, 0)
-				var dx := c.r + p - (m.x + i + 0.5)
-				probes += 1
-				if absf(dx - off) > 0.01 or absf(c.g - st[1] * 0.5) > 0.01 or (c.b > 0.5) != (st[1] > 20.0):
-					bad += 1
-	t.note("%d street-map probes" % probes)
-	t.check(bad == 0, "%d street-map texels disagree with the plan" % bad)
+	for r in R.roads:
+		var pts: PackedVector2Array = r["pts"]
+		if pts.size() < 3 or CityRoads.length_of(pts) < 80.0:
+			continue
+		var i := pts.size() / 2
+		var d := (pts[i + 1] - pts[i]).normalized()
+		var n := Vector2(-d.y, d.x)
+		for off: float in [0.0, float(r["w"]) * 0.25]:
+			var p := pts[i] + n * off
+			var f := R.field_at(p)
+			if f.w < 2.0:
+				continue  # (a junction: another road owns the texel)
+			probes += 1
+			if absf(absf(f.x) - off) > R.field_cell or absf(absf(f.y) - float(r["w"]) * 0.5) > 0.01:
+				bad += 1
+	t.note("%d road-field probes" % probes)
+	t.check(probes > 60, "probed most roads")
+	t.check(bad <= probes / 50, "%d road-field texels disagree with their road" % bad)
 	w.queue_free()
 	await get_tree().process_frame
 
@@ -182,11 +201,7 @@ func test_street_furniture_stays_on_the_pavement(t) -> void:
 	add_child(w)
 	await get_tree().process_frame
 	var l := w.layout
-	var foot: Array = []
-	for b in l.buildings:
-		if b["kind"] == "normal":
-			var tt: Array = b["tiers"][0]
-			foot.append(Rect2(tt[0], tt[1], tt[2] - tt[0], tt[3] - tt[1]).grow(-0.4))
+	var normal: Array = l.buildings.filter(func(b): return b["kind"] == "normal")
 	var n := 0
 	var in_building := 0
 	var off_block := 0
@@ -197,10 +212,12 @@ func test_street_furniture_stays_on_the_pavement(t) -> void:
 			kinds[it[0]] = kinds.get(it[0], 0) + 1
 			var o: Vector3 = (it[1] as Transform3D).origin
 			var p := Vector2(o.x, o.z)
-			if not l.blocks.any(func(r): return (r as Rect2).has_point(p)):
+			if l.block_at(p.x, p.y) < 0:
 				off_block += 1
-			if foot.any(func(r): return (r as Rect2).has_point(p)):
-				in_building += 1
+			for b in normal:
+				if CityLayout.base_center(b).distance_to(p) < 60.0 and CityLayout.inside(b, Vector3(o.x, o.y + 0.5, o.z), -0.4):
+					in_building += 1
+					break
 	t.note("%d furniture items %s" % [n, kinds])
 	t.check(n > 1000 and kinds.size() == CityWorld.FURNITURE.size(), "every kind of street furniture is placed")
 	t.check(off_block == 0, "%d items out on the road" % off_block)

@@ -14,9 +14,8 @@ func test_tokens_are_deterministic_and_clear_of_buildings(t) -> void:
 	var inside := 0
 	for p in a:
 		for bd in layout.buildings:
-			for tt in bd["tiers"]:
-				if p.x > tt[0] and p.x < tt[2] and p.z > tt[1] and p.z < tt[3] and p.y > tt[4] and p.y < tt[5]:
-					inside += 1
+			if CityLayout.inside(bd, p):
+				inside += 1
 	t.check(inside == 0, "no token inside a building")
 
 

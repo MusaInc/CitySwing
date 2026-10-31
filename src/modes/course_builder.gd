@@ -13,14 +13,14 @@ const PATH := "res://config/courses.json"
 const GATE_SPACING := 105.0
 
 const COURSES := {
-	"canyon": {"name": "Canyon Sprint", "desc": "Straight down the main avenue. Find your rhythm."},
-	"waterfront": {"name": "Three Graces", "desc": "Cut across midtown and down to the clock towers by the river."},
+	"canyon": {"name": "Canyon Sprint", "desc": "North up the Central Spine through the towers. Find your rhythm."},
+	"waterfront": {"name": "Three Graces", "desc": "Down the Grand Diagonal to the clock towers by the strait."},
 	"beacon": {"name": "Beacon Loop", "desc": "A lap of the plaza round the radio beacon. Tight corners."},
-	"uptown": {"name": "Uptown Express", "desc": "The long avenue north. Nothing but speed."},
-	"spires": {"name": "Spire Run", "desc": "Under the tallest towers in the city, then up through the district."},
-	"switchback": {"name": "Switchback", "desc": "Left, right, left. Tight midtown corners – steer hard."},
-	"riverside": {"name": "Riverside", "desc": "Down the river avenue, past the clock towers."},
-	"grand_tour": {"name": "Grand Tour", "desc": "A lap of the great avenues round the skyscraper district."},
+	"uptown": {"name": "Uptown Express", "desc": "The whole Central Spine, south coast to north. Nothing but speed."},
+	"spires": {"name": "Spire Run", "desc": "Up the Grand Diagonal under the tallest towers, out to the cathedral."},
+	"switchback": {"name": "Switchback", "desc": "Left, right, left. The spine's S-bends through midtown – steer hard."},
+	"riverside": {"name": "Riverside", "desc": "Along the strait road, past the clock towers."},
+	"grand_tour": {"name": "Grand Tour", "desc": "A lap of the Inner Ring round the skyscraper district."},
 }
 
 
@@ -56,103 +56,74 @@ static func _v(a: Array) -> Vector3:
 
 
 # --------------------------------------------------------------- routes
-## {start: Vector3, waypoints: Array[Vector3]} – waypoints on street centres.
+## {start: Vector3, waypoints: Array[Vector3]} – waypoints on road centre
+## lines (CityRoads' named roads), ~100 m apart.
 static func route(id: String, layout: CityLayout) -> Dictionary:
-	var wps: Array[Vector3] = []
+	var R := layout.roads
+	var pts: Array = []
 	match id:
 		"canyon":
-			var x := _avenue_x(layout, CityLayout.CBD_CENTER.x)
-			for i in 8:
-				wps.append(Vector3(x, 0, CityLayout.CBD_CENTER.y + 300.0 - i * 100.0))
+			# North up the Central Spine through the business district.
+			pts = _part(R.along("spine", 100.0), func(q: Vector2) -> bool: return q.y > -520.0 and q.y < 140.0)
+			pts.reverse()
 		"waterfront":
-			var x0 := _avenue_x(layout, 560.0)
-			var z0 := _avenue_z(layout, -150.0)
-			wps.append(Vector3(x0, 0, z0 + 260.0))
-			wps.append(Vector3(x0, 0, z0 + 120.0))
-			wps.append(Vector3(x0, 0, z0))
-			var x := x0 - 110.0
-			while x > 210.0:
-				wps.append(Vector3(x, 0, z0))
-				x -= 110.0
-			wps.append(Vector3(195.0, 0, z0 + 10.0))
-			wps.append(Vector3(195.0, 0, -76.0))  # in front of the clock towers
+			# West down the Grand Diagonal to the clock towers by the strait.
+			pts = _part(R.along("diagonal", 100.0), func(q: Vector2) -> bool: return q.x > 185.0 and q.x < 640.0)
+			pts.reverse()
+			pts.append(Vector2(190.0, -24.0))
 		"beacon":
-			# Streets bounding the beacon plaza, one lap.
-			var plaza := Rect2()
-			for p in layout.parks:
-				if (p as Rect2).grow(10).has_point(Vector2(CityLayout.CBD_CENTER.x - 40, CityLayout.CBD_CENTER.y + 60)):
-					plaza = p
-			var g := plaza.grow(9.0)
-			var corners := [Vector3(g.position.x, 0, g.end.y), Vector3(g.position.x, 0, g.position.y),
-				Vector3(g.end.x, 0, g.position.y), Vector3(g.end.x, 0, g.end.y)]
-			for c in corners:
-				wps.append(c)
-			wps.append(corners[0])
+			pts = _beacon_lap(layout)
 		"uptown":
-			var x := _avenue_x(layout, 715.0)
-			for z in [520.0, 400.0, 280.0, 160.0, 40.0, -80.0, -200.0, -320.0, -440.0, -540.0]:
-				wps.append(Vector3(x, 0, z))
+			pts = _part(R.along("spine", 110.0), func(q: Vector2) -> bool: return q.y > -560.0 and q.y < 540.0)
+			pts.reverse()
 		"spires":
-			var z := _avenue_z(layout, -226.0)
-			for x in [300.0, 400.0, 500.0, 600.0, 700.0, 812.0]:
-				wps.append(Vector3(x, 0, z))
-			var x1 := _street_x(layout, 812.0)
-			wps.append(Vector3(x1, 0, -130.0))
-			wps.append(Vector3(x1, 0, _avenue_z(layout, -51.0)))
-			wps.append(Vector3(_street_x(layout, 620.0), 0, _avenue_z(layout, -51.0)))
+			pts = _part(R.along("diagonal", 100.0), func(q: Vector2) -> bool: return q.x > 290.0 and q.x < 860.0)
 		"switchback":
-			var a := _street_x(layout, 504.0)
-			var b := _street_x(layout, 620.0)
-			var zs := [369.0, 171.0, -51.0, -226.0, -424.0]
-			for i in zs.size():
-				var z := _avenue_z(layout, zs[i])
-				var xs := [a, b] if i % 2 == 0 else [b, a]
-				wps.append(Vector3(xs[0], 0, z))
-				wps.append(Vector3(xs[1], 0, z))
+			# South down the spine's S-bends through midtown.
+			pts = _part(R.along("spine", 70.0), func(q: Vector2) -> bool: return q.y > -40.0 and q.y < 545.0)
 		"riverside":
-			var x := _avenue_x(layout, 83.0)
-			for z in [-520.0, -400.0, -280.0, -160.0, -40.0, 80.0, 200.0, 300.0]:
-				wps.append(Vector3(x, 0, z))
+			pts = _part(R.along("ring", 110.0), func(q: Vector2) -> bool:
+				return q.x < 110.0 and q.y > -540.0 and q.y < 330.0)
+			if pts.size() > 1 and (pts[0] as Vector2).y > (pts[-1] as Vector2).y:
+				pts.reverse()
 		"grand_tour":
-			var xe := _avenue_x(layout, 715.0)
-			var xw := _avenue_x(layout, 386.0)
-			var zs := _avenue_z(layout, 58.0)
-			var zn := _avenue_z(layout, -520.0)
-			for c in [Vector3(xe, 0, zs), Vector3(xe, 0, 0.5 * (zs + zn)), Vector3(xe, 0, zn), Vector3(xw, 0, zn),
-					Vector3(xw, 0, 0.5 * (zs + zn)), Vector3(xw, 0, zs), Vector3(xe, 0, zs)]:
-				wps.append(c)
+			pts = R.along("inner", 100.0)
+			if not pts.is_empty():
+				pts.append(pts[0])
+	var wps: Array[Vector3] = []
+	for q in pts:
+		wps.append(Vector3(q.x, 0, q.y))
+	if wps.size() < 2:
+		wps = [Vector3(500, 0, -100), Vector3(500, 0, -300)]
 	var start := start_roof(layout, wps[0], wps[1])
 	return {"start": start, "waypoints": wps}
 
 
-static func _avenue_x(layout: CityLayout, near: float) -> float:
-	var best := near
-	var bd := INF
-	for s in layout.x_streets:
-		if s[1] > 20.0 and absf(s[0] - near) < bd:
-			bd = absf(s[0] - near)
-			best = s[0]
-	return best
+static func _part(pts: Array, keep: Callable) -> Array:
+	var out: Array = []
+	for q in pts:
+		if keep.call(q):
+			out.append(q)
+	return out
 
 
-static func _street_x(layout: CityLayout, near: float) -> float:
-	var best := near
-	var bd := INF
-	for s in layout.x_streets:
-		if absf(s[0] - near) < bd:
-			bd = absf(s[0] - near)
-			best = s[0]
-	return best
-
-
-static func _avenue_z(layout: CityLayout, near: float) -> float:
-	var best := near
-	var bd := INF
-	for s in layout.z_streets:
-		if absf(s[0] - near) < bd:
-			bd = absf(s[0] - near)
-			best = s[0]
-	return best
+## A lap of the roads round the beacon plaza: its block outline pushed out
+## to the middle of the surrounding streets, a corner every ~60 m.
+static func _beacon_lap(layout: CityLayout) -> Array:
+	var beacon := Vector2(CityLayout.CBD_CENTER.x - 40, CityLayout.CBD_CENTER.y + 60)
+	var i := layout.block_at(beacon.x, beacon.y)
+	if i < 0:
+		return []
+	var ring: Array = Geometry2D.offset_polygon(layout.blocks[i]["poly"], 9.0)
+	if ring.is_empty():
+		return []
+	var poly: PackedVector2Array = CityRoads._simplify(ring[0], 3.0)
+	var out: Array = []
+	for q in poly:
+		if out.is_empty() or (out[-1] as Vector2).distance_to(q) > 25.0:
+			out.append(q)
+	out.append(out[0])
+	return out
 
 
 ## A rooftop ~70 m up, behind the first waypoint (away from the second).
@@ -162,19 +133,20 @@ static func start_roof(layout: CityLayout, first: Vector3, second: Vector3) -> V
 	var best := Vector3(want.x, 60.0, want.y)
 	var best_s := -INF
 	for b in layout.buildings:
-		if b["kind"] != "normal":
+		if b["kind"] != "normal" or b.get("roof_blocked", false):
 			continue
 		var t: Array = b["tiers"][-1]
 		if t[2] - t[0] < 10.0 or t[3] - t[1] < 10.0:
 			continue
-		var c := Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5)
+		var tc := CityLayout.top_center(b)
+		var c := Vector2(tc.x, tc.z)
 		var d := c.distance_to(want)
 		if d > 90.0:
 			continue
 		var s: float = -absf(t[5] - BuildingMesher.base_of(b) - 70.0) * 0.7 - d
 		if s > best_s:
 			best_s = s
-			best = Vector3(c.x, t[5] + 2.0, c.y)
+			best = tc + Vector3.UP * 2.0
 	return best
 
 
@@ -207,11 +179,14 @@ static func gates_from_path(layout: CityLayout, path: Array) -> Array:
 ## +0.5 m so hugging a facade still counts; 14 m in the open.
 static func street_half_width(layout: CityLayout, p: Vector3, dir: Vector3) -> float:
 	var side := Vector3(-dir.z, 0.0, dir.x)
+	var near: Array = []
+	for b in layout.buildings:
+		if b["kind"] in ["normal", "landmark", "plain", "frame"] and CityLayout.base_center(b).distance_to(Vector2(p.x, p.z)) < 120.0:
+			near.append(b)
 	for d in [4.0, 7.0, 10.0, 13.0, 16.0, 19.0, 22.0]:
 		for sgn in [-1.0, 1.0]:
 			var q: Vector3 = p + side * d * sgn
-			for b in layout.buildings:
-				var t: Array = b["tiers"][0]
-				if q.x > t[0] and q.x < t[2] and q.z > t[1] and q.z < t[3] and b["tiers"][-1][5] > p.y:
+			for b in near:
+				if CityLayout.inside(b, Vector3(q.x, p.y - 1.0, q.z)):
 					return maxf(d + 0.5, 9.0)
 	return 14.0

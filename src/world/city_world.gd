@@ -88,8 +88,9 @@ func _ready() -> void:
 		detail_range = minf(380.0, view_distance * 0.45)
 	_materials()
 	_load_props()
-	var kx := Vector2i(floori(CityLayout.RIVER_EDGE / CHUNK) - 1, ceili((CityLayout.MAX_X + 200.0) / CHUNK))
-	var kz := Vector2i(floori((CityLayout.MIN_Z - 100.0) / CHUNK), ceili((CityLayout.MAX_Z + 100.0) / CHUNK))
+	var land := layout.island.grow(130.0)  # (the shore apron reaches past the coast)
+	var kx := Vector2i(floori(land.position.x / CHUNK) - 1, ceili(land.end.x / CHUNK))
+	var kz := Vector2i(floori(land.position.y / CHUNK), ceili(land.end.y / CHUNK))
 	grid_rect = Rect2(kx.x * CHUNK, kz.x * CHUNK, (kx.y - kx.x) * CHUNK, (kz.y - kz.x) * CHUNK)
 	for cx in range(kx.x, kx.y):
 		for cz in range(kz.x, kz.y):
@@ -128,9 +129,10 @@ func spawn_point() -> Vector3:
 		if b["kind"] != "normal":
 			continue
 		var t: Array = b["tiers"][-1]
-		var c := Vector2((t[0] + t[2]) * 0.5, (t[1] + t[3]) * 0.5)
+		var tc := CityLayout.top_center(b)
+		var c := Vector2(tc.x, tc.z)
 		var h: float = t[5] - BuildingMesher.base_of(b)  # above its street
-		if h < 55.0 or h > 95.0 or t[2] - t[0] < 14.0 or t[3] - t[1] < 14.0:
+		if h < 55.0 or h > 95.0 or t[2] - t[0] < 14.0 or t[3] - t[1] < 14.0 or b.get("roof_blocked", false):
 			continue
 		var s := -c.distance_to(CityLayout.CBD_CENTER + Vector2(-60, 260)) - absf(h - 75.0) * 2.0
 		if s > best_score:
@@ -138,8 +140,7 @@ func spawn_point() -> Vector3:
 			best = b
 	if best.is_empty():
 		return Vector3(300, 120, 0)
-	var t2: Array = best["tiers"][-1]
-	return Vector3((t2[0] + t2[2]) * 0.5, t2[5] + 2.0, (t2[1] + t2[3]) * 0.5)
+	return CityLayout.top_center(best) + Vector3.UP * 2.0
 
 
 ## Clearance (m) to keep from each kind of rooftop prop when standing.
@@ -147,6 +148,18 @@ const PROP_CLEARANCE := {"water_tower": 6.0, "ac_unit": 4.0, "antenna": 3.0, "ro
 const ROOF_EDGE_CLEARANCE := 4.5
 
 var _roof_spawns: Array = []
+var _ground_cache := {}  # chunk key -> ground mesh arrays (built with the collision, at startup)
+var _ground_meshers: Array = []
+var _ground_lock := Mutex.new()
+
+
+func _ground_task(i: int) -> void:
+	var gm := BuildingMesher.new()
+	var key: Vector2i = _all_keys[i]
+	gm.add_ground(layout, Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK)))
+	_ground_lock.lock()
+	_ground_meshers[i] = gm
+	_ground_lock.unlock()
 
 
 ## Every rooftop that makes a good start: high enough for an exciting first
@@ -170,10 +183,10 @@ func rooftop_spawns() -> Array:
 		var h: float = t[5] - BuildingMesher.base_of(b)  # above its street
 		if h < 50.0 or h > 150.0 or t[2] - t[0] < 18.0 or t[3] - t[1] < 18.0:
 			continue
-		var spot := _clear_spot(t, roof_props)
+		var spot := _clear_spot(t, roof_props, b)
 		if spot.is_empty():
 			continue
-		var p := Vector3(spot["x"], BuildingMesher.roof_y(b) + 0.95, spot["z"])
+		var p := CityLayout.bxf(b) * Vector3(spot["x"], BuildingMesher.roof_y(b) + 0.95, spot["z"])
 		_roof_spawns.append({"position": p, "height": h})  # yaw is computed when picked
 	return _roof_spawns
 
@@ -333,13 +346,16 @@ func _held_swing_safe(space: PhysicsDirectSpaceState3D, from: SwingPhysics.State
 	return true
 
 
-func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
+func _clear_spot(t: Array, roof_props: Dictionary, b: Dictionary = {}) -> Dictionary:
+	# Props are in the world; the roof is in the building's frame.
+	var to_local := CityLayout.bxf(b).affine_inverse() if not b.is_empty() else Transform3D.IDENTITY
 	var x0: float = t[0] + ROOF_EDGE_CLEARANCE
 	var z0: float = t[1] + ROOF_EDGE_CLEARANCE
 	var x1: float = t[2] - ROOF_EDGE_CLEARANCE
 	var z1: float = t[3] - ROOF_EDGE_CLEARANCE
 	var nearby: Array = []
-	var c := Vector2i(roundi((t[0] + t[2]) * 0.25 / 25.0), roundi((t[1] + t[3]) * 0.25 / 25.0))
+	var wc := to_local.affine_inverse() * Vector3((t[0] + t[2]) * 0.5, 0.0, (t[1] + t[3]) * 0.5)
+	var c := Vector2i(roundi(wc.x / 50.0), roundi(wc.z / 50.0))
 	for dx in [-1, 0, 1]:
 		for dz in [-1, 0, 1]:
 			nearby.append_array(roof_props.get(c + Vector2i(dx, dz), []))
@@ -351,7 +367,7 @@ func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
 			var z := lerpf(z0, z1, j / 4.0)
 			var margin := 30.0
 			for pr in nearby:
-				var o: Vector3 = pr[1].origin
+				var o: Vector3 = to_local * (pr[1].origin as Vector3)
 				if absf(o.y - t[5]) > 1.0:
 					continue
 				margin = minf(margin, Vector2(o.x - x, o.z - z).length() - PROP_CLEARANCE[pr[0]])
@@ -365,24 +381,42 @@ func _clear_spot(t: Array, roof_props: Dictionary) -> Dictionary:
 ## anchors ahead and nothing blocking the run-up, best first.
 func _headings(p: Vector3, roof_h: float) -> Array:
 	var ranked: Array = []
+	# Roof props right by the spawn (huts, tanks, units, masts): don't face one.
+	var near_props: Array = []
+	for pr in _props_by_chunk.get(CityLayout.chunk_of(Vector2(p.x, p.z)), []):
+		if pr[0] in PROP_CLEARANCE:
+			var o: Vector3 = (pr[1] as Transform3D).origin
+			if absf(o.y - (p.y - 0.95)) < 2.0 and Vector2(o.x - p.x, o.z - p.z).length() < 12.0:
+				near_props.append(o)
 	for k in 16:
 		var dir := Vector3.FORWARD.rotated(Vector3.UP, k * TAU / 16.0)
 		var score := 0.0
 		var blocked := false
+		for o in near_props:
+			var off := Vector3(o.x - p.x, 0.0, o.z - p.z)
+			if off.length() < 11.0 and off.normalized().dot(dir) > 0.8:
+				blocked = true
 		for b in layout.buildings:
 			if b["kind"] == "invisible":
 				continue
 			var t: Array = b["tiers"][0]
 			var top: float = b["tiers"][-1][5]
-			var near := Vector3(clampf(p.x, t[0], t[2]), 0.0, clampf(p.z, t[1], t[3]))
-			var off := Vector3(near.x - p.x, 0.0, near.z - p.z)
+			# In the building's frame (lots are turned to their street).
+			var pl := p
+			var dl := dir
+			if float(b.get("rot", 0.0)) != 0.0:
+				var inv := CityLayout.bxf(b).affine_inverse()
+				pl = inv * p
+				dl = inv.basis * dir
+			var near := Vector3(clampf(pl.x, t[0], t[2]), 0.0, clampf(pl.z, t[1], t[3]))
+			var off := Vector3(near.x - pl.x, 0.0, near.z - pl.z)
 			var d := off.length()
 			if d < 0.5:
 				continue  # the building we're standing on
-			var along := off.dot(dir)
-			if along > 0.0 and d < 9.0 and top > roof_h + 2.0 and off.normalized().dot(dir) > 0.7:
+			var along := off.dot(dl)
+			if along > 0.0 and d < 9.0 and top > roof_h + 2.0 and off.normalized().dot(dl) > 0.7:
 				blocked = true
-			if d < 25.0 or d > 110.0 or off.normalized().dot(dir) < 0.8 or top < roof_h + 5.0:
+			if d < 25.0 or d > 110.0 or off.normalized().dot(dl) < 0.8 or top < roof_h + 5.0:
 				continue
 			score += minf(top - roof_h, 60.0) / d
 		if not blocked:  # weak headings rank last, but a safe one beats none
@@ -395,19 +429,59 @@ func bot_heading() -> Vector3:
 	return Vector3.FORWARD
 
 
-## Autopilot goal: down the nearest north–south avenue, ahead of the player.
+## Autopilot goal: 90 m on along a boulevard. The bot keeps to its road and
+## direction (picked from the nearest boulevard and the way it was moving)
+## until it strays from it; at the coast it turns back.
 func bot_goal(p: Node3D) -> Vector3:
-	var x := p.global_position.x
-	var best := x
-	var bd := INF
-	for s in layout.x_streets:
-		if absf(s[0] - x) < bd and s[1] > 20.0:
-			bd = absf(s[0] - x)
-			best = s[0]
-	var z := p.global_position.z - 90.0
-	if z < CityLayout.MIN_Z + 60.0:
-		z = CityLayout.MAX_Z  # turn round at the edge of the map
-	return Vector3(best, 0.0, z)
+	if _boulevards.is_empty():
+		for name in ["diagonal", "spine", "valley", "heights", "crescent", "inner"]:
+			var r: Dictionary = layout.roads.by_name.get(name, {})
+			if not r.is_empty():
+				_boulevards.append(r["pts"])
+	var q := Vector2(p.global_position.x, p.global_position.z)
+	var id := p.get_instance_id()
+	var st: Dictionary = _goal_state.get(id, {})
+	var bi := -1
+	if not st.is_empty():
+		var pts0: PackedVector2Array = _boulevards[st["road"]]
+		var bd := INF
+		for i in pts0.size():
+			var d := pts0[i].distance_squared_to(q)
+			if d < bd:
+				bd = d
+				bi = i
+		if bd > 80.0 * 80.0:
+			st = {}
+	if st.is_empty():
+		var best_d := INF
+		for ri in _boulevards.size():
+			var pts1: PackedVector2Array = _boulevards[ri]
+			for i in range(0, pts1.size(), 2):
+				var d := pts1[i].distance_squared_to(q)
+				if d < best_d:
+					best_d = d
+					st = {"road": ri}
+					bi = i
+		if st.is_empty():
+			return p.global_position + Vector3.FORWARD * 90.0
+		var pts2: PackedVector2Array = _boulevards[st["road"]]
+		var v := Vector3.FORWARD
+		if "velocity" in p and (p.velocity as Vector3).length() > 3.0:
+			v = p.velocity
+		var fwd := pts2[mini(bi + 1, pts2.size() - 1)] - pts2[maxi(bi - 1, 0)]
+		st["dir"] = 1 if fwd.dot(Vector2(v.x, v.z)) >= 0.0 else -1
+		_goal_state[id] = st
+	var bp: PackedVector2Array = _boulevards[st["road"]]
+	var j: int = bi + 15 * int(st["dir"])
+	if j < 0 or j >= bp.size():
+		st["dir"] = -int(st["dir"])  # the coast: turn back
+		j = bi + 15 * int(st["dir"])
+	j = clampi(j, 0, bp.size() - 1)
+	return Vector3(bp[j].x, 0.0, bp[j].y)
+
+
+var _goal_state := {}  # player instance id -> {road, dir}
+var _boulevards: Array = []
 
 
 func is_water(p: Vector3) -> bool:
@@ -554,35 +628,35 @@ static func _flatten_colors(m: Mesh) -> Array:
 func _place_furniture() -> Dictionary:
 	var out := {}
 	for blk in layout.blocks:
-		var r: Rect2 = blk
-		if r in layout.parks:
+		if blk["kind"] not in ["block", "plaza"]:
 			continue
-		var basin := false
-		for w in layout.water:
-			if (w as Rect2).position.x > 0.0 and (w as Rect2).encloses(r.grow(-7.0)):
-				basin = true
-		if basin or layout.terraces.has(r):
-			continue
+		var poly: PackedVector2Array = blk["poly"]
+		var c := CityRoads._centroid(poly)
 		var rng := RandomNumberGenerator.new()
-		rng.seed = hash(Vector2i(int(r.position.x), int(r.position.y))) ^ 0xf00d
-		# Edges: start corner, direction along, outward normal (towards the road), length.
-		var edges := [
-			[Vector2(r.position.x, r.position.y), Vector2.RIGHT, Vector2.UP, r.size.x],
-			[Vector2(r.end.x, r.position.y), Vector2.DOWN, Vector2.RIGHT, r.size.y],
-			[Vector2(r.end.x, r.end.y), Vector2.LEFT, Vector2.DOWN, r.size.x],
-			[Vector2(r.position.x, r.end.y), Vector2.UP, Vector2.LEFT, r.size.y],
-		]
-		for ei in edges.size():
-			var e: Array = edges[ei]
-			var o: Vector2 = e[0]
-			var along: Vector2 = e[1]
-			var nrm: Vector2 = e[2]
-			var length: float = e[3]
+		rng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ 0xf00d
+		# Curved kerbs are sampled every few metres: merge them into runs.
+		var simple := CityRoads._simplify(CityLayout._closed(poly), 1.5)
+		simple.remove_at(simple.size() - 1)
+		var full := poly
+		poly = simple
+		for ei in poly.size():
+			var o: Vector2 = poly[ei]
+			var e: Vector2 = poly[(ei + 1) % poly.size()] - o
+			var length := e.length()
+			if length < 16.0:
+				continue
+			var along := e / length
+			var nrm := Vector2(along.y, -along.x)  # towards the road
+			if Geometry2D.is_point_in_polygon(o + along * length * 0.5 + nrm * 0.5, poly):
+				nrm = -nrm
 			var inward := -nrm
 			var basis := Basis.looking_at(Vector3(nrm.x, 0, nrm.y), Vector3.UP)  # front faces the road
-			var avenue := _street_width_beside(r, nrm) > 20.0
+			var fw: Vector4 = layout.roads.field_at(o + along * length * 0.5 + nrm * 3.0)
+			var avenue := absf(fw.y) * 2.0 > 20.0
 			var put := func(kind: String, d: float, inset: float, yaw := 0.0):
 				var p2 := o + along * d + inward * inset
+				if not Geometry2D.is_point_in_polygon(p2, full):
+					return
 				var key := Vector2i(floori(p2.x / CHUNK), floori(p2.y / CHUNK))
 				if not out.has(key):
 					out[key] = []
@@ -590,11 +664,11 @@ func _place_furniture() -> Dictionary:
 			# Corner street sign at the start of every other edge.
 			if ei % 2 == 0:
 				put.call("sign_post", 2.2, 0.5, PI * 0.25)
-			# Kerbside line.
+			# Kerbside line, clear of the street lights (every 32 m from 8 m).
 			var d := 7.0 + rng.randf_range(0.0, 6.0)
 			while d < length - 7.0:
-				var lamp_d := fmod(absf((o + along * d).x - r.position.x) - 8.0 + 320.0, 32.0)
-				if ei % 2 == 1 or (lamp_d > 1.5 and lamp_d < 30.5):
+				var lamp_d := fposmod(d - 8.0, 32.0)
+				if lamp_d > 1.5 and lamp_d < 30.5:
 					var roll := rng.randf()
 					if roll < 0.32:
 						put.call("bin", d, 0.55)
@@ -604,7 +678,7 @@ func _place_furniture() -> Dictionary:
 						put.call("bollard", d, 0.45)
 						put.call("bollard", d + 1.4, 0.45)
 				d += rng.randf_range(11.0, 22.0)
-			# Building line: one bus shelter per avenue edge, benches/planters.
+			# Building line: one bus shelter per boulevard edge, benches/planters.
 			var shelter_at := length * rng.randf_range(0.35, 0.65) if avenue and length > 40.0 and rng.randf() < 0.7 else -100.0
 			if shelter_at > 0.0:
 				put.call("bus_shelter", shelter_at, 3.95)
@@ -618,16 +692,6 @@ func _place_furniture() -> Dictionary:
 						put.call("planter", d, 4.0)
 				d += rng.randf_range(16.0, 34.0)
 	return out
-
-
-## Width of the street on the `nrm` side of block `r` (0 if none found).
-func _street_width_beside(r: Rect2, nrm: Vector2) -> float:
-	var list: Array = layout.x_streets if nrm.x != 0.0 else layout.z_streets
-	var edge := (r.end.x if nrm.x > 0.0 else r.position.x) if nrm.x != 0.0 else (r.end.y if nrm.y > 0.0 else r.position.y)
-	for st in list:
-		if absf(st[0] - (edge + (nrm.x + nrm.y) * st[1] * 0.5)) < 1.0:
-			return st[1]
-	return 0.0
 
 
 ## Merged furniture arrays for one chunk (worker-thread safe: reads only).
@@ -679,8 +743,13 @@ func _build_collision() -> void:
 		body.collision_layer = 1 | (1 << 1)
 		body.collision_mask = 0
 		for b in by_chunk[key]:
+			var X := CityLayout.bxf(b)
+			var turned := float(b.get("rot", 0.0)) != 0.0
 			for box in BuildingMesher.collision_boxes(b):
-				_add_box(body, box)
+				if turned:
+					_add_box_xf(body, box, X)
+				else:
+					_add_box(body, box)
 		add_child(body)
 	var street := StaticBody3D.new()
 	street.name = "Street"
@@ -689,10 +758,17 @@ func _build_collision() -> void:
 	street.add_to_group("street")
 	# The ground follows the terrain: collide with exactly the triangles drawn
 	# (streets, sloping pavements and kerbs, terraces and retaining walls).
-	for key in _all_keys:
-		var gm := BuildingMesher.new()
-		gm.add_ground(layout, Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK)))
+	# Every chunk's ground on the worker pool (pure data), then collision on
+	# the main thread from exactly those triangles.
+	_ground_meshers.clear()
+	_ground_meshers.resize(_all_keys.size())
+	var task := WorkerThreadPool.add_group_task(_ground_task, _all_keys.size(), -1, true)
+	WorkerThreadPool.wait_for_group_task_completion(task)
+	for i in _all_keys.size():
+		var gm: BuildingMesher = _ground_meshers[i]
 		_add_faces(street, gm)
+		_ground_cache[_all_keys[i]] = null if gm.is_empty() else gm.arrays()  # drawn later from the same triangles
+	_ground_meshers.clear()
 	var og := BuildingMesher.new()
 	for r in outer_ground_rects():
 		og.terrain_patch(layout.terrain, r, 0.0, Color.WHITE, OUTER_STEP)
@@ -820,6 +896,18 @@ static func _add_faces(body: StaticBody3D, m: BuildingMesher) -> void:
 	body.add_child(cs)
 
 
+## A box in a building's frame (turned lots).
+static func _add_box_xf(body: StaticBody3D, box: AABB, xf: Transform3D) -> void:
+	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
+		return
+	var shape := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = box.size
+	shape.shape = bs
+	shape.transform = xf * Transform3D(Basis(), box.get_center())
+	body.add_child(shape)
+
+
 static func _add_box(body: StaticBody3D, box: AABB) -> void:
 	if box.size.x <= 0.0 or box.size.y <= 0.0 or box.size.z <= 0.0:
 		return
@@ -831,25 +919,14 @@ static func _add_box(body: StaticBody3D, box: AABB) -> void:
 	body.add_child(shape)
 
 
-## Every piece of street-level ground that is drawn (the playable city, the
-## outskirts round it and the far shore), minus the dock basins.
+## Ground outside the streamed chunks: the mainland across the strait.
 func ground_rects() -> Array:
-	var rects: Array = [layout.island]
-	for w in layout.water:
-		if (w as Rect2).position.x < 0.0 or w in layout.sea:
-			continue
-		var next: Array = []
-		for r in rects:
-			next.append_array(CityLayout._subtract(r, w))
-		rects = next
-	rects.append(Rect2(-2600.0, -2600.0, CityLayout.FAR_SHORE + 2600.0, 5200.0))
-	return rects
+	return [Rect2(-2600.0, -2600.0, CityLayout.FAR_SHORE + 2600.0, 5200.0)]
 
 
-const OUTER_STEP := 400.0  # m: beyond the grid the surface is linear between junction lines: exact
+const OUTER_STEP := 400.0  # m: the mainland is level (the landform is clamped past its grid)
 
 
-## Ground beyond the streamed chunk grid (outskirts, far shore), minus basins.
 func outer_ground_rects() -> Array:
 	var out: Array = []
 	for r in ground_rects():
@@ -857,25 +934,11 @@ func outer_ground_rects() -> Array:
 	return out
 
 
-## Raised pavement blocks (kerb height) as drawn by BuildingMesher.add_ground:
-## whole blocks, or just the quay ring round a dock basin.
-func pavement_rects() -> Array:
-	var out: Array = []
-	for blk in layout.blocks:
-		var basin := false
-		for w in layout.water:
-			if (w as Rect2).encloses((blk as Rect2).grow(-7.0)) and (w as Rect2).position.x > 0.0:
-				basin = true
-		if basin:
-			out.append_array(CityLayout._subtract(blk, (blk as Rect2).grow(-6.0)))
-		else:
-			out.append(blk)
-	return out
-
-
 func _build_water() -> void:
 	var m := BuildingMesher.new()
 	for w in layout.water:
+		if w in layout.basins:
+			continue  # (the sea surface runs under the whole island and shows through the basins)
 		var r: Rect2 = w
 		m.top(r.position.x, r.position.y, r.end.x, r.end.y, -1.6, Color.WHITE, 0, 0, 0)
 	var mesh := ArrayMesh.new()
@@ -970,13 +1033,14 @@ func _build_birds() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = layout.seed * 7
 	var homes: Array = []
-	for p in layout.parks:
-		homes.append(Vector3((p as Rect2).get_center().x, rng.randf_range(18.0, 34.0), (p as Rect2).get_center().y))
+	for blk in layout.blocks:
+		if blk["kind"] == "park":
+			var pc := CityRoads._centroid(blk["poly"])
+			homes.append(Vector3(pc.x, layout.ground_y(pc.x, pc.y) + rng.randf_range(18.0, 34.0), pc.y))
 	for i in 10:
 		var b: Dictionary = layout.buildings[rng.randi() % layout.buildings.size()]
 		if b["kind"] == "normal":
-			var t: Array = b["tiers"][-1]
-			homes.append(Vector3((t[0] + t[2]) * 0.5, t[5] + rng.randf_range(10.0, 22.0), (t[1] + t[3]) * 0.5))
+			homes.append(CityLayout.top_center(b) + Vector3.UP * rng.randf_range(10.0, 22.0))
 	for h in homes:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1016,77 +1080,8 @@ func _build_outskirts() -> void:
 	pave_body.collision_layer = 1 << 3
 	pave_body.collision_mask = 0
 	pave_body.add_to_group("street")
-	var styles := [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE,
-		CityLayout.Style.BRICK]
-	var near_m := BuildingMesher.new()  # detailed, close to the playable grid
-	var blocks_m := BuildingMesher.new()  # pavements, kerbs and lawns of the outer blocks
-	# The street grid carries on past the playable area: blocks with kerbs and
-	# pavements, filled with lower, older buildings that thin out with
-	# distance – so every edge reads as more city, not an empty apron.
-	var xr_in := _block_ranges(layout.x_streets)
-	var zr_in := _block_ranges(layout.z_streets)
-	# The city is an island now: nothing past the sea walls (see CityLayout._sea).
-	var xr_out: Array = []
-	var zr_out: Array = []
-	_outer_ranges = [xr_in + xr_out, zr_in + zr_out]
-	var grid := Rect2(CityLayout.MIN_X, CityLayout.MIN_Z, CityLayout.MAX_X - CityLayout.MIN_X, CityLayout.MAX_Z - CityLayout.MIN_Z)
-	for xr in xr_in + xr_out:
-		for zr in zr_in + zr_out:
-			if xr in xr_in and zr in zr_in:
-				continue  # the playable city
-			var blk := Rect2(xr[0], zr[0], xr[1] - xr[0], zr[1] - zr[0])
-			var c := blk.get_center()
-			var far := maxf(maxf(c.x - grid.end.x, grid.position.y - c.y), c.y - grid.end.y)
-			var near := far < 230.0
-			var brng := RandomNumberGenerator.new()
-			brng.seed = hash(Vector2i(int(c.x), int(c.y))) ^ layout.seed
-			var park := brng.randf() < 0.1
-			# Pavements follow the terrain like the city's (collision: the same
-			# triangles, added to pave_body below).
-			blocks_m.terrain_patch(layout.terrain, blk, CityTerrain.KERB,
-				Color(0.32, 0.45, 0.24) if park else Color(0.58, 0.57, 0.55), OUTER_STEP)
-			blocks_m.terrain_skirt(layout.terrain, blk, blk.grow(1.0), NAN, Color(0.7, 0.69, 0.66), OUTER_STEP)
-			if park:
-				continue
-			var lots: Array = []
-			var inner := blk.grow(-3.5)
-			var fx := brng.randf_range(0.35, 0.65)
-			var fz := brng.randf_range(0.35, 0.65)
-			for i in 2:
-				for j in 2:
-					var lx0 := inner.position.x + (0.0 if i == 0 else inner.size.x * fx)
-					var lx1 := inner.position.x + (inner.size.x * fx if i == 0 else inner.size.x)
-					var lz0 := inner.position.y + (0.0 if j == 0 else inner.size.y * fz)
-					var lz1 := inner.position.y + (inner.size.y * fz if j == 0 else inner.size.y)
-					lots.append(Rect2(lx0, lz0, lx1 - lx0, lz1 - lz0).grow(-1.2))
-			if brng.randf() < 0.35:
-				lots = [inner.grow(-1.2)]  # one big building (warehouse, offices)
-			for r in lots:
-				if r.size.x < 8.0 or r.size.y < 8.0 or brng.randf() < 0.08:
-					continue
-				var tall := brng.randf() < maxf(0.18 - far * 0.0003, 0.03)
-				var h := brng.randf_range(42.0, 80.0) if tall else brng.randf_range(10.0, 30.0)
-				var st: int = styles[brng.randi() % styles.size()]
-				var cols: Array = CityLayout.STYLE_COLORS[st]
-				# Level on its lot at the highest street corner, base course down the slope.
-				var hi := -INF
-				var lo := INF
-				for cpt in [r.position, r.end, Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y)]:
-					hi = maxf(hi, layout.terrain.road_y(cpt.x, cpt.y))
-					lo = minf(lo, layout.terrain.road_y(cpt.x, cpt.y))
-				var bd := {"tiers": [[r.position.x, r.position.y, r.end.x, r.end.y, hi, hi + h]], "style": st,
-					"color": (cols[brng.randi() % cols.size()] as Color).lightened(brng.randf_range(-0.05, 0.05)),
-					"kind": "normal", "seed": brng.randf(), "_features": BuildingMesher.NO_FEATURES,
-					"base": hi, "foot": lo}
-				# Everything drawn out here is solid too: the outskirts are part
-				# of the city you can swing into, not a painted backdrop.
-				if near:
-					near_m.add_building(bd, true)
-					for box in BuildingMesher.collision_boxes(bd):
-						_add_box(col_body, box)
-				else:
-					m.add_building(bd, false)
-					_add_box(col_body, AABB(Vector3(r.position.x, lo - 0.3, r.position.y), Vector3(r.size.x, hi + h - lo + 0.3, r.size.y)))
+	var near_m := BuildingMesher.new()  # (unused now: kept for the mesh plumbing below)
+	var blocks_m := BuildingMesher.new()
 	# Far shore across the river (where the bridge lands): a quay road, then
 	# terraces and a few towers. Near the bridge they collide, so it's a place
 	# to land, not a painted backdrop.
@@ -1158,37 +1153,6 @@ func _build_outskirts() -> void:
 	add_child(pave_body)
 
 
-## [start, end] of each block between consecutive streets ([centre, width] list).
-static func _block_ranges(streets: Array) -> Array:
-	var out: Array = []
-	for i in streets.size() - 1:
-		out.append([streets[i][0] + streets[i][1] * 0.5, streets[i + 1][0] - streets[i + 1][1] * 0.5])
-	return out
-
-
-## Blocks continuing outward from `edge` (a street's outer kerb) in direction
-## `sgn`, with 16 m streets between, out to `reach` metres.
-static func _extend_ranges(edge: float, sgn: float, reach: float, rng: RandomNumberGenerator) -> Array:
-	var out: Array = []
-	var d := 0.0
-	while d < reach:
-		var w := rng.randf_range(60.0, 92.0)
-		var a := edge + sgn * d
-		var b := edge + sgn * (d + w)
-		out.append([minf(a, b), maxf(a, b)])
-		d += w + 16.0
-	return out
-
-
-## Street layout for ground.gdshader: per axis, a 1-texel-per-metre strip
-## holding (offset from the nearest street centre line at the texel centre,
-## half width, avenue flag). The shader adds its sub-texel offset back, so
-## lane lines, crossings, kerbs and paving are exact without any geometry.
-var _outer_ranges: Array = [[], []]
-const STREET_MAP_X := Vector2(-640.0, 2600.0)  # origin, texels (1 m each)
-const STREET_MAP_Z := Vector2(-1500.0, 3000.0)
-
-
 ## The road surface as a texture for the GPU-driven traffic and pedestrians
 ## (global shader uniforms ground_height / ground_rect). 2 m texels over the
 ## junction grid; clamped sampling continues it level beyond, like road_y.
@@ -1204,28 +1168,13 @@ func _bake_ground_height() -> void:
 		Vector4(r.position.x - cell * 0.5, r.position.y - cell * 0.5, cell * w, cell * h))
 
 
+## The road field (CityRoads.bake_field) for ground.gdshader: lane paint,
+## crossings, kerbs and paving all follow the real roads, curves included.
 func _bake_street_maps() -> void:
-	for axis in 2:
-		var streets: Array = (layout.x_streets if axis == 0 else layout.z_streets).duplicate()
-		var ranges: Array = _outer_ranges[axis].duplicate()
-		ranges.sort_custom(func(a, b): return a[0] < b[0])
-		for i in ranges.size() - 1:
-			var gap: float = ranges[i + 1][0] - ranges[i][1]
-			var c: float = (ranges[i][1] + ranges[i + 1][0]) * 0.5
-			if gap > 4.0 and gap < 40.0 and streets.all(func(st): return absf(st[0] - c) > 4.0):
-				streets.append([c, gap])
-		streets.sort_custom(func(a, b): return a[0] < b[0])
-		var m: Vector2 = STREET_MAP_X if axis == 0 else STREET_MAP_Z
-		var img := Image.create(int(m.y), 1, false, Image.FORMAT_RGBF)
-		var j := 0
-		for i in int(m.y):
-			var p := m.x + i + 0.5
-			while j < streets.size() - 1 and absf(streets[j + 1][0] - p) < absf(streets[j][0] - p):
-				j += 1
-			var st: Array = streets[j]
-			img.set_pixel(i, 0, Color(p - st[0], st[1] * 0.5, 1.0 if st[1] > 20.0 else 0.0))
-		ground_mat.set_shader_parameter("street_x" if axis == 0 else "street_z", ImageTexture.create_from_image(img))
-	ground_mat.set_shader_parameter("street_map", Vector4(STREET_MAP_X.x, STREET_MAP_X.y, STREET_MAP_Z.x, STREET_MAP_Z.y))
+	var R := layout.roads
+	ground_mat.set_shader_parameter("road_field", R.field_texture())
+	ground_mat.set_shader_parameter("road_rect", Vector4(R.field_rect.position.x, R.field_rect.position.y,
+		R.field_w * R.field_cell, R.field_h * R.field_cell))
 	ground_mat.set_shader_parameter("has_streets", true)
 
 
@@ -1283,7 +1232,6 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
 	var detail := BuildingMesher.new()
 	var low := BuildingMesher.new()
-	var ground := BuildingMesher.new()
 	var feats := BuildingMesher.new()
 	for b in _by_chunk.get(key, []):
 		detail.add_building(b, true)
@@ -1292,13 +1240,12 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 			feats.add_features(b)
 			detail.add_skyline(b)
 			low.add_skyline(b)
-	ground.add_ground(layout, rect)
 	var furn: Variant = _furniture_arrays(key)
 	return {
 		"detail": null if detail.is_empty() else detail.arrays(),
 		"low": null if low.is_empty() else low.arrays(),
 		"features": null if feats.is_empty() else feats.arrays(),
-		"ground": null if ground.is_empty() else ground.arrays(),
+		"ground": _ground_cache.get(key),
 		"furniture": furn,
 	}
 
@@ -1591,22 +1538,20 @@ static func _instance_buffer(items: Array) -> PackedFloat32Array:
 func _pavement_paths() -> Array:
 	var out: Array = []
 	for blk in layout.blocks:
-		var r: Rect2 = blk
-		var basin := false
-		for w in layout.water:
-			if (w as Rect2).position.x > 0.0 and (w as Rect2).encloses(r.grow(-7.0)):
-				basin = true
-		if basin or layout.terraces.has(r):
-			continue  # (terraced set-piece blocks have no pavement walks)
+		if blk["kind"] not in ["block", "plaza", "park"]:
+			continue
+		var poly: PackedVector2Array = blk["poly"]
 		for inset_dir in [[1.7, 1.0], [3.0, -1.0]]:
-			var i: float = inset_dir[0]
+			var ring := Geometry2D.offset_polygon(poly, -float(inset_dir[0]))
+			if ring.is_empty():
+				continue
+			var r: PackedVector2Array = ring[0]
 			var fwd: bool = inset_dir[1] > 0.0
-			var c := [Vector3(r.position.x + i, 0.15, r.position.y + i), Vector3(r.end.x - i, 0.15, r.position.y + i),
-				Vector3(r.end.x - i, 0.15, r.end.y - i), Vector3(r.position.x + i, 0.15, r.end.y - i)]
-			for k in 4:
-				var a: Vector3 = c[k]
-				var b: Vector3 = c[(k + 1) % 4]
-				out.append([a, b] if fwd else [b, a])
+			for k in r.size():
+				var a := Vector3(r[k].x, 0.15, r[k].y)
+				var b := Vector3(r[(k + 1) % r.size()].x, 0.15, r[(k + 1) % r.size()].y)
+				if a.distance_to(b) > 6.0:
+					out.append([a, b] if fwd else [b, a])
 	return out
 
 
@@ -1685,48 +1630,64 @@ func parked_cars(key: Vector2i) -> Array:
 
 
 func _parked_cars(rect: Rect2, rng: RandomNumberGenerator, xf: Array, custom: Array) -> void:
-	for axis in 2:
-		var mains: Array = layout.x_streets if axis == 0 else layout.z_streets
-		var cross: Array = layout.z_streets if axis == 0 else layout.x_streets
-		for st in mains:
-			if st[1] > 20.0:
-				continue
-			for k in cross.size() - 1:
-				var a: float = cross[k][0] + cross[k][1] * 0.5 + 12.0
-				var b: float = cross[k + 1][0] - cross[k + 1][1] * 0.5 - 12.0
-				for side in [-1.0, 1.0]:
-					var lateral: float = st[0] + side * (st[1] * 0.5 - 1.5)
-					var d := a
-					while d < b:
-						var pos := Vector3(lateral, 0.02, d) if axis == 0 else Vector3(d, 0.02, lateral)
-						if rect.has_point(Vector2(pos.x, pos.z)) and rng.randf() < 0.6:
-							# Parked facing with the traffic on that side.
-							var fwd := (Vector3.BACK if side > 0.0 else Vector3.FORWARD) if axis == 0 \
-								else (Vector3.LEFT if side > 0.0 else Vector3.RIGHT)
-							# On the road surface, pitched with the street's grade.
-							var T := layout.terrain
-							pos.y += T.road_y(pos.x, pos.z)
-							var grade := (T.road_y(pos.x + fwd.x, pos.z + fwd.z) - T.road_y(pos.x - fwd.x, pos.z - fwd.z)) * 0.5
-							var basis := Basis.looking_at((fwd + Vector3.UP * grade).normalized(), Vector3.UP)
-							# Phase 5 m into a 10 m "segment": full size, shifted 5 m along -Z.
-							xf.append(Transform3D(basis, pos + basis.z * 5.0))
-							custom.append(Color(0.0, 5.0, 10.0, 0.0))
-						d += rng.randf_range(6.2, 7.5)
+	var T := layout.terrain
+	for r in layout.roads.roads:
+		if r["kind"] != "minor" or float(r["w"]) < 14.0:
+			continue
+		var pts := CityRoads._simplify(r["pts"], 0.5)
+		var hw: float = float(r["w"]) * 0.5
+		var total := CityRoads.length_of(pts)
+		var acc := 0.0
+		for i in pts.size() - 1:
+			var a := pts[i]
+			var b := pts[i + 1]
+			var L := a.distance_to(b)
+			var dir := (b - a) / maxf(L, 0.001)
+			var right := Vector2(-dir.y, dir.x)
+			for side: float in [-1.0, 1.0]:
+				var d := 0.0
+				while d < L:
+					var along := acc + d
+					var p2 := a + dir * d + right * side * (hw - 1.5)
+					if along > 12.0 and along < total - 12.0 and rect.has_point(p2) and rng.randf() < 0.6 \
+							and layout.roads.field_at(p2).w > 6.0:
+						# Parked facing with the traffic on that side (right-hand drive lanes: +side = with dir).
+						var f2 := dir if side > 0.0 else -dir
+						var fwd := Vector3(f2.x, 0.0, f2.y)
+						var pos := Vector3(p2.x, 0.02 + T.road_y(p2.x, p2.y), p2.y)
+						var grade := (T.road_y(p2.x + f2.x, p2.y + f2.y) - T.road_y(p2.x - f2.x, p2.y - f2.y)) * 0.5
+						var basis := Basis.looking_at((fwd + Vector3.UP * grade).normalized(), Vector3.UP)
+						xf.append(Transform3D(basis, pos + basis.z * 5.0))
+						custom.append(Color(0.0, 5.0, 10.0, 0.0))
+					d += rng.randf_range(6.2, 7.5)
+			acc += L
 
 
+## The part of segment a→b inside r (Liang–Barsky), or [] if under 1 m.
 static func _clip_segment(a: Vector3, b: Vector3, r: Rect2) -> Array:
-	# Axis-aligned lanes only: clip the varying coordinate to the rect.
-	if absf(a.x - b.x) < 0.01:
-		if a.x < r.position.x or a.x > r.end.x:
-			return []
-		var z0 := clampf(a.z, r.position.y, r.end.y)
-		var z1 := clampf(b.z, r.position.y, r.end.y)
-		return [] if absf(z1 - z0) < 1.0 else [Vector3(a.x, 0, z0), Vector3(a.x, 0, z1)]
-	if a.z < r.position.y or a.z > r.end.y:
+	var t0 := 0.0
+	var t1 := 1.0
+	var dx := b.x - a.x
+	var dz := b.z - a.z
+	for e in [[-dx, a.x - r.position.x], [dx, r.end.x - a.x], [-dz, a.z - r.position.y], [dz, r.end.y - a.z]]:
+		var pp: float = e[0]
+		var q: float = e[1]
+		if absf(pp) < 1e-9:
+			if q < 0.0:
+				return []
+		else:
+			var t := q / pp
+			if pp < 0.0:
+				t0 = maxf(t0, t)
+			else:
+				t1 = minf(t1, t)
+	if t1 - t0 <= 0.0:
 		return []
-	var x0 := clampf(a.x, r.position.x, r.end.x)
-	var x1 := clampf(b.x, r.position.x, r.end.x)
-	return [] if absf(x1 - x0) < 1.0 else [Vector3(x0, 0, a.z), Vector3(x1, 0, a.z)]
+	var s0 := a.lerp(b, t0)
+	var s1 := a.lerp(b, t1)
+	s0.y = 0.0
+	s1.y = 0.0
+	return [] if s0.distance_to(s1) < 1.0 else [s0, s1]
 
 
 func _add_occluder(root: Node3D, key: Vector2i) -> void:
@@ -1745,8 +1706,10 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 		var z1: float = t[3] - 0.5
 		var y1: float = t[5] - 0.5
 		var base := v.size()
-		v.append_array([Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1),
-			Vector3(x0, y1, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), Vector3(x0, y1, z1)])
+		var X := CityLayout.bxf(b)
+		for q: Vector3 in [Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1),
+				Vector3(x0, y1, z0), Vector3(x1, y1, z0), Vector3(x1, y1, z1), Vector3(x0, y1, z1)]:
+			v.append(X * q)
 		for f in [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [4, 5, 6, 7]]:
 			idx.append_array([base + f[0], base + f[1], base + f[2], base + f[0], base + f[2], base + f[3]])
 	if v.is_empty():

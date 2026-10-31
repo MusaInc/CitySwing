@@ -15,6 +15,9 @@ func _initialize() -> void:
 	var t0 := Time.get_ticks_msec()
 	var R := CityRoads.new().generate(1207, lay.district, Rect2(30.0, -656.0, 1000.0, 1271.0))
 	print("roads: %d, blocks: %d, roundabouts %d, %d ms" % [R.roads.size(), R.blocks.size(), R.roundabouts.size(), Time.get_ticks_msec() - t0])
+	t0 = Time.get_ticks_msec()
+	R.bake_field(1.5)
+	print("field %dx%d in %d ms" % [R.field_w, R.field_h, Time.get_ticks_msec() - t0])
 	var kinds := {}
 	for b in R.blocks:
 		kinds[b["kind"]] = kinds.get(b["kind"], 0) + 1

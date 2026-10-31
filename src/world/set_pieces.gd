@@ -17,13 +17,13 @@ extends RefCounted
 ## random stream, so adding one never reshuffles the city.
 
 const STADIUM_AT := Vector2(867, 219)
-const GASHOLDER_AT := Vector2(867, -579)
+const GASHOLDER_AT := Vector2(800, -555)
 const WHEEL_AT := Vector2(135, 219)
-const YARDS_AT := [Vector2(135, 526), Vector2(135, 315)]
+const YARDS_AT := [Vector2(135, 505), Vector2(135, 300)]
 const SHIP_AT := Vector2(240, 423)
 const LIGHTHOUSE_AT := Vector2(8, 560)
-const EL_Z := 368.87          # the avenue the elevated railway runs along
-const EL_X := [440.0, 1010.0]
+const EL_FROM_X := 440.0      # the elevated railway runs along Valley Road from here east
+const EL_DECK := 14.0
 
 const RED := Color(0.72, 0.12, 0.1)
 const WHITE := Color(0.9, 0.9, 0.87)
@@ -39,18 +39,21 @@ func _init(layout: CityLayout) -> void:
 	L = layout
 
 
-## Which set piece (if any) takes over this block instead of buildings.
-func piece_for(rect: Rect2) -> String:
-	if rect.has_point(STADIUM_AT):
-		return "stadium"
-	if rect.has_point(GASHOLDER_AT):
-		return "gasholder"
-	if rect.has_point(WHEEL_AT):
-		return "wheel"
-	for y in YARDS_AT:
-		if rect.has_point(y):
-			return "yard"
-	return ""
+## Where each set piece stands (axis-aligned, world): the road network keeps
+## its cuts clear of these, and the block holding one is terraced for it.
+func rects() -> Dictionary:
+	if _rects.is_empty():
+		_rects = {
+			"stadium": Rect2(STADIUM_AT - Vector2(48, 41), Vector2(96, 82)),
+			"gasholder": Rect2(GASHOLDER_AT - Vector2(46, 41), Vector2(92, 82)),
+			"wheel": Rect2(WHEEL_AT - Vector2(40, 40), Vector2(80, 80)),
+			"yard": Rect2(YARDS_AT[0] - Vector2(40, 40), Vector2(80, 80)),
+			"yard2": Rect2(YARDS_AT[1] - Vector2(40, 39), Vector2(80, 78)),
+		}
+	return _rects
+
+
+var _rects := {}
 
 
 func build(piece: String, rect: Rect2) -> void:
@@ -63,7 +66,7 @@ func build(piece: String, rect: Rect2) -> void:
 			_gasholder(rect, rng)
 		"wheel":
 			_wheel(rect, rng)
-		"yard":
+		"yard", "yard2":
 			_container_yard(rect, rng)
 
 
@@ -113,7 +116,7 @@ func _stadium(r: Rect2, rng: RandomNumberGenerator) -> void:
 		for s: float in [-1.0, 1.0]:
 			L._kbeam(k, Vector3(gx, 0.15, gz + s * 3.7), Vector3(gx, 2.6, gz + s * 3.7), 0.14, 0.14, WHITE, false)
 		L._kbeam(k, Vector3(gx, 2.6, gz - 3.8), Vector3(gx, 2.6, gz + 3.8), 0.14, 0.14, WHITE, false)
-	L.parks.append(r)  # grass pitch
+	L.greens.append(r)  # grass pitch
 	L.reserved.append(r)
 
 
@@ -358,113 +361,87 @@ func ship(basin: Rect2) -> void:
 
 
 # -------------------------------------------------------- elevated rail
-## Elevated railway along an avenue: deck on steel bents at the kerbs (never
-## in a traffic lane or a crossing), side girders, rails, and a parked
-## three-car train. Run along it, swing under it, land on the train.
+## Elevated railway along Valley Road (curving with it): deck segments on
+## steel bents at the kerbs (never in a traffic lane or a junction), side
+## girders, rails, and a parked three-car train. Run along it, swing under
+## it, land on the train.
 func elevated_rail() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("el")
 	var k := L._kit("el")
-	var zc := EL_Z
-	var deck := 14.0
-	var x0: float = EL_X[0]
-	var x1: float = EL_X[1]
+	var road: Dictionary = L.roads.by_name.get("valley", {})
+	if road.is_empty():
+		return
+	var keep: PackedVector2Array = Geometry2D.offset_polygon(L.coast, -60.0)[0]
+	var path := PackedVector2Array()
+	for q in CityRoads._simplify(road["pts"], 0.4):
+		if q.x >= EL_FROM_X and Geometry2D.is_point_in_polygon(q, keep):
+			path.append(q)
+	if path.size() < 2:
+		return
+	var deck := EL_DECK
 	var half := 5.0
-	L._ksolid(k, x0, zc - half, x1, zc + half, deck - 1.0, deck, Color(0.36, 0.37, 0.38))
-	for s: float in [-1.0, 1.0]:
-		var z0 := zc + s * half
-		L._ksolid(k, x0, minf(z0, z0 + s * 0.5), x1, maxf(z0, z0 + s * 0.5), deck - 2.2, deck + 0.25, Color(0.3, 0.4, 0.38))
-		for r: float in [-0.75, 0.75]:
-			var rz := zc + s * 2.0 + r
-			L._kbeam(k, Vector3(x0, deck + 0.08, rz), Vector3(x1, deck + 0.08, rz), 0.12, 0.16, STEEL, false)
-		L._anchor(Vector3(x0, deck - 2.4, z0 + s * 0.3), Vector3(x1, deck - 2.4, z0 + s * 0.3))
-	# Bents every ~24 m, skipping the cross streets.
-	var x := x0 + 6.0
-	while x < x1 - 4.0:
-		var clear := true
-		for st in L.x_streets:
-			if absf(x - float(st[0])) < float(st[1]) * 0.5 + 4.0:
-				clear = false
-		if clear:
+	var green := Color(0.3, 0.4, 0.38)
+	for i in path.size() - 1:
+		var a := Vector3(path[i].x, deck - 0.5, path[i].y)
+		var b := Vector3(path[i + 1].x, deck - 0.5, path[i + 1].y)
+		var d := (b - a).normalized()
+		var side := Vector3(-d.z, 0.0, d.x)
+		var ext := d * 0.6  # overlap the joints
+		L._kbeam(k, a - ext, b + ext, half * 2.0, 1.0, Color(0.36, 0.37, 0.38))
+		for s: float in [-1.0, 1.0]:
+			var o: Vector3 = side * s * (half + 0.25)
+			L._kbeam(k, a - ext + o + Vector3(0, -0.6, 0), b + ext + o + Vector3(0, -0.6, 0), 0.5, 2.45, green)
+			for r: float in [-0.75, 0.75]:
+				var ro: Vector3 = side * (s * 2.0 + r) + Vector3(0, 0.58, 0)
+				L._kbeam(k, a + ro, b + ro, 0.12, 0.16, STEEL, false)
+			L._anchor(a + o * 1.06 + Vector3(0, -1.9, 0), b + o * 1.06 + Vector3(0, -1.9, 0))
+	# Bents every ~24 m, skipping junctions.
+	var total := CityRoads.length_of(path)
+	var t := 6.0
+	while t < total - 4.0:
+		var p := _at(path, t)
+		var dir := (_at(path, t + 1.0) - _at(path, t - 1.0)).normalized()
+		var sd := Vector2(-dir.y, dir.x)
+		var ok := true
+		for s: float in [-1.0, 1.0]:
+			var f: Vector4 = L.roads.field_at(p + sd * s * 11.8)
+			if f.w < 4.0:
+				ok = false
+		if ok:
 			for s: float in [-1.0, 1.0]:
-				var cz := zc + s * 11.5
-				L._ksolid(k, x - 0.45, cz - 0.45, x + 0.45, cz + 0.45, 0.15, deck - 2.2, Color(0.3, 0.4, 0.38))
-			L._ksolid(k, x - 0.6, zc - 12.0, x + 0.6, zc + 12.0, deck - 3.4, deck - 2.2, Color(0.3, 0.4, 0.38))
-			x += 24.0
+				var c: Vector2 = p + sd * s * 11.8
+				var gy := L.terrain.road_y(c.x, c.y)
+				L._kbeam(k, Vector3(c.x, gy - 0.3, c.y), Vector3(c.x, deck - 2.2, c.y), 0.9, 0.9, green)
+			var e0 := p - sd * 12.0
+			var e1 := p + sd * 12.0
+			L._kbeam(k, Vector3(e0.x, deck - 2.8, e0.y), Vector3(e1.x, deck - 2.8, e1.y), 1.2, 1.2, green)
+			t += 24.0
 		else:
-			x += 4.0
-	# The train: three cars with a gap, on the south track.
-	var tx := x0 + 150.0 + rng.randf_range(0.0, 60.0)
-	var tz := zc + 2.0
+			t += 4.0
+	# The train: three cars with a gap, on one track.
+	var t0 := 150.0 + rng.randf_range(0.0, 60.0)
 	for car in 3:
-		var a := tx + car * 19.0
-		L._ksolid(k, a, tz - 1.6, a + 18.0, tz + 1.6, deck + 0.6, deck + 4.2, Color(0.82, 0.8, 0.74))
-		L._ksolid(k, a + 0.1, tz - 1.65, a + 17.9, tz + 1.65, deck + 2.2, deck + 3.4, Color(0.16, 0.2, 0.25), false)
-		L._ksolid(k, a + 0.1, tz - 1.65, a + 17.9, tz + 1.65, deck + 1.1, deck + 1.6, Color(0.85, 0.5, 0.1), false)
-		L._ksolid(k, a + 1.5, tz - 1.3, a + 16.5, tz + 1.3, deck + 0.15, deck + 0.6, STEEL)
+		var a2 := _at(path, t0 + car * 19.0)
+		var b2 := _at(path, t0 + car * 19.0 + 18.0)
+		var dd := (b2 - a2).normalized()
+		var off := Vector2(-dd.y, dd.x) * 2.0
+		var A := Vector3(a2.x + off.x, 0.0, a2.y + off.y)
+		var B := Vector3(b2.x + off.x, 0.0, b2.y + off.y)
+		L._kbeam(k, A + Vector3.UP * (deck + 2.4), B + Vector3.UP * (deck + 2.4), 3.2, 3.6, Color(0.82, 0.8, 0.74))
+		L._kbeam(k, A + Vector3.UP * (deck + 2.8), B + Vector3.UP * (deck + 2.8), 3.3, 1.2, Color(0.16, 0.2, 0.25), false)
+		L._kbeam(k, A + Vector3.UP * (deck + 1.35), B + Vector3.UP * (deck + 1.35), 3.3, 0.5, Color(0.85, 0.5, 0.1), false)
 
 
-# ------------------------------------------------------------- gateways
-## Gateway blocks: a four-storey "sky lobby" spanning an avenue between two
-## towers of the business district, high enough to swing under.
-func gateways() -> void:
-	var made := 0
-	for st in L.x_streets:
-		if float(st[1]) < 20.0:
-			continue
-		var west_x: float = float(st[0]) - float(st[1]) * 0.5
-		var east_x: float = float(st[0]) + float(st[1]) * 0.5
-		var best: Array = []
-		var best_s := 0.0
-		for a in L.buildings:
-			if a["kind"] != "normal" or L.district(a["tiers"][0][2], a["tiers"][0][3]) != "cbd":
-				continue
-			var ta: Array = a["tiers"][-1]
-			if absf(float(a["tiers"][0][2]) - west_x) > 5.0 or float(ta[5]) < 120.0:
-				continue
-			for b in L.buildings:
-				if b["kind"] != "normal":
-					continue
-				var tb: Array = b["tiers"][-1]
-				if absf(float(b["tiers"][0][0]) - east_x) > 5.0 or float(tb[5]) < 120.0:
-					continue
-				var ov0 := maxf(ta[1], tb[1])
-				var ov1 := minf(ta[3], tb[3])
-				if ov1 - ov0 < 18.0:
-					continue
-				var s := ov1 - ov0 + minf(ta[5], tb[5]) * 0.05
-				if s > best_s:
-					best_s = s
-					best = [a, b, ov0, ov1]
-		if best.is_empty():
-			continue
-		var a2: Dictionary = best[0]
-		var b2: Dictionary = best[1]
-		var y := minf(float(a2["tiers"][-1][5]), float(b2["tiers"][-1][5])) * 0.42
-		# Spans between the tiers the towers have at that height (setbacks).
-		var ta2 := _tier_at(a2, y + 7.5)
-		var tb2 := _tier_at(b2, y + 7.5)
-		if ta2.is_empty() or tb2.is_empty() or _tier_at(a2, y) != ta2 or _tier_at(b2, y) != tb2 \
-				or _tier_at(a2, y + 15.0) != ta2 or _tier_at(b2, y + 15.0) != tb2:
-			continue
-		var ov0 := maxf(ta2[1], tb2[1])
-		var ov1 := minf(ta2[3], tb2[3])
-		if ov1 - ov0 < 16.0:
-			continue
-		var zc := (ov0 + ov1) * 0.5
-		var hw := minf((ov1 - ov0) * 0.5 - 2.0, 14.0)
-		var xa: float = ta2[2]
-		var xb: float = tb2[0]
-		L._add({"tiers": [[xa - 1.0, zc - hw, xb + 1.0, zc + hw, y, y + 15.0]], "style": CityLayout.Style.DARK_GLASS,
-			"color": Color(0.2, 0.24, 0.28), "kind": "bridge", "seed": 0.37 + made * 0.11})
-		made += 1
-
-
-static func _tier_at(b: Dictionary, y: float) -> Array:
-	for t in b["tiers"]:
-		if y >= float(t[4]) and y <= float(t[5]):
-			return t
-	return []
+## Point `t` metres along a polyline (clamped).
+static func _at(path: PackedVector2Array, t: float) -> Vector2:
+	var acc := 0.0
+	for i in path.size() - 1:
+		var L2 := path[i].distance_to(path[i + 1])
+		if t <= acc + L2:
+			return path[i].lerp(path[i + 1], clampf((t - acc) / maxf(L2, 0.001), 0.0, 1.0))
+		acc += L2
+	return path[-1]
 
 
 # ---------------------------------------------------------- lighthouse

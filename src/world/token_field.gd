@@ -28,7 +28,7 @@ static func generate(layout: CityLayout) -> Array[Vector3]:
 			continue
 		var top: Array = b["tiers"][-1]
 		if top[5] >= 28.0 and top[5] <= 150.0:
-			tall.append(Vector3((top[0] + top[2]) * 0.5, top[5], (top[1] + top[3]) * 0.5))
+			tall.append(CityLayout.top_center(b))
 	var grid := _tier_grid(layout)
 	var out: Array[Vector3] = []
 	if tall.is_empty():
@@ -71,17 +71,20 @@ static func generate(layout: CityLayout) -> Array[Vector3]:
 const GRID := 40.0
 
 
-## Building tiers bucketed by GRID-sized cells (each tier in every cell it touches).
+## Buildings bucketed by GRID-sized cells (each in every cell its tiers' world
+## bounds touch).
 static func _tier_grid(layout: CityLayout) -> Dictionary:
 	var g := {}
 	for b in layout.buildings:
 		for t in b["tiers"]:
-			for cx in range(floori(t[0] / GRID), floori(t[2] / GRID) + 1):
-				for cz in range(floori(t[1] / GRID), floori(t[3] / GRID) + 1):
+			var bx := CityLayout.tier_aabb(b, t)
+			for cx in range(floori(bx.position.x / GRID), floori(bx.end.x / GRID) + 1):
+				for cz in range(floori(bx.position.z / GRID), floori(bx.end.z / GRID) + 1):
 					var k := Vector2i(cx, cz)
 					if not g.has(k):
 						g[k] = []
-					g[k].append(t)
+					if (g[k] as Array).is_empty() or not is_same(g[k][-1], b):
+						g[k].append(b)
 	return g
 
 
@@ -90,9 +93,8 @@ static func _blocked(grid: Dictionary, p: Vector3) -> bool:
 	var m := COLLECT_RADIUS + 1.5
 	for cx in range(floori((p.x - m) / GRID), floori((p.x + m) / GRID) + 1):
 		for cz in range(floori((p.z - m) / GRID), floori((p.z + m) / GRID) + 1):
-			for t in grid.get(Vector2i(cx, cz), []):
-				if p.x > t[0] - m and p.x < t[2] + m and p.z > t[1] - m and p.z < t[3] + m \
-						and p.y > t[4] - m and p.y < t[5] + 1.5:
+			for b in grid.get(Vector2i(cx, cz), []):
+				if CityLayout.inside(b, p, m, 1.5):
 					return true
 	return false
 
