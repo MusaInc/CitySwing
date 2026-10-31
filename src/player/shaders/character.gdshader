@@ -26,12 +26,17 @@ const vec3 K_PANTS_DK = vec3(0.078, 0.090, 0.129);
 const vec3 K_SNEAKER = vec3(0.929, 0.929, 0.894);
 const vec3 K_GLOVE = vec3(0.098, 0.098, 0.106);
 
+// Baked ambient occlusion (build_character.py bake_ao): UV = (ao, 1) on the
+// meshes that carry it; anything else (UV.y = 0) stays unshaded.
+varying float v_ao;
+
 float is_key(vec3 c, vec3 k) {
 	vec3 d = abs(c - k);
 	return step(max(d.r, max(d.g, d.b)), 0.012);
 }
 
 void vertex() {
+	v_ao = UV.y > 0.5 ? UV.x : 1.0;
 	vec3 c = COLOR.rgb;
 	vec3 o = c;
 	if (COLOR.a < 0.5) {
@@ -54,7 +59,13 @@ void fragment() {
 	// way to linear so the suit reads deep crimson under the warm sun instead
 	// of a pale salmon, and the trousers a true dark navy.
 	vec3 base = pow(COLOR.rgb, vec3(2.0));
-	ALBEDO = base;
+	// Creases and contact shadow (underarms, collar, between the legs,
+	// inside the hood) – a little in the albedo so it reads in direct sun
+	// too, the rest on ambient light.
+	float ao = clamp(v_ao, 0.0, 1.0);
+	ALBEDO = base * mix(0.55, 1.0, smoothstep(0.1, 0.95, ao));
+	AO = ao;
+	AO_LIGHT_AFFECT = 0.0;
 	// Suit fabric has a soft sheen; trainers and gloves stay matte.
 	ROUGHNESS = mix(0.6, 0.3, glow);
 	EMISSION = COLOR.rgb * glow * 2.5;
@@ -64,5 +75,5 @@ void fragment() {
 	vec3 n_w = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
 	float sun_side = clamp(dot(n_w, normalize(vec3(0.73, 0.62, -0.29))) * 0.5 + 0.5, 0.0, 1.0);
 	vec3 rim_c = mix(vec3(0.55, 0.75, 1.0), rim_color, sun_side);
-	EMISSION += rim_c * rim * rim_strength * (1.0 - glow);
+	EMISSION += rim_c * rim * rim_strength * (1.0 - glow) * ao;
 }
