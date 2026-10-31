@@ -1,6 +1,15 @@
 # Status: 2026-10-31 (art direction: lighting, architecture, hero, HUD)
 
-## Art-direction pass (latest)
+## Polish pass 2 (2026-10-31)
+
+- **Geometry cost fixed**: the art pass's features had raised per-frame primitives 50–130% (aerial view 188k → 433k). Features now live in their own per-chunk `Features` mesh drawn to 190 m (`CityWorld.feature_range`), fins are 3 quads, fire escapes lost mid-rails/rungs: back to 417k street / 185k aerial (pre-art-pass levels).
+- **Ghost collision fixed**: outskirt and far-shore blocks got feature collision without drawing features; they now opt out (`BuildingMesher.NO_FEATURES`). Billboard legs and catwalks collide (collision audit "over" 31 → 4, all crane cables).
+- Glass towers over 100 m: 70% get a glass crown screen (4–7 m, light coping) drawn at every LOD; glass coatings dominate their sky reflection (champagne/bronze/silver/teal/green/blue), so the CBD is no longer one blue.
+- Web line: catch twang, thins and brightens under swing load, thicker at the hand.
+- Camera: flight distance 5.0–6.6 m (+≤1.3 for long ropes; was 5.4–8.0 +≤2.2), max FOV 82°. `tools/camera_probe.gd` (`--camaudit=<s>` with `--bot=expert`): angular jerk, pops, hero screen jitter and size.
+- Known flake: test_motion_quality ledge_dive get-up ankle fails ~1 in 3 runs on identical code (nondeterministic), seen on this tree; not caused by these changes (the test stage doesn't use them).
+
+## Art-direction pass
 
 - **Lighting** (`atmosphere.gd`): warmer, stronger sun (2.3) against a cool blue sky fill (ambient 0.62), so lit and shaded faces finally contrast; deeper blue zenith, cleaner horizon. Fog is now depth fog (clear to 180 m, soft blue veil to 2.6 km) instead of an exponential grey wash over everything. A procedural 17³ grade LUT (`Atmosphere.grade`): gentle S-curve, cool shadows, warm highlights, mid saturation.
 - **Fixed a long-standing shader bug**: the facade shader compared an interpolated surface kind with `==`, so parts of every roof and cornice ran the window code: that was the "gravel" grain and streaks on roofs. `v_kind` is now a `flat` varying.

@@ -32,6 +32,9 @@ const CAR_COLORS := [Color(0.85, 0.85, 0.83), Color(0.1, 0.1, 0.11), Color(0.62,
 var layout: CityLayout
 var viewer: Node3D
 var detail_range := 380.0
+## Fire escapes, fins, portals, chimneys: small detail, drawn nearer than the
+## detailed LOD (they still collide at any distance).
+var feature_range := 190.0
 var view_distance := 900.0
 var prop_density := 1.0
 var traffic_density := 1.0
@@ -1037,7 +1040,7 @@ func _build_outskirts() -> void:
 				var cols: Array = CityLayout.STYLE_COLORS[st]
 				var bd := {"tiers": [[r.position.x, r.position.y, r.end.x, r.end.y, 0.0, h]], "style": st,
 					"color": (cols[brng.randi() % cols.size()] as Color).lightened(brng.randf_range(-0.05, 0.05)),
-					"kind": "normal", "seed": brng.randf()}
+					"kind": "normal", "seed": brng.randf(), "_features": BuildingMesher.NO_FEATURES}
 				# Everything drawn out here is solid too: the outskirts are part
 				# of the city you can swing into, not a painted backdrop.
 				if near:
@@ -1064,7 +1067,8 @@ func _build_outskirts() -> void:
 			var st2: int = [CityLayout.Style.BRICK, CityLayout.Style.STONE, CityLayout.Style.SANDSTONE][rng.randi() % 3]
 			var cols2: Array = CityLayout.STYLE_COLORS[st2]
 			var b2 := {"tiers": [[bx, z2, bx + w2, z2 + d2, 0.0, h2]], "style": st2,
-				"color": cols2[rng.randi() % cols2.size()], "kind": "normal", "seed": rng.randf()}
+				"color": cols2[rng.randi() % cols2.size()], "kind": "normal", "seed": rng.randf(),
+				"_features": BuildingMesher.NO_FEATURES}
 			m.add_building(b2, near_bridge)
 			if near_bridge:
 				for box in BuildingMesher.collision_boxes(b2):
@@ -1233,14 +1237,20 @@ func generate_chunk_arrays(key: Vector2i) -> Dictionary:
 	var detail := BuildingMesher.new()
 	var low := BuildingMesher.new()
 	var ground := BuildingMesher.new()
+	var feats := BuildingMesher.new()
 	for b in _by_chunk.get(key, []):
 		detail.add_building(b, true)
 		low.add_building(b, false)
+		if b["kind"] == "normal":
+			feats.add_features(b)
+			detail.add_skyline(b)
+			low.add_skyline(b)
 	ground.add_ground(layout, rect)
 	var furn: Variant = _furniture_arrays(key)
 	return {
 		"detail": null if detail.is_empty() else detail.arrays(),
 		"low": null if low.is_empty() else low.arrays(),
+		"features": null if feats.is_empty() else feats.arrays(),
 		"ground": null if ground.is_empty() else ground.arrays(),
 		"furniture": furn,
 	}
@@ -1321,6 +1331,16 @@ func _instantiate(key: Vector2i, res: Dictionary) -> void:
 			sh.visibility_range_end = detail_range
 			sh.visibility_range_end_margin = 30.0
 			root.add_child(sh)
+	var feats := _mesh_from(res.get("features"))
+	if feats:
+		var fi := MeshInstance3D.new()
+		fi.name = "Features"
+		fi.mesh = feats
+		fi.material_override = building_mat
+		fi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		fi.visibility_range_end = feature_range
+		fi.visibility_range_end_margin = 20.0
+		root.add_child(fi)
 	if low:
 		var lo := MeshInstance3D.new()
 		lo.name = "Low"

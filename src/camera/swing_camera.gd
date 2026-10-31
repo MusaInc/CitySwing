@@ -20,7 +20,7 @@ extends Node3D
 ##    gentle bank (max 4°) leans into sustained turns at speed.
 
 @export var base_fov := 70.0
-@export var max_fov := 84.0  # restrained: wide enough to sell speed, no fish-eye
+@export var max_fov := 82.0  # restrained: wide enough to sell speed, no fish-eye
 @export var fov_speed_full := 50.0
 @export var follow_smooth := 0.12
 @export var aim_smooth := 0.08
@@ -198,12 +198,14 @@ func _process(dt: float) -> void:
 		look_pitch = lerpf(look_pitch, 0.0, k)
 
 	# --- distance / framing ---------------------------------------------------
-	var want_dist := lerpf(5.4, 8.0, t) if not grounded else lerpf(4.8, 6.2, clampf(vh.length() / 11.0, 0.0, 1.0))
+	# Tighter in flight than it used to be (8 m + 2.2 for long ropes left the
+	# hero ~10% of the screen): the hero is the show; the FOV sells the speed.
+	var want_dist := lerpf(5.0, 6.6, t) if not grounded else lerpf(4.8, 6.2, clampf(vh.length() / 11.0, 0.0, 1.0))
 	var lift_goal := 0.0
 	if target.s.attached and target.s.taut:
 		# Long lines swing big arcs: frame more of them.
 		var rope := target.s.rope_length
-		want_dist += clampf((rope - 15.0) * 0.06, 0.0, 2.2)
+		want_dist += clampf((rope - 15.0) * 0.045, 0.0, 1.3)
 		lift_goal = clampf(rope * 0.04, 0.0, 1.4)
 	_lift = lerpf(_lift, lift_goal, 1.0 - exp(-2.5 * dt))
 	_dist = lerpf(_dist, want_dist * distance_scale, 1.0 - exp(-2.0 * dt))

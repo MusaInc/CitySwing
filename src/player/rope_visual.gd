@@ -20,6 +20,9 @@ const SWEET := Color(1.0, 0.78, 0.3)
 var color := WHITE
 var rainbow := false
 var _hue := 0.0
+var _twang := 0.0   # 1 → 0 after the web catches: a quick decaying vibration
+var _load := 0.0    # 0..1 smoothed swing tension (v²/r against gravity)
+var _hooked := false
 
 
 func _ready() -> void:
@@ -49,12 +52,22 @@ func _process(dt: float) -> void:
 	if cam == null:
 		return
 	_wave += dt * 30.0
+	if player.line_state == Player.Line.ATTACHED and not _hooked:
+		_twang = 1.0
+	_hooked = player.line_state == Player.Line.ATTACHED
+	_twang = maxf(0.0, _twang - dt * 2.8)
+	var want_load := 0.0
+	if _hooked and player.s.taut:
+		var r := maxf(player.s.position.distance_to(player.s.anchor), 1.0)
+		want_load = clampf(player.s.velocity.length_squared() / r / 25.0, 0.0, 1.0)
+	_load = lerpf(_load, want_load, 1.0 - exp(-8.0 * dt))
 	# Timing cue: the web glows gold inside the perfect-release window.
 	var want := 1.0 if player.line_state == Player.Line.ATTACHED and player.is_perfect_release() else 0.0
 	_glow = move_toward(_glow, want, dt * (12.0 if want > _glow else 5.0))
 	_hue = fmod(_hue + dt * 0.35, 1.0)
 	_mat.albedo_color = (Color.WHITE if rainbow else color).lerp(SWEET, _glow)
-	var w_scale := 1.0 + _glow * 0.6
+	# Under load the line pulls thin and bright; it leaves the hand thicker.
+	var w_scale := (1.0 + _glow * 0.6) * (1.0 - 0.22 * _load)
 	var start := hand.global_position if hand else player.hand_position()
 	var pts: PackedVector3Array
 	var sag := 0.0
@@ -94,12 +107,15 @@ func _process(dt: float) -> void:
 				# Only the free segment (hand → nearest pivot) sags or ripples.
 				p += Vector3.DOWN * sag * 4.0 * t * (1.0 - t)
 				p += side * sin(t * 9.0 - _wave) * amp * t * (1.0 - t) * 4.0
+				# Catch twang: a standing wave along the taut line, dying fast.
+				p += side * sin(t * PI * 3.0) * sin(_wave * 1.7) * 0.09 * _twang * _twang
 			var to_cam := (cam_pos - p).normalized()
-			var w := tangent.cross(to_cam).normalized() * width * w_scale * (1.0 + p.distance_to(cam_pos) * 0.009)
+			var taper := 1.0 + 0.8 * maxf(0.0, 1.0 - p.distance_to(pts[0]) / 1.2)
+			var w := tangent.cross(to_cam).normalized() * width * w_scale * taper * (1.0 + p.distance_to(cam_pos) * 0.009)
 			if rainbow:
 				_mesh.surface_set_color(Color.from_hsv(fmod(_hue + (seg_i + t) * 0.35, 1.0), 0.75, 1.0))
 			else:
-				_mesh.surface_set_color(Color.WHITE)
+				_mesh.surface_set_color(Color(1.0 + 0.25 * _load, 1.0 + 0.25 * _load, 1.0 + 0.25 * _load))
 			_mesh.surface_add_vertex(p - w)
 			_mesh.surface_add_vertex(p + w)
 	_mesh.surface_end()

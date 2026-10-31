@@ -173,14 +173,19 @@ void fragment() {
 		// green, blue) so the skyline isn't one sky-blue mass; reflections are
 		// seen through that tint like real coated glass.
 		float pick = fract(seed * 7.31);
+		// (Blue-sky reflections made every tower read the same blue: the
+		// coating colour now dominates, with warm champagne/bronze/silver
+		// towers among the teal, green and blue.)
 		if (style == 2.0) {
-			tint = pick < 0.3 ? vec3(0.16, 0.34, 0.36) : (pick < 0.55 ? vec3(0.4, 0.27, 0.15)
-				: (pick < 0.75 ? vec3(0.17, 0.33, 0.24) : vec3(0.18, 0.27, 0.42)));
+			tint = pick < 0.18 ? vec3(0.16, 0.34, 0.36) : (pick < 0.36 ? vec3(0.42, 0.28, 0.15)
+				: (pick < 0.5 ? vec3(0.17, 0.33, 0.24) : (pick < 0.64 ? vec3(0.18, 0.27, 0.42)
+				: (pick < 0.82 ? vec3(0.46, 0.42, 0.34) : vec3(0.36, 0.38, 0.4)))));
 		} else if (style == 6.0) {
-			tint = pick < 0.5 ? vec3(0.1, 0.14, 0.2) : vec3(0.2, 0.14, 0.09);
+			tint = pick < 0.4 ? vec3(0.1, 0.14, 0.2) : (pick < 0.75 ? vec3(0.22, 0.15, 0.09) : vec3(0.13, 0.13, 0.12));
 		}
 		if (style == 2.0 || style == 6.0) {
-			refl *= mix(vec3(1.0), clamp(tint * 2.6, 0.0, 1.3), 0.55);
+			float lum = dot(refl, vec3(0.3, 0.55, 0.15));
+			refl = mix(refl, clamp(tint * 2.4, 0.0, 1.3) * lum * 1.6, 0.75);
 		}
 		vec3 interior = tint * (0.75 + 0.35 * rnd);
 		// Blinds half-drawn in some windows (offices and flats, not shops).

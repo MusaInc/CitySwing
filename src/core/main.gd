@@ -214,6 +214,12 @@ func _ready() -> void:
 			pub.process_mode = Node.PROCESS_MODE_ALWAYS
 			pub.main = self
 			add_child(pub)
+	if args.has("camaudit"):
+		var probe: Node = load("res://tools/camera_probe.gd").new()
+		probe.set("cam", camera.cam)
+		probe.set("player", player)
+		probe.set("secs", float(args["camaudit"]))
+		add_child(probe)
 	if args.has("selftest"):
 		_selftest.call_deferred()
 	if args.has("shot"):

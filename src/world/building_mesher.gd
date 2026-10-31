@@ -33,6 +33,8 @@ const AWNING_OUT := 1.3
 const IRON := [Color(0.11, 0.12, 0.12), Color(0.1, 0.16, 0.13), Color(0.3, 0.12, 0.09)]
 const ESCAPE_DEPTH := 1.35   # m: fire-escape platforms stand this far out
 const FIN_OUT := 0.24        # m: glass-tower fins
+## Outskirt backdrop blocks opt out of features (drawn plain, collide plain).
+const NO_FEATURES := {"draw": [], "beams": [], "col": []}
 
 var verts := PackedVector3Array()
 var normals := PackedVector3Array()
@@ -280,13 +282,62 @@ func add_building(b: Dictionary, detailed: bool) -> void:
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
 			top(x0, z0, x1, z1, y1, roof, KIND_ROOF, style, seed)
-	if detailed:
-		var f := features(b)
-		for d in f["draw"]:
+
+
+## Architectural features (features()) as their own mesh: CityWorld draws it
+## over a shorter range than the detailed LOD, since it is small detail.
+## Fins only need their two sides and face (6 triangles, not 12).
+func add_features(b: Dictionary) -> void:
+	var f := features(b)
+	for d in f["draw"]:
+		var bx: AABB = d[0]
+		if d.size() > 2 and d[2] is String:
+			continue  # skyline pieces: drawn with the building (add_skyline)
+		if d.size() > 2 and d[2] is Vector3:
+			_fin(bx, d[2], d[1])
+		else:
+			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1])
+	for bm in f["beams"]:
+		beam(bm[0], bm[1], bm[2], bm[3], bm[4])
+
+
+## Feature pieces that shape the skyline (glass crowns): part of the building
+## mesh at every LOD, not the short-range feature mesh.
+func add_skyline(b: Dictionary) -> void:
+	if b["kind"] != "normal":
+		return
+	for d in features(b)["draw"]:
+		if d.size() > 2 and d[2] is String:
 			var bx: AABB = d[0]
 			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1])
-		for bm in f["beams"]:
-			beam(bm[0], bm[1], bm[2], bm[3], bm[4])
+
+
+## A thin vertical fin standing out of a wall along `out`: face + two sides.
+func _fin(bx: AABB, out: Vector3, col: Color) -> void:
+	var y0 := bx.position.y
+	var y1 := bx.end.y
+	var lo := bx.position
+	var hi := bx.end
+	var c := bx.get_center()
+	var side := Vector3(out.z, 0, -out.x).abs()  # along the wall
+	var hw := (side * bx.size).length() * 0.5
+	var depth := (out.abs() * bx.size).length()
+	var base := c - out * depth * 0.5  # on the wall plane
+	var tip := c + out * depth * 0.5
+	var s := Vector3(out.z, 0, -out.x)  # wall tangent (right of `out`)
+	var a := tip - s * hw
+	var e := tip + s * hw
+	_vquad(a, e, y0, y1, out, col)
+	_vquad(e, base + s * hw, y0, y1, s, col.darkened(0.12))
+	_vquad(base - s * hw, a, y0, y1, -s, col.darkened(0.12))
+
+
+## Vertical quad from a to b (seen with `n` toward the viewer), y0..y1.
+func _vquad(a: Vector3, b: Vector3, y0: float, y1: float, n: Vector3, col: Color) -> void:
+	var p := [Vector3(a.x, y1, a.z), Vector3(b.x, y1, b.z), Vector3(b.x, y0, b.z), Vector3(a.x, y0, a.z)]
+	if (p[1] - p[0]).cross(p[2] - p[0]).dot(n) > 0.0:
+		p.reverse()
+	quad(p[0], p[1], p[2], p[3], n, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col, KIND_TRIM, 0, 0)
 
 
 ## Cornice: how far the roof slab overhangs the walls, and its depth (it
@@ -335,6 +386,8 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		"structure", "sign", "plain":
 			for t in tiers:
 				out.append(_aabb(t[0], t[1], t[2], t[3], t[4], t[5]))
+			if kind == "sign":
+				_sign_boxes(b, out)
 			return out
 		"frame":
 			for t in tiers:
@@ -464,7 +517,7 @@ static func _features(b: Dictionary) -> Dictionary:
 				var m := ceili((u0 + 0.9) / 3.2)
 				while m * 3.2 - u0 < L - 0.9:
 					var a := m * 3.2 - u0
-					out["draw"].append([_fbox(f, a - 0.07, a + 0.07, 0.0, FIN_OUT, y0, y1), fin_col])
+					out["draw"].append([_fbox(f, a - 0.07, a + 0.07, 0.0, FIN_OUT, y0, y1), fin_col, f[2]])
 					m += 1
 			out["col"].append(_aabb(t[0] - FIN_OUT, t[1] - FIN_OUT, t[2] + FIN_OUT, t[3] + FIN_OUT, y0, y1))
 	var tt: Array = b["tiers"][-1]
@@ -486,6 +539,26 @@ static func _features(b: Dictionary) -> Dictionary:
 			cap.size.y = 0.18
 			out["draw"].append([cap, trim])
 			out["col"].append(AABB(cap.position - Vector3(0, hgt, 0), Vector3(cap.size.x, hgt + 0.18, cap.size.z)))
+	# Glass crowns: the curtain wall carries on past the roof as a screen with
+	# a light coping band, so each tower ends in its own cap (and the plant
+	# behind it is hidden).
+	if _glassy(b) and float(tt[5]) > 100.0 and rng.randf() < 0.7:
+		var ch2 := rng.randf_range(4.0, 7.0)
+		var scr := trim.darkened(rng.randf_range(0.25, 0.55))
+		var x0: float = float(tt[0]) - o
+		var z0: float = float(tt[1]) - o
+		var x1: float = float(tt[2]) + o
+		var z1: float = float(tt[3]) + o
+		var rings: Array[AABB] = []
+		_ring(rings, x0, z0, x1, z1, ry, ry + ch2, 0.3)
+		for r in rings:
+			out["draw"].append([r, scr, "far"])
+			out["col"].append(r)
+		var caps: Array[AABB] = []
+		_ring(caps, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, ry + ch2, ry + ch2 + 0.35, 0.4)
+		for r in caps:
+			out["draw"].append([r, trim.lightened(0.25), "far"])
+			out["col"].append(r)
 	# Crowns: corner and mid piers rising over the parapet of deco/stone towers.
 	if style in [CityLayout.Style.DECO, CityLayout.Style.STONE] and float(tt[5]) > 70.0 \
 			and float(tt[2]) - float(tt[0]) > 14.0 and float(tt[3]) - float(tt[1]) > 14.0:
@@ -529,11 +602,9 @@ static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: 
 		out["draw"].append([_fbox(f, c - hw, c + hw, 0.0, d, y - 0.08, y), iron])
 		var r := 1.0
 		out["beams"].append([_fpt(f, c - hw, d - 0.03, y + r), _fpt(f, c + hw, d - 0.03, y + r), 0.06, 0.06, iron])
-		out["beams"].append([_fpt(f, c - hw, d - 0.03, y + r * 0.5), _fpt(f, c + hw, d - 0.03, y + r * 0.5), 0.03, 0.03, iron])
 		for e in [c - hw + 0.03, c + hw - 0.03]:
 			out["beams"].append([_fpt(f, e, 0.05, y + r), _fpt(f, e, d - 0.03, y + r), 0.06, 0.06, iron])
 			out["beams"].append([_fpt(f, e, d - 0.03, y), _fpt(f, e, d - 0.03, y + r), 0.05, 0.05, iron])
-		out["beams"].append([_fpt(f, c, d - 0.03, y), _fpt(f, c, d - 0.03, y + r), 0.04, 0.04, iron])
 		if i + 1 < levels.size():
 			# Zig-zag stair to the next platform, against the wall.
 			var y2: float = levels[i + 1]
@@ -553,8 +624,8 @@ static func _fire_escape(out: Dictionary, f: Array, style: int, h: float, iron: 
 	var lx := c + hw - 0.7
 	for s2 in [-0.22, 0.22]:
 		out["beams"].append([_fpt(f, lx + s2, d - 0.2, ya - 2.3), _fpt(f, lx + s2, d - 0.2, ya), 0.05, 0.05, iron])
-	for j in 6:
-		var yy := ya - 2.1 + j * 0.35
+	for j in 3:
+		var yy := ya - 2.0 + j * 0.8
 		out["beams"].append([_fpt(f, lx - 0.22, d - 0.2, yy), _fpt(f, lx + 0.22, d - 0.2, yy), 0.03, 0.03, iron])
 	out["col"].append(_fbox(f, lx - 0.27, lx + 0.27, d - 0.25, d - 0.15, ya - 2.3, ya))
 
@@ -581,7 +652,7 @@ static func _portal(out: Dictionary, f: Array, style: int, col: Color, trim: Col
 		out["col"].append(can)
 		return
 	# Classical portal: two pilasters, entablature and a cornice cap.
-	var stone := Color(0.8, 0.76, 0.68) if style == CityLayout.Style.BRICK else col.lightened(0.1)
+	var stone := Color(0.7, 0.64, 0.55) if style == CityLayout.Style.BRICK else col.lightened(0.04)
 	var pw := 1.0
 	var ph := rng.randf_range(5.6, 6.6)
 	var parts := [
@@ -599,6 +670,27 @@ static func _portal(out: Dictionary, f: Array, style: int, col: Color, trim: Col
 	for e in [c - 2.6 - pw * 0.5, c + 2.6 + pw * 0.5]:
 		out["draw"].append([_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5), Color(0.95, 0.78, 0.4)])
 		out["col"].append(_fbox(f, e - 0.14, e + 0.14, 0.55, 0.85, 3.0, 3.5))
+
+
+## A billboard's legs and its catwalk, as _add_sign draws them.
+static func _sign_boxes(b: Dictionary, out: Array[AABB]) -> void:
+	var t: Array = b["tiers"][0]
+	var roof: float = b.get("roof", float(t[4]) - 2.6)
+	var along_x: bool = t[2] - t[0] > t[3] - t[1]
+	var length: float = (t[2] - t[0]) if along_x else (t[3] - t[1])
+	var n := maxi(2, int(length / 5.0) + 1)
+	for i in n:
+		var u := lerpf(0.1, 0.9, i / float(n - 1))
+		var x: float = lerpf(t[0], t[2], u) if along_x else (t[0] + t[2]) * 0.5
+		var z: float = (t[1] + t[3]) * 0.5 if along_x else lerpf(t[1], t[3], u)
+		out.append(_aabb(x - 0.125, z - 0.125, x + 0.125, z + 0.125, roof, t[4]))
+	var cx: float = (t[0] + t[2]) * 0.5
+	var cz: float = (t[1] + t[3]) * 0.5
+	var y: float = float(t[4]) - 0.1
+	if along_x:
+		out.append(_aabb(cx - length * 0.5, cz + 0.27 - 0.45, cx + length * 0.5, cz + 0.27 + 0.45, y - 0.06, y + 0.06))
+	else:
+		out.append(_aabb(cx + 0.27 - 0.45, cz - length * 0.5, cx + 0.27 + 0.45, cz + length * 0.5, y - 0.06, y + 0.06))
 
 
 static func _aabb(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float) -> AABB:

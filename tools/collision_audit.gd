@@ -164,7 +164,7 @@ func _mirror_visuals(n: Node) -> int:
 		var nm := String(c.name)
 		if c is MeshInstance3D:
 			var mi := c as MeshInstance3D
-			if nm in ["Detail", "Ground", "Water", "Outskirts", "OutskirtsNear", "OutskirtsBlocks", "OutskirtsGround"] \
+			if nm in ["Detail", "Features", "Ground", "Water", "Outskirts", "OutskirtsNear", "OutskirtsBlocks", "OutskirtsGround"] \
 					and mi.mesh != null:
 				tris += _add_trimesh(mi.mesh, mi.global_transform, String(mi.get_parent().name) + "/" + nm)
 		elif c is MultiMeshInstance3D and nm.begins_with("Landmark_"):
