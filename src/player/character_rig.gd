@@ -21,6 +21,11 @@ extends Node3D
 ## was bound in an A-pose (ARM_A / LEG_A), so each bone carries a fixed
 ## correction from "pivot in A-pose" to "skeleton bone at rest".
 
+## Emitted at the end of every pose update – what gets drawn this frame.
+## (Measure poses here: right after process_frame the capsule has already
+## moved for the next frame while the limbs haven't.)
+signal posed
+
 const MODEL_PATH := "res://assets/models/character.glb"
 const GEAR_PATH := "res://assets/models/gear.glb"
 ## Gear pieces that ride a bone other than the head (gadgets).
@@ -162,6 +167,11 @@ var _foot_off := {"l": Vector3.ZERO, "r": Vector3.ZERO}  # eases out target jump
 var _foot_last := {}                     # side -> last solved ankle target
 var _foot_mode := {}                     # side -> planted ankle pos, or null when free
 var _hip_drop := 0.0
+var _gait := Gait.new()      # world-space foot placement (ground locomotion)
+var _gait_live := false      # the gait drove the legs this frame
+var _floor_t := 0.0         # s since the capsule was last on the floor
+var _gait_amp := 0.0         # 0..1 stride amplitude (eases in/out on start/stop)
+var _hip_shift := 0.0        # pelvis side-shift over the stance foot (m)
 var _settle := {}          # side -> [progress 0..1, from ankle pos]: a small step back under the hips
 const SETTLE_DIST := 0.16  # a standing foot further than this from its rest spot steps in
 const SETTLE_TIME := 0.28
@@ -681,6 +691,8 @@ func _on_respawned() -> void:
 	_foot_mode.clear()
 	_hip_drop = 0.0
 	_settle.clear()
+	_gait.reset()
+	_gait_amp = 0.0
 	_step_off = 0.0
 	_reset_scarf()
 
@@ -742,6 +754,7 @@ func _process(dt: float) -> void:
 	var wing := maxf(_glide, _glide_rope) > 0.5 and not ragdolling
 	_set_grip("r", player.line_state != Player.Line.IDLE or (fists and not wing))
 	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
+	posed.emit()
 
 
 func _set_grip(side: String, on: bool) -> void:
@@ -759,8 +772,18 @@ func _update_animated(dt: float) -> void:
 	var vh := Vector3(v.x, 0.0, v.z)
 	var hs := vh.length()
 	var speed := v.length()
-	var grounded := player.is_on_floor() and not s.attached
 	var on_rope := player.line_state != Player.Line.IDLE
+	# Kerbs and steps down lift the capsule off the floor for a few frames:
+	# the body keeps walking through them (animation only) instead of
+	# flickering into the air poses.
+	_floor_t = 0.0 if player.is_on_floor() else _floor_t + dt
+	var grounded := player.is_on_floor() and not s.attached
+	if not grounded and _floor_t < 0.12 and v.y > -4.0 and v.y < 2.0 and not on_rope and _was_grounded \
+			and not s.attached and _getup_t <= 0.0 and _roll_time <= 0.0:
+		# (Only with a floor within a kerb's height under the feet.)
+		var at := player.global_position
+		var kq := PhysicsRayQueryParameters3D.create(at, at + Vector3.DOWN * 1.32, player.collision_mask, [player.get_rid()])
+		grounded = not get_world_3d().direct_space_state.intersect_ray(kq).is_empty()
 	var attached := player.line_state == Player.Line.ATTACHED
 	# Rope load 0..1: taut + tension. Slack line = 0 (body relaxes into flight).
 	_load = move_toward(_load, clampf(s.tension / 40.0, 0.0, 1.0) if attached and s.taut else 0.0, dt * 4.0)
@@ -810,6 +833,8 @@ func _update_animated(dt: float) -> void:
 		_stance_w[sd] = -1.0
 		_swing_w[sd] = -1.0
 		_heel[sd] = 0.0
+	_gait_live = false
+	_hip_shift = 0.0
 
 	# --- facing & turn rate -----------------------------------------------
 	_stagger_t = maxf(_stagger_t - dt, 0.0)
@@ -1076,6 +1101,10 @@ func _update_animated(dt: float) -> void:
 	# Hip bob (running) – the pelvis rides up and down over the stance leg.
 	(bones["hips"] as Node3D).position.y = lerpf((bones["hips"] as Node3D).position.y,
 		(BONES["hips"][1] as Vector3).y - 0.9 + bob - _hip_drop, 1.0 - exp(-20.0 * dt))
+	(bones["hips"] as Node3D).position.x = lerpf((bones["hips"] as Node3D).position.x, _hip_shift, 1.0 - exp(-12.0 * dt))
+	if not _gait_live and _gait.active:
+		_gait.reset()  # next time on the feet, start from where they are
+		_gait_amp = 0.0
 
 	_drive_springs(q, dt, on_rope, grounded)
 	if air:
@@ -1097,162 +1126,126 @@ func _update_animated(dt: float) -> void:
 const GETUP_TIME := 1.05
 
 
-## Ground: idle → walk → sprint. Each leg alternates a stance phase, in
-## which the thigh sweeps back at exactly the ground speed so the foot stays
-## planted (sole held flat, toe-off at the end), and a swing phase that drives
-## the knee forward and folds the heel up. Stance is ~60% of a walking cycle and
-## ~28% of a sprint (longer flight). The cycle advances with distance.
+## Ground: idle → walk → jog → sprint. The feet are placed in the world by
+## the Gait (src/player/gait.gd): stance feet locked where they touched down,
+## swing feet flying to a landing spot predicted from the real velocity, the
+## clock running at a cadence picked from the speed. The legs are solved onto
+## those feet in _plant_feet; here the rest of the body is driven from the
+## same clock – the pelvis turns with the leg swinging through, drops toward
+## the swinging side and shifts over the stance foot (walking), the shoulders
+## counter-rotate, the arms swing against the legs (loose and nearly straight
+## walking, pumping at ~90° running), the head stays level and steady.
+## Returns the pelvis height offset (bob, crouch, landing squash).
 func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
-	var stride_len := clampf(0.4 + hs * 0.15, 0.5, 2.6)  # metres per step
-	_run_phase += dt * hs * PI / stride_len
-	var run := clampf((hs - 1.8) / 5.0, 0.0, 1.0)  # 0 walk … 1 run
-	var mv := clampf(hs / 1.2, 0.0, 1.0)            # 0 standing … 1 moving
-	# Stance geometry. The hips ride a little lower as the pace rises (knees
-	# flexed – athletic, and it buys the legs reach). A foot lands up to
-	# reach_f ahead of the hip and leaves up to reach_b behind it, rolled onto
-	# the ball of the foot. Stance is shortened to what the legs can
-	# actually cover at this stride, so a planted foot never has to skate.
-	var crouch := (0.02 + 0.06 * run) * mv
-	var hh := LEG_LEN - 0.01 - crouch - (0.012 + 0.01 * run)  # hip above ankle, mid-stance
-	var reach_f := sqrt(maxf(LEG_LEN * LEG_LEN - hh * hh, 0.0)) * 0.92
-	var toe_end := 0.5 + 0.25 * run
-	var hb := hh - BALL * sin(toe_end)
-	var reach_b := (sqrt(maxf(LEG_LEN * LEG_LEN - hb * hb, 0.0)) + BALL * (1.0 - cos(toe_end))) * 0.95
-	var stance := minf(lerpf(0.58, 0.24, run), (reach_f + reach_b) / (2.0 * stride_len))
-	# Ground covered while a foot is down (each step = stride_len, one cycle =
-	# two steps), split ahead/behind the hip in proportion to the reach.
-	var cover := 2.0 * stride_len * stance * mv
-	var xf := cover * reach_f / (reach_f + reach_b)
-	# Drifting backwards (bounced off a wall, braking past a reversal before
-	# the body has turned): back-pedal – feet land behind and push off ahead,
-	# so the stride still matches the ground instead of skating.
-	var vh := Vector3(player.s.velocity.x, 0.0, player.s.velocity.z)
-	if hs > 0.8 and vh.dot(_facing) < -0.3 * hs and player.controls.move.length() < 0.3:
-		cover = -cover
-		xf = cover * reach_b / (reach_f + reach_b)
-	# The whole body leans (from the ankles) at speed; legs are posed in the
-	# body's frame, so add that lean back or the feet plant behind the hips.
-	var pitch := asin(clampf(global_basis.y.normalized().dot(_facing), -0.6, 0.6))
-	var th_f := atan2(xf, hh)
-	var th_b := atan2(xf - cover, hh)
-	# Thigh angular rate (per unit of stance progress) at landing and toe-off.
-	var rate_f := -cover / hh / (1.0 + pow(xf / hh, 2.0))
-	var rate_b := -cover / hh / (1.0 + pow((xf - cover) / hh, 2.0))
+	var g := _gait
+	var space := get_world_3d().direct_space_state
+	var ground := func(at: Vector3) -> Dictionary: return _ground_hit(space, at, 2.2)
+	var hips_w := {"l": (bones["thigh_l"] as Node3D).global_position, "r": (bones["thigh_r"] as Node3D).global_position}
+	if not g.active:
+		var ank := {}
+		for sd in ["l", "r"]:
+			ank[sd] = _plant[sd][0] if _plant.has(sd) else (bones["foot_" + sd] as Node3D).global_position
+		g.begin(ank, _facing, ground, player.s.velocity)
+	var run0 := g.run
+	var crouch := (0.012 + 0.05 * run0 + 0.03 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
+	g.update(dt, player.s.velocity, _facing, player.global_position, hips_w, ground, crouch)
+	_gait_live = true
+	var run := g.run
+	var spr := g.sprint
+	# Gait amplitude: eases in on the first step and out as the body stops.
+	_gait_amp = move_toward(_gait_amp, clampf(hs / 1.1, 0.0, 1.0) if g.moving else 0.0, dt * 3.5)
+	var amp := _gait_amp
+	var walk := 1.0 - run
+	var lf := g.left_forward()  # +1 left leg forward … -1 right leg forward
+	var fl: Gait.Foot = g.feet["l"]
+	var fr: Gait.Foot = g.feet["r"]
+	var sw_l := 0.0 if fl.planted else sin(PI * fl.w)
+	var sw_r := 0.0 if fr.planted else sin(PI * fr.w)
+	var ps := g.step_phase()
 	var brake := clampf(la.z * 0.03, 0.0, 0.5) * clampf(hs / 3.0, 0.0, 1.0)
-	# Forward bend of the torso (+ = forward; torso bones tilt back on +X, so
-	# it's applied negated). Landing folds forward, braking sits back.
-	# Swagger: walking, the chest is up and a touch back (a strut, not a
-	# shuffle); running, the body drives forward with the shoulders working.
-	var strut := mv * (1.0 - run)
-	var lean := -0.03 * strut + 0.1 * run * mv + _land_squash * 0.45 - brake * 0.4
-	var ph := _run_phase
-	var sw := sin(ph)
-	var step2 := sin(2.0 * ph + 0.6)  # once per step: the bounce and the nod
-	# Pelvis turns with the swinging leg, shoulders counter it and roll (the
-	# leading shoulder dips), the head stays steady and level (it counters
-	# the whole-body lean too) with a small nod on each step. Walking, the
-	# pelvis also drops toward the swinging leg – a loose, rolling hip sway.
-	var sway := sw * 0.085 * strut
-	q["hips"] = _ry(sw * (0.1 + 0.08 * strut) * mv) * _rz(sway)
-	q["spine"] = _rx(-lean) * _ry(-sw * 0.12 * mv) * _rz(-sway * 1.3)
-	q["chest"] = _ry(-sw * (0.22 + 0.1 * strut + 0.06 * run) * mv) * _rx(-0.04 * run + 0.05 * strut) \
-		* _rz(sw * (0.07 * strut + 0.04 * run))
-	q["neck"] = _ry(sw * 0.12 * mv)
-	# Eyes level: undo the torso bend and most of the whole-body lean.
-	q["head"] = _rx(lean * 0.8 + 0.14 * run + 0.03 + step2 * 0.045 * strut) * _rz(-sw * 0.05 * strut)
-	var bob := 0.0
-	for i in 2:
-		var sd := "l" if i == 0 else "r"
-		var u := fposmod((ph + PI * i) / TAU, 1.0)
-		var thigh: float
-		var knee: float
-		var foot: float
-		if u < stance:
-			var w := u / stance
-			thigh = atan2(xf - cover * w, hh) + pitch   # front → back at exactly ground speed
-			knee = 0.1 + (0.12 + 0.3 * run) * sin(PI * w)  # absorbs the load mid-stance
-			foot = -thigh + knee                         # sole parallel to the ground
-			# Heel strike: walking, the foot lands heel first, toes up, and rolls flat.
-			_heel[sd] = (1.0 - smoothstep(0.0, 0.22, w)) * 0.3 * (1.0 - run) * mv
-			foot += _heel[sd]
-			_toe[sd] = smoothstep(0.7, 1.0, w) * (0.5 + 0.25 * run) * mv  # toe-off: heel rolls up
-			foot -= _toe[sd]
-			_stance_w[sd] = w
-			bob -= (0.035 + 0.01 * run) * sin(PI * w) * mv  # a bounce in the step
-		else:
-			var w := (u - stance) / (1.0 - stance)
-			var e := smoothstep(0.0, 1.0, w)
-			_toe[sd] = 0.0
-			_swing_w[sd] = w * mv
-			if w > 0.15 and w < 0.85:
-				_lead = sd  # the knee coming through leads if we jump now
-			var lift := sin(PI * w)
-			# Back → front, leaving and arriving at the stance sweep rate, so the
-			# foot is already moving back under the body when it touches down.
-			var k := (1.0 - stance) / stance
-			var w2 := w * w
-			var w3 := w2 * w
-			thigh = th_b * (2.0 * w3 - 3.0 * w2 + 1.0) + rate_b * k * (w3 - 2.0 * w2 + w) \
-				+ th_f * (-2.0 * w3 + 3.0 * w2) + rate_f * k * (w3 - w2) + pitch
-			thigh += lift * (0.25 + 0.55 * run) * mv  # knee drive
-			knee = 0.15 + lift * (0.6 + 1.4 * run) * mv               # heel folds up
-			foot = 0.25 * lift - 0.2 * (1.0 - e) * mv                  # toes clear the ground
-		q["thigh_" + sd] = _rx(thigh + _land_squash * 0.9 + brake * 0.5)
-		q["shin_" + sd] = _rx(-knee - _land_squash * 1.6 - brake * 0.6)
-		q["foot_" + sd] = _rx(foot + _land_squash * 0.6)
-		# Arms swing against the legs from the shoulder; the elbow holds near
-		# 90° through the stride (closing a little on the forward swing), so
-		# the hands travel hip → chin rather than flailing up to the face.
-		# Driven from the shoulder, further back than forward at speed; the
-		# elbow opens a little on the back swing and closes coming through.
-		# Walking, the arms hang loose and a little out (elbows out, a lazy
-		# swing) and the forearm follows through after the upper arm; running,
-		# they pump hard.
-		var asg := 1.0 if i == 0 else -1.0
+	var push := clampf(-la.z * 0.02, 0.0, 0.3) * (1.0 - spr)  # pulling away: weight forward
+	var pitch := asin(clampf(global_basis.y.normalized().dot(_facing), -0.6, 0.6))
+
+	# --- pelvis: vertical rhythm, turn, list and side shift -----------------
+	# Walking the hips vault over the stance leg (highest mid-stance, lowest
+	# as the feet change); running they sink into the stance and rise in
+	# flight. Kept small: the body glides, it doesn't bounce.
+	var duty2 := minf(g.duty * 2.0, 1.0)
+	var bob_w := 0.018 * cos(TAU * (ps - 0.32)) - 0.018
+	var bob_r := -0.026 * cos(TAU * (ps - duty2 * 0.5)) - 0.012
+	var bob := lerpf(bob_w, bob_r, run) * amp
+	var hip_yaw := (0.09 + 0.04 * run - 0.03 * spr) * amp
+	var list := (sw_l - sw_r) * (0.055 * walk + 0.02 * run) * amp
+	_hip_shift = (sw_l - sw_r) * 0.022 * walk * amp
+	q["hips"] = _ry(-lf * hip_yaw) * _rz(list)
+	# --- torso ---------------------------------------------------------------
+	# Forward bend (+ = forward; torso bones tilt back on +X): runners lean a
+	# little from the hips on top of the ankle lean; pulling away the weight
+	# goes forward, braking it sits back; landing folds.
+	var lean := (0.02 * walk + 0.07 * run + 0.05 * spr) * amp + push * 0.5 + _land_squash * 0.45 - brake * 0.4
+	var sh_yaw := (0.1 + 0.08 * run) * amp
+	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.6) * _rz(-list * 0.8)
+	q["chest"] = _rx(-lean * 0.45 + 0.03 * walk) * _ry(lf * (hip_yaw * 0.4 + sh_yaw)) \
+		* _rz(-list * 0.4 + lf * 0.03 * run * amp)
+	# Head steady: undo the shoulders' turn and the body's lean; a small nod
+	# to the step walking.
+	q["neck"] = _ry(-lf * sh_yaw * 0.6)
+	q["head"] = _ry(-lf * sh_yaw * 0.4) * _rx(lean * 0.85 + pitch * 0.8 + 0.02 + 0.012 * walk * amp * sin(TAU * ps)) \
+		* _rz(list * 0.6)
+	# --- arms ------------------------------------------------------------------
+	# Opposite arm to leg, from the shoulder. Walking: loose, the elbow only
+	# softly bent (it flexes a little as the arm comes forward). Running: the
+	# elbow holds ~80–90°, opening on the back swing and closing coming
+	# through, the hand travelling hip → chest toward the midline.
+	var a_amp := (lerpf(0.3, 0.55, run) + 0.3 * spr) * amp
+	var a_base := lerpf(0.02, -0.1, run) * amp
+	for sd in ["l", "r"]:
 		var sdg := 1.0 if sd == "r" else -1.0
-		var asw := -sw * asg * (0.45 + 0.65 * run) * mv - 0.2 * run
-		var follow := maxf(-sin(ph - 0.9) * asg, 0.0) * 0.25 * strut
-		q["upper_arm_" + sd] = _rx(asw) * _rz((0.12 + 0.08 * strut + 0.05 * run) * sdg) * _ry(-0.25 * strut * sdg)
-		q["forearm_" + sd] = _rx(0.3 + 1.05 * run + 0.15 * mv + asw * 0.35 + follow)
+		var fwd := lf * sdg  # this arm forward when the opposite leg is
+		var arm := a_base + fwd * a_amp
+		var fwd_n := maxf(fwd, 0.0)
+		var back_n := maxf(-fwd, 0.0)
+		var abd := (0.11 + 0.03 * run - 0.07 * run * fwd_n) * sdg
+		q["upper_arm_" + sd] = _rx(arm) * _rz(abd) * _ry(-0.18 * sdg)
+		var elbow_w := 0.2 + 0.2 * fwd_n * amp
+		var elbow_r := 1.3 + 0.15 * spr + 0.25 * fwd_n - 0.3 * back_n
+		q["forearm_" + sd] = _rx(lerpf(elbow_w, elbow_r, run * amp) + 0.12 * amp * walk)
 		if brake > 0.05:
 			# Braking: arms come forward and out to balance the backward lean.
-			q["upper_arm_" + sd] = q["upper_arm_" + sd].slerp(_rx(0.6) * _rz(0.45 * (1.0 if sd == "r" else -1.0)),
-				clampf(brake * 1.8, 0.0, 0.8))
+			# (Elbows bent – balancing, not reaching.)
+			var bk := clampf(brake * 1.8, 0.0, 0.7)
+			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(_rx(0.4) * _rz(0.35 * sdg) * _ry(-0.2 * sdg), bk)
+			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(_rx(1.0), bk)
 		if _land_squash > 0.01:
 			# Landing: arms come forward to balance the folding hips.
 			var ls := clampf(_land_squash * 1.6, 0.0, 1.0)
-			q["upper_arm_" + sd] = q["upper_arm_" + sd].slerp(_rx(0.85) * _rz(0.4 * (1.0 if sd == "r" else -1.0)), ls)
-			q["forearm_" + sd] = q["forearm_" + sd].slerp(_rx(0.7), ls)
-	_standing = false
-	if mv < 0.3:
+			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(_rx(0.85) * _rz(0.4 * sdg), ls)
+			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(_rx(0.7), ls)
+	# Legs are solved onto the gait's feet in _plant_feet; hold the current
+	# pose here so the springs don't fight it.
+	for b in ["thigh_l", "thigh_r", "shin_l", "shin_r", "foot_l", "foot_r"]:
+		q[b] = _rot[b]
+	if amp < 0.35:
 		# Idle: slow breathing, weight shifting from leg to leg, a glance about.
-		# The weight sits on one leg (hip cocked, the other knee loose) and
+		# The weight sits on one leg (that hip up, the other knee loose) and
 		# only now and then swaps over; the shoulders counter the hip and the
 		# head tilts with an easy nod – relaxed, not standing to attention.
-		var k := 1.0 - mv / 0.3
+		var k := 1.0 - amp / 0.35
 		var br := sin(_time * 1.5)
 		var shift := clampf(sin(_time * 0.21) * 2.4, -1.0, 1.0)
-		q["hips"] = q["hips"].slerp(_rz(shift * 0.07), k)
-		q["spine"] = q["spine"].slerp(_rz(-shift * 0.06) * _rx(-0.02), k)
-		q["chest"] = q["chest"].slerp(_rx(0.04 + br * 0.025) * _rz(-shift * 0.04) * _ry(shift * 0.06), k)
-		q["head"] = q["head"].slerp(_ry(sin(_time * 0.31) * 0.2) * _rz(shift * 0.06)
+		q["hips"] = (q["hips"] as Quaternion).slerp(_rz(shift * 0.06) * _ry(shift * 0.04), k)
+		q["spine"] = (q["spine"] as Quaternion).slerp(_rz(-shift * 0.05) * _rx(-0.015), k)
+		q["chest"] = (q["chest"] as Quaternion).slerp(_rx(0.03 + br * 0.022) * _rz(-shift * 0.035) * _ry(-shift * 0.05), k)
+		q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.02), k)
+		q["head"] = (q["head"] as Quaternion).slerp(_ry(sin(_time * 0.31) * 0.2) * _rz(shift * 0.05)
 			* _rx(0.02 + br * 0.01 + maxf(sin(_time * 0.9), 0.0) * 0.04), k)
-		q["thigh_l"] = q["thigh_l"].slerp(_rz(-0.05 - maxf(shift, 0.0) * 0.04) * _rx(0.04), k)
-		q["thigh_r"] = q["thigh_r"].slerp(_rz(0.05 - minf(shift, 0.0) * 0.04) * _rx(0.02), k)
-		q["shin_l"] = q["shin_l"].slerp(_rx(-0.12 - maxf(-shift, 0.0) * 0.2), k)
-		q["shin_r"] = q["shin_r"].slerp(_rx(-0.12 - maxf(shift, 0.0) * 0.2), k)
-		q["foot_l"] = q["foot_l"].slerp(Quaternion.IDENTITY, k)
-		q["foot_r"] = q["foot_r"].slerp(Quaternion.IDENTITY, k)
-		# Relaxed: shoulders soft, elbows a little bent, hands slightly forward.
-		q["upper_arm_l"] = q["upper_arm_l"].slerp(_rz(-0.14 - br * 0.015) * _rx(0.12) * _ry(0.25), k)
-		q["upper_arm_r"] = q["upper_arm_r"].slerp(_rz(0.14 + br * 0.015) * _rx(0.1) * _ry(-0.25), k)
-		q["forearm_l"] = q["forearm_l"].slerp(_rx(0.42), k)
-		q["forearm_r"] = q["forearm_r"].slerp(_rx(0.38), k)
-		_standing = k > 0.5
-		if _standing:  # both feet stay where they are
-			for sd in ["l", "r"]:
-				_stance_w[sd] = 0.5
-				_toe[sd] = 0.0
+		# Relaxed: shoulders soft, elbows a little bent, hands by the thighs.
+		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-0.13 - br * 0.012) * _rx(0.06) * _ry(0.3), k)
+		q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion).slerp(_rz(0.13 + br * 0.012) * _rx(0.05) * _ry(-0.3), k)
+		q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.3 + br * 0.02), k)
+		q["forearm_r"] = (q["forearm_r"] as Quaternion).slerp(_rx(0.27 + br * 0.02), k)
+		_hip_shift = lerpf(_hip_shift, shift * 0.025, k)
+	_standing = not g.moving
 	# Turning: the head leads toward where the stick points, the chest
 	# follows a little – the body visibly decides before it goes.
 	var mvd := Vector3(player.controls.move.x, 0.0, player.controls.move.z)
@@ -1261,7 +1254,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		q["head"] = _ry(lead * 0.5) * (q["head"] as Quaternion)
 		q["neck"] = _ry(lead * 0.15) * (q["neck"] as Quaternion)
 		q["chest"] = _ry(lead * 0.12) * (q["chest"] as Quaternion)
-	return bob - crouch - _land_squash * 0.18
+	return bob - crouch - _land_squash * 0.18 - push * 0.03
 
 
 ## On the web. The rope arm is solved with two-bone IK so the hand sits on
@@ -1418,6 +1411,9 @@ func _two_bone(chest_basis: Basis, dir: Vector3, dist: float, pole: Vector3,
 ## and the hips drop when a planted foot is out of reach (stepping down).
 ## Any jump in a foot's target is eased out, so lock and release never pop.
 func _plant_feet(dt: float) -> void:
+	if _gait_live:
+		_plant_gait(dt)
+		return
 	var space := get_world_3d().direct_space_state
 	var hips := bones["hips"] as Node3D
 	var targets := {}
@@ -1536,6 +1532,91 @@ func _plant_feet(dt: float) -> void:
 			var shin_b := (bones["shin_" + sd] as Node3D).global_basis.orthonormalized()
 			var local := (shin_b.inverse() * want).get_rotation_quaternion()
 			_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(local, wik * _flat[sd]))
+
+
+## Locomotion: the legs are solved onto the Gait's feet (world positions),
+## and the feet are oriented on the ground (planted: heading, heel strike,
+## toe-off roll) or in the air (swing pitch). The hips sink if a planted foot
+## would be out of reach. Mirrors the gait into _plant/_stance_w/_toe so
+## audits and the other poses read one convention.
+func _plant_gait(dt: float) -> void:
+	var g := _gait
+	var hips := bones["hips"] as Node3D
+	var drop := -1.0
+	_plant.clear()
+	for sd in ["l", "r"]:
+		var f: Gait.Foot = g.feet[sd]
+		var hip := (bones["thigh_" + sd] as Node3D).global_position
+		if f.planted:
+			_plant[sd] = [f.pos, f.normal, f.heading]
+			_stance_w[sd] = f.stance_u
+			drop = maxf(drop, f.out.distance_to(hip) - (LEG_LEN - 0.005))
+		else:
+			_swing_w[sd] = f.w
+			if f.w > 0.15 and f.w < 0.85:
+				_lead = sd  # the knee coming through leads if we jump now
+			# The hips settle ahead of a touchdown the leg could only just
+			# reach (stepping down a kerb, a long stride) – never after it.
+			if f.w > 0.55 and not f.settle:
+				var down := Vector3(f.out.x, minf(f.out.y, f.target.y), f.out.z)
+				drop = maxf(drop, (down.distance_to(hip) - (LEG_LEN - 0.005)) * smoothstep(0.55, 0.9, f.w))
+		_toe[sd] = f.toe
+		_heel[sd] = f.heel
+		_foot_mode[sd] = f.pos if f.planted else null
+		_foot_off[sd] = Vector3.ZERO
+	_hip_drop = lerpf(_hip_drop, clampf(_hip_drop + drop, 0.0, 0.3), 1.0 - exp(-20.0 * dt))
+	var hb := hips.global_basis.orthonormalized()
+	for sd in ["l", "r"]:
+		var f: Gait.Foot = g.feet[sd]
+		# A planted leg is solved at full weight (fading the IK in would drag
+		# the foot across the ground); a swinging one fades in from the air
+		# pose as contact comes in (landing), so the legs never pop.
+		var wik := 1.0 if f.planted else _contact
+		var hip := (bones["thigh_" + sd] as Node3D).global_position
+		var tgt := f.out
+		_foot_last[sd] = tgt
+		var d := tgt - hip
+		var side := 0.12 if sd == "r" else -0.12
+		var ik := _two_bone(hb, d.normalized(), d.length(), Vector3(side, 0.0, -1.0), 0.45, 0.44, -1.0)
+		var th: Quaternion = ik[0]
+		if not f.planted:
+			# A swing leg never reaches back past the hip's range (a hard
+			# reversal can leave the lifting foot far behind).
+			var td := th * Vector3.DOWN
+			var back := atan2(td.z, -td.y)
+			if back > 0.82 and td.y < 0.0:
+				th = Quaternion(Vector3.RIGHT, back - 0.82) * th
+		_set_bone("thigh_" + sd, (_rot["thigh_" + sd] as Quaternion).slerp(th, wik))
+		var sh: Quaternion = ik[1]
+		if not f.planted and sh.get_angle() > 2.55:
+			sh = _rx(-2.55)  # heel kick: the calf meets the hamstring (~145°)
+		_set_bone("shin_" + sd, (_rot["shin_" + sd] as Quaternion).slerp(sh, wik))
+		var want: Basis
+		if f.planted:
+			var n := f.normal
+			var fh := (f.heading - n * f.heading.dot(n)).normalized()
+			if fh.length_squared() < 0.5:
+				continue
+			want = Basis.looking_at(fh, n) * Basis(Vector3.RIGHT, f.heel - f.toe)
+		else:
+			var fh := Vector3(f.heading.x, 0.0, f.heading.z).normalized()
+			if fh.length_squared() < 0.5:
+				continue
+			want = Basis.looking_at(fh, Vector3.UP) * Basis(Vector3.RIGHT, f.pitch)
+		var shin_b := (bones["shin_" + sd] as Node3D).global_basis.orthonormalized()
+		var local := (shin_b.inverse() * want).get_rotation_quaternion()
+		if not f.planted and f.world_k < 1.0:
+			# Mid-swing: relaxed on the shin, toes a little pointed.
+			local = _rx(-0.3 - 0.15 * _gait.run).slerp(local, f.world_k)
+		# Ankle range: in the air ~65° pointed, ~45° flexed, a little roll; a
+		# planted sole gets more (it must lie on the ground through a deep
+		# landing) but never twists round under the shin.
+		var eu := local.get_euler()
+		if f.planted:
+			local = Quaternion.from_euler(Vector3(eu.x, clampf(eu.y, -0.55, 0.55), clampf(eu.z, -0.45, 0.45)))
+		else:
+			local = Quaternion.from_euler(Vector3(clampf(eu.x, -1.13, 0.8), clampf(eu.y, -0.3, 0.3), clampf(eu.z, -0.3, 0.3)))
+		_set_bone("foot_" + sd, (_rot["foot_" + sd] as Quaternion).slerp(local, wik))
 
 
 ## Crouched poses (hard landing): both feet stay planted where they
@@ -1743,8 +1824,8 @@ func _set_bone(b: String, qq: Quaternion) -> void:
 	(bones[b] as Node3D).quaternion = qq
 
 
-func _ground_hit(space: PhysicsDirectSpaceState3D, at: Vector3) -> Dictionary:
-	var rq := PhysicsRayQueryParameters3D.create(at + Vector3.UP * 0.6, at + Vector3.DOWN * 0.7, player.collision_mask)
+func _ground_hit(space: PhysicsDirectSpaceState3D, at: Vector3, down := 0.7) -> Dictionary:
+	var rq := PhysicsRayQueryParameters3D.create(at + Vector3.UP * 0.6, at + Vector3.DOWN * down, player.collision_mask)
 	rq.exclude = [player.get_rid()]
 	return space.intersect_ray(rq)
 

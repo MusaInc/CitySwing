@@ -138,7 +138,7 @@ func run_scenario(name: String) -> Dictionary:
 			if t >= at:
 				(events[at] as Callable).call()
 				events.erase(at)
-		await get_tree().process_frame
+		await rig.posed
 		var dt := get_process_delta_time()
 		t += dt
 		m.sample(t, dt)
@@ -319,8 +319,16 @@ class Meter:
 					if trace and -h > 0.03:
 						print("  sink %s %.3f planted %s stance %.2f swing %.2f settle %s off %s" % [sd, -h, rig._plant.has(sd),
 							rig._stance_w[sd], rig._swing_w[sd], rig._settle.has(sd), (rig._foot_off[sd] as Vector3).snapped(Vector3.ONE * 0.01)])
+						var gf = rig._gait.feet[sd]
+						print("    gait out %s target %s from %s ankle %s ground %.3f" % [gf.out.snapped(Vector3.ONE * 0.01),
+							gf.target.snapped(Vector3.ONE * 0.01), gf.from.snapped(Vector3.ONE * 0.01), a.snapped(Vector3.ONE * 0.01), gy])
+			# Skating is measured where the foot meets the ground: the ball of
+			# the foot (the ankle rises and moves forward over it on toe-off,
+			# which is not a slide).
+			var fb := (rig.bones["foot_" + sd] as Node3D).global_basis.orthonormalized()
+			var ball := a - fb.z * CharacterRig.BALL
 			if rig._plant.has(sd) and prev_ankle.has(sd):
-				var mv: Vector3 = a - prev_ankle[sd]
+				var mv: Vector3 = ball - prev_ankle[sd]
 				r["slide"] = maxf(r["slide"], Vector2(mv.x, mv.z).length() / dt)
 				_slide_d += Vector2(mv.x, mv.z).length()
 				_slide_t += dt
@@ -328,7 +336,7 @@ class Meter:
 					print("  slide %s %.2f m/s off %s w %.2f toe %.2f" % [sd, Vector2(mv.x, mv.z).length() / dt,
 						(rig._foot_off[sd] as Vector3).snapped(Vector3.ONE * 0.01), rig._stance_w[sd], rig._toe[sd]])
 			if rig._plant.has(sd):
-				prev_ankle[sd] = a
+				prev_ankle[sd] = ball
 			else:
 				prev_ankle.erase(sd)
 		# Standing feet: scored from the second slow sample on – a dead stop

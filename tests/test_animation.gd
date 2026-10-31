@@ -143,7 +143,7 @@ func test_running_up_and_down_kerbs(t) -> void:
 	var planted := 0
 	var space := world.get_world_3d().direct_space_state
 	for i in 60 * 5:
-		await get_tree().process_frame
+		await rig.posed  # the pose as drawn
 		top = maxf(top, player.global_position.y)
 		if not player.is_on_floor():
 			continue
