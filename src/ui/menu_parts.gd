@@ -304,3 +304,25 @@ static func floor_fade(strength := 0.6) -> TextureRect:
 	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return r
+
+
+## Soft shade along one edge (right by default) so menu text over the live
+## city stays readable without a panel: dark at the edge, clear by `reach`.
+static func edge_shade(strength := 0.7, reach := 0.42, right := true) -> TextureRect:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 1.0 - reach, 1.0 - reach * 0.45, 1.0])
+	g.colors = PackedColorArray([Color(UiStyle.INK, 0.0), Color(UiStyle.INK, 0.0),
+		Color(UiStyle.INK, 0.45 * strength), Color(UiStyle.INK, 0.8 * strength)])
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	tex.width = 256
+	tex.height = 4
+	if not right:
+		tex.fill_from = Vector2(1, 0)
+		tex.fill_to = Vector2(0, 0)
+	var r := TextureRect.new()
+	r.texture = tex
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r

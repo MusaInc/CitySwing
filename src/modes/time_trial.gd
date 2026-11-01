@@ -95,8 +95,13 @@ func _hud() -> void:
 		if elapsed <= t:
 			target = "%s %s" % [Progress.MEDAL_NAMES[m].to_lower(), _fmt(t)]
 			break
-	hud.mode_sub = "ring %d/%d   ·   %s   ·   best %s" % [mini(next + 1, rings.size()), rings.size(),
-		target if target != "" else "no medal", "--" if best == INF else _fmt(best)]
+	hud.mode_sub = "ring %d/%d  ·  %s" % [mini(next + 1, rings.size()), rings.size(),
+		target if target != "" else ("best " + ("--" if best == INF else _fmt(best)))]
+	if hud.minimap:
+		var list: Array = []
+		for i in range(next, mini(next + 3, rings.size())):
+			list.append([rings[i].global_position, "next" if i == next else "ring"])
+		hud.minimap.markers = list
 
 
 func _complete() -> void:

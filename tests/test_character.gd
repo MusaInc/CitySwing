@@ -291,3 +291,27 @@ func test_idle_has_life(t) -> void:
 			seen[rig.idle_action] = true
 	t.check(seen.size() >= 1, "idle actions played: %s" % str(seen.keys()))
 	t.note("idle actions in 16 s: %s" % str(seen.keys()))
+
+
+## Landing moving sideways to the facing: an off-balance catch, not a
+## frozen pose; landing straight on doesn't trigger it.
+func test_sideways_landing_stumbles(t) -> void:
+	player.respawn(Vector3(20, 4.5, -120))
+	await get_tree().physics_frame
+	player.s.velocity = Vector3(9, 0, 0)
+	var seen := 0.0
+	for i in 90:
+		if not player.is_on_floor():
+			rig.set_facing(Vector3.FORWARD)  # the body still twisted the other way
+		await get_tree().process_frame
+		seen = maxf(seen, rig.stumble_t)
+	t.check(seen > 0.0, "sideways landing → stumble (%.2f s)" % seen)
+	player.respawn(Vector3(20, 4.5, -120))
+	await get_tree().physics_frame
+	player.s.velocity = Vector3(0, 0, -9)
+	rig.set_facing(Vector3.FORWARD)
+	seen = 0.0
+	for i in 90:
+		await get_tree().process_frame
+		seen = maxf(seen, rig.stumble_t)
+	t.check(seen == 0.0, "landing straight on → no stumble")

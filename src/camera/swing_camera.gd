@@ -75,6 +75,9 @@ var distance_scale := 1.0
 ## line, unit direction of travel]. The camera faces down the avenue and
 ## stays near its middle (never against a facade). Empty = normal follow.
 var rail: Callable
+## Title cinematics (CinematicDirector.camera_xf): callable(dt) -> [Transform3D, fov];
+## while set it places the camera outright.
+var cine: Callable
 
 
 func _ready() -> void:
@@ -144,6 +147,13 @@ func _process(dt: float) -> void:
 	if target == null:
 		return
 	dt = minf(dt, 0.1)
+	if cine.is_valid():
+		var c: Array = cine.call(dt)
+		global_transform = c[0]
+		cam.fov = c[1]
+		if _body:
+			_body.visible = true
+		return
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	if stick.length() > 0.05:
 		add_look(stick * dt * 2.6 * Settings.look_sensitivity)

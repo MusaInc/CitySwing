@@ -8,7 +8,7 @@ extends SceneTree
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 ##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble"]
 
 var player: Player
 var rig: CharacterRig
@@ -135,6 +135,14 @@ func _sc_idlelife() -> void:
 	for i in 16:
 		t.append(1.0 + i * 1.5)
 	await _film("idlelife", 25.0, t)
+
+
+## Landing moving sideways to the facing: the off-balance catch.
+func _sc_stumble() -> void:
+	_reset(Vector3(0, 4.5, 20), Vector3(8.0, 0.0, 0.0))
+	rig.set_facing(Vector3.FORWARD)
+	_cam_off = Vector3(0.0, 0.5, -4.2)  # from the front: the sideways lean reads
+	await _film("stumble", 1.6, [0.35, 0.5, 0.6, 0.7, 0.8, 0.95, 1.1, 1.3, 1.5])
 
 
 ## Each idle action, close up (forced one after another).

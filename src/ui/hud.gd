@@ -17,6 +17,8 @@ var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
 var coins: CoinMeter
+## Live map at the top centre (src/ui/minimap.gd).
+var minimap: Minimap
 var gadgets: Gadgets
 const GADGET_NAMES := {"boost": "JET BOOST", "glide": "GLIDE", "focus": "SLOW-MO", "surge": "DOUBLE COINS"}
 var _coin_shown := -1.0    # rolling balance readout
@@ -54,6 +56,9 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_font = UiStyle.font("bold")
 	_font_black = UiStyle.font("black")
+	minimap = Minimap.new()
+	minimap.name = "Minimap"
+	add_child(minimap)
 
 
 func web_feedback(pos: Vector2, ok: bool, reason: String) -> void:
@@ -104,6 +109,12 @@ func flash(text: String, seconds := 2.0) -> void:
 
 
 func _process(dt: float) -> void:
+	if minimap:
+		# Responsive: ~22% of the short side, inside the safe area (clear of
+		# the Dynamic Island / notch in landscape: it's centred, below the top).
+		var d := clampf(minf(size.x, size.y) * 0.22, 104.0, 196.0)
+		minimap.size = Vector2(d, d)
+		minimap.position = Vector2(size.x * 0.5 - d * 0.5, _safe_origin().y + 10.0)
 	_banner_t -= dt
 	_lines_seed += dt
 	_perfect_t = maxf(_perfect_t - dt, 0.0)
@@ -193,13 +204,16 @@ func _draw() -> void:
 		UiStyle.pill(self, Rect2(Vector2(g.x - cw / 2.0 - 14, g.y + 64), Vector2(cw + 28, 30)), Color(UiStyle.GOLD, 0.22))
 		_text(Vector2(g.x - cw / 2.0, g.y + 85), ct, 18, gold, shadow)
 	if mode_text != "":
-		var w := _font.get_string_size(mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
-		var w2 := _font.get_string_size(mode_sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x if mode_sub != "" else 0.0
-		var pw := maxf(w, w2) + 48.0
-		UiStyle.pill(self, Rect2(Vector2(size.x / 2.0 - pw / 2.0, 22), Vector2(pw, 66 if mode_sub != "" else 44)))
-		_text(Vector2(size.x / 2.0 - w / 2.0, 53), mode_text, 26, white, shadow)
+		# Mode readout (trial clock, endurance distance, training step):
+		# compact, just under the minimap.
+		var ty := minimap.position.y + minimap.size.y + 8.0 if minimap and minimap.visible else 22.0
+		var w := _font.get_string_size(mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+		var w2 := _font.get_string_size(mode_sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x if mode_sub != "" else 0.0
+		var pw := maxf(w, w2) + 32.0
+		UiStyle.pill(self, Rect2(Vector2(size.x / 2.0 - pw / 2.0, ty), Vector2(pw, 50 if mode_sub != "" else 34)))
+		_text(Vector2(size.x / 2.0 - w / 2.0, ty + 25), mode_text, 22, white, shadow)
 		if mode_sub != "":
-			_text(Vector2(size.x / 2.0 - w2 / 2.0, 76), mode_sub, 15, Color(1, 1, 1, 0.7), shadow)
+			_text(Vector2(size.x / 2.0 - w2 / 2.0, ty + 42), mode_sub, 13, Color(1, 1, 1, 0.7), shadow)
 	if _perfect_t > 0.0:
 		# "PERFECT" pops in big, settles, and fades; the streak counts up.
 		var age := 0.9 - _perfect_t
@@ -459,8 +473,8 @@ func _draw_pointer(cam: Camera3D) -> void:
 func _safe_origin() -> Vector2:
 	var sa := DisplayServer.get_display_safe_area()
 	var win := DisplayServer.window_get_size()
-	if sa.size.x <= 0 or win.x <= 0:
-		return Vector2.ZERO
+	if sa.size.x <= 0 or win.x <= 0 or DisplayServer.screen_get_size() != win:
+		return Vector2.ZERO  # (windowed on desktop: screen-space safe area doesn't apply)
 	return (Vector2(sa.position) * size / Vector2(win)).clamp(Vector2.ZERO, size * 0.2)
 
 

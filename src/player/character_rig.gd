@@ -154,6 +154,10 @@ var _glide_rope := 0.0     # 0..1 the same lean while swinging forward on the we
 var _bank := Vector3.ZERO  # smoothed sideways lean into an air turn (world, horizontal)
 var _turn := 0.0           # -1..1 how hard the body is turning (+ = right); head and arms lead it
 const HARD_TIME := 0.62
+const STUMBLE_TIME := 0.6
+var stumble_t := 0.0       # off-balance landing remaining (s); read by tests
+var _stumble_side := 1.0
+var _stumble_k := 1.0
 var _hard_lead := "l"
 const RELEASE_TIME := 0.42
 ## Foot planting (see _plant_feet).
@@ -430,6 +434,20 @@ func on_landed(speed: float) -> void:
 		# knee up, the other knee nearly down, one hand to the ground.
 		_hard_t = HARD_TIME
 		_hard_lead = _lead
+	elif player and impact > 6.0 and vh > 3.0:
+		# Coming down moving sideways to the way the body faces: off balance –
+		# arms thrown out, the torso tips toward the slide and rights itself
+		# while the feet catch up (the gait takes the corrective steps).
+		var vdir := Vector3(player.s.velocity.x, 0.0, player.s.velocity.z).normalized()
+		var side := _facing.cross(vdir).y
+		# (Also out of a banked air turn: the body is still leaning into it.)
+		var lean := _bank.dot(_facing.cross(Vector3.UP))
+		if absf(side) < 0.5 and absf(lean) > 0.12:
+			side = signf(lean)
+		if absf(side) > 0.5:
+			stumble_t = STUMBLE_TIME
+			_stumble_side = signf(side)
+			_stumble_k = clampf((impact - 6.0) / 10.0, 0.4, 1.0)
 
 
 ## Wall run / wall tap: face the wall and run up it while still rising.
@@ -673,6 +691,7 @@ func _on_respawned() -> void:
 	# Idle life, anticipation and cloth start fresh too (no state leaking
 	# from the last life into the next).
 	exert = 0.0
+	stumble_t = 0.0
 	idle_action = ""
 	_idle_t = 0.0
 	_idle_next = 3.0
@@ -855,6 +874,7 @@ func _update_animated(dt: float) -> void:
 	_takeoff_t = maxf(_takeoff_t - dt, 0.0)
 	_release_t = maxf(_release_t - dt, 0.0)
 	_hard_t = maxf(_hard_t - dt, 0.0)
+	stumble_t = maxf(stumble_t - dt, 0.0)
 	if _hard_t > 0.0 and (not player.is_on_floor() or player.controls.move.length() > 0.3 and _hard_t < HARD_TIME * 0.6):
 		_hard_t = minf(_hard_t, 0.12)  # off again / running on: rise quickly
 	# Getting up: quicker if the player is already pushing the stick.
@@ -1297,6 +1317,19 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	else:
 		_idle_reset()
 	_standing = not g.moving
+	if stumble_t > 0.0:
+		var u := 1.0 - stumble_t / STUMBLE_TIME
+		var e := sin(PI * minf(u * 1.4, 1.0)) * _stumble_k
+		var sd2 := _stumble_side
+		q["spine"] = (q["spine"] as Quaternion) * _rz(0.16 * sd2 * e) * _rx(0.05 * e)
+		q["chest"] = (q["chest"] as Quaternion) * _rz(0.1 * sd2 * e)
+		q["head"] = (q["head"] as Quaternion) * _rz(-0.14 * sd2 * e)
+		for sd in ["l", "r"]:
+			var sg := 1.0 if sd == "r" else -1.0
+			# The arm on the falling side reaches out further.
+			var reach := 0.75 + 0.35 * maxf(sg * sd2, 0.0)
+			q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(_rz(sg * reach) * _rx(0.25), e)
+			q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(_rx(0.35), e)
 	# Turning: the head leads toward where the stick points, the chest
 	# follows a little – the body visibly decides before it goes.
 	var mvd := Vector3(player.controls.move.x, 0.0, player.controls.move.z)
@@ -2447,6 +2480,8 @@ const IDLE_ACTIONS := {
 }
 var exert := 0.0            # 0..1 how hard the hero has been working (breathing)
 var idle_action := ""       # current idle action ("" = none); read by tests
+## Off in the shop (the hero holds still for the try-on: breathing only).
+var idle_actions := true
 var _idle_t := 0.0
 var _idle_next := 3.0
 var _idle_dur := 1.0
@@ -2525,7 +2560,7 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 	_gaze = _gaze.lerp(_gaze_goal, 1.0 - exp(-2.2 * dt))
 	# Occasional actions (not while winded).
 	_idle_next -= dt
-	if idle_action == "" and _idle_next <= 0.0 and winded < 0.2:
+	if idle_action == "" and _idle_next <= 0.0 and winded < 0.2 and idle_actions:
 		var pool := ["glance_back", "shoulder_roll", "shake_out", "gauntlet", "neck"]
 		if edge_k > 0.5 or high > 0.3:
 			pool += ["look_down", "look_down", "glance_back"]

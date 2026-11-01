@@ -39,12 +39,17 @@ func _physics_process(dt: float) -> void:
 func _process(_dt: float) -> void:
 	if not running:
 		return
-	var line := "%.1f km · %d swings" % [player.distance_travelled / 1000.0, player.swings]
-	if tokens:
-		var got := SaveData.token_count()
-		hud.mode_text = "TOKENS %d/%d" % [got, Progress.TOKEN_TOTAL]
-		hud.pointer = tokens.nearest(player.global_position)
-	hud.mode_sub = line
+	# No banner: the minimap shows the tokens (the nearest one pinned to its
+	# rim when it's off the map); totals live in pause / results / stats.
+	if tokens and hud.minimap:
+		var p := player.global_position
+		var list: Array = []
+		for t in tokens.near(p, 400.0):
+			list.append([t, "token"])
+		var nt := tokens.nearest(p)
+		if nt != Vector3.INF:
+			list.append([nt, "next"])
+		hud.minimap.markers = list
 
 
 func _on_token(_id: int, left: int) -> void:
@@ -74,5 +79,7 @@ func stop() -> void:
 func _exit_tree() -> void:
 	if is_instance_valid(hud):
 		hud.pointer = Vector3.INF
+		if hud.minimap:
+			hud.minimap.markers = []
 	if tokens:
 		tokens.queue_free()

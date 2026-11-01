@@ -123,6 +123,10 @@ func _ready() -> void:
 	hud = Hud.new()
 	ui.add_child(hud)
 	hud.player = player
+	hud.minimap.player = player
+	hud.minimap.camera = camera
+	if world is CityWorld:
+		hud.minimap.bake.call_deferred((world as CityWorld).layout)
 	hud.camera = camera
 	touch = TouchControls.new()
 	ui.add_child(touch)
@@ -176,6 +180,10 @@ func _ready() -> void:
 			get_tree().paused = false
 			(mode as FreeSwingMode).stop())
 	menus.look_changed.connect(dress)
+	menus.preview_focus.connect(func(slot: String): if is_instance_valid(director): director.shop_focus = slot)
+	menus.preview_orbit.connect(func(dx: float): if is_instance_valid(director): director.shop_yaw -= dx)
+	menus.preview_zoom.connect(func(f: float): if is_instance_valid(director): director.shop_zoom = clampf(director.shop_zoom * f, 0.55, 1.7))
+	menus.preview_reset.connect(func(): if is_instance_valid(director): director.reset_shop_view())
 	Settings.changed.connect(_apply_settings)
 
 	if args.has("cam"):
@@ -208,6 +216,8 @@ func _ready() -> void:
 			"results": menus.show_results({"mode": "trial", "time": 71.4, "course": "Canyon Sprint", "par": 84.4,
 				"best": 71.4, "new_best": true, "medal": Progress.Medal.SILVER, "swings": 24, "chain": 17,
 				"top_speed": 41.0, "unlocks": ["Violet"], "coins": 312, "best_mult": 4.5, "close_calls": 7})
+	if args.has("cine") and is_instance_valid(director):
+		director.cut_to(int(args["cine"]))  # captures: start on title shot N
 	if args.has("nohud"):
 		ui.visible = false
 	if OS.has_feature("web"):
@@ -259,13 +269,13 @@ func to_title() -> void:
 	hud.visible = false
 	touch.visible = false
 	_attract(SwingBot.Style.EXPERT, true)
-	# Frame the hero in the right half: the menus sit on the left.
-	camera.cam.h_offset = -2.8
+	camera.cam.h_offset = 0.0  # the director composes its own frames
 	menus.show_title()
 
 
 func start_mode(kind: String, arg: String) -> void:
 	get_tree().paused = false
+	_end_director()
 	camera.cam.h_offset = 0.0
 	camera.rail = Callable()
 	camera.distance_scale = 1.0
@@ -388,9 +398,19 @@ func _attract(style: int, showcase := false) -> void:
 	var bot: SwingBot
 	if showcase and world is CityWorld:
 		bot = ShowcasePilot.new(world)
-		_showcase_shot(bot as ShowcasePilot)
-		camera.rail = (bot as ShowcasePilot).rail
-		camera.distance_scale = 0.7
+		player.bot = bot
+		_end_director()
+		director = CinematicDirector.new()
+		director.name = "Director"
+		director.main = self
+		director.player = player
+		director.camera = camera
+		director.pilot = bot as ShowcasePilot
+		director.atmosphere = atmosphere
+		director.dip = _dip
+		add_child(director)
+		director.begin()
+		return
 	else:
 		bot = SwingBot.new(style, Vector3.FORWARD)
 		if world.has_method("bot_goal"):
@@ -399,6 +419,13 @@ func _attract(style: int, showcase := false) -> void:
 
 
 var _curtain: ColorRect
+var director: CinematicDirector
+
+
+func _end_director() -> void:
+	if is_instance_valid(director):
+		director.end()
+	director = null
 var _dipping := false
 
 
@@ -429,10 +456,7 @@ func _showcase_shot(pilot: ShowcasePilot) -> void:
 
 
 func _physics_process(dt: float) -> void:
-	if state == State.TITLE and player.bot is ShowcasePilot:
-		var pilot := player.bot as ShowcasePilot
-		if pilot.needs_cut(player, dt) and not _dipping:
-			_dip(_showcase_shot.bind(pilot), 0.12, 0.28)
+	pass  # (title cuts are the CinematicDirector's)
 
 
 func _apply_settings() -> void:
@@ -530,12 +554,15 @@ func _publish_web_state(dt: float) -> void:
 func _process(dt: float) -> void:
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
-	if state == State.TITLE and player.bot is ShowcasePilot:
-		# Shop: the drone moves in close so try-ons are easy to see (the
-		# hero stays framed in the right half, clear of the shop column).
+	if state == State.TITLE and is_instance_valid(director):
+		# The shop is a quiet rooftop studio with an orbit camera; every other
+		# title screen plays the cinematics.
 		var shop := menus.screen_name == "shop"
-		camera.distance_scale = 0.3 if shop else 0.7
-		camera.cam.h_offset = lerpf(camera.cam.h_offset, -1.6 if shop else -2.8, 1.0 - exp(-3.0 * dt))
+		if shop != director.in_shop:
+			if shop:
+				director.enter_shop()
+			else:
+				director.exit_shop()
 
 
 func _unhandled_input(event: InputEvent) -> void:

@@ -145,6 +145,16 @@ func remaining() -> int:
 	return _nodes.size()
 
 
+## Uncollected tokens within `r` metres of `p` (minimap markers).
+func near(p: Vector3, r: float) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var r2 := r * r
+	for i in _nodes:
+		if p.distance_squared_to(spots[i]) < r2:
+			out.append(spots[i])
+	return out
+
+
 ## Nearest uncollected token to `p`, or Vector3.INF when all are collected.
 func nearest(p: Vector3) -> Vector3:
 	var best := Vector3.INF

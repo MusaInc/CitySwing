@@ -55,6 +55,31 @@ func entry(rng: RandomNumberGenerator) -> Array:
 	return [Vector3(g.x, 48.0 + _ground(g.x, g.y), g.y), Vector3(along.x, -0.15, along.y).normalized() * 20.0]
 
 
+## Number of avenue legs on the tour.
+func leg_count() -> int:
+	return _loop.size()
+
+
+## Unit direction of travel along leg i (x, z).
+func leg_dir(i: int) -> Vector2:
+	var l := _leg(i)
+	return ((l[1] as Vector2) - (l[0] as Vector2)).normalized()
+
+
+## A mid-air start `frac` of the way down leg i, `height` m above the street,
+## at `speed` m/s: [position, velocity]. (Cinematic title shots.)
+func entry_on(i: int, frac: float, height := 48.0, speed := 20.0) -> Array:
+	if _loop.is_empty():
+		return [Vector3(0, 50, 0), Vector3.ZERO]
+	_seg = posmod(i, _loop.size())
+	var l := _leg(_seg)
+	var a: Vector2 = l[0]
+	var b: Vector2 = l[1]
+	var g := a.lerp(b, frac)
+	var along := (b - a).normalized()
+	return [Vector3(g.x, height + _ground(g.x, g.y), g.y), Vector3(along.x, -0.15, along.y).normalized() * speed]
+
+
 func _ground(x: float, z: float) -> float:
 	return _layout.ground_y(x, z) if _layout else 0.0
 
