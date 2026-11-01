@@ -1756,6 +1756,21 @@ func _bridge() -> void:
 	# Anchorages (solid stone blocks at both ends).
 	_add(_building([[x_east - 2.0, zc - 14.0, x_east + 14.0, zc + 14.0, 0.0, deck + 6.0]], Style.STONE,
 		Color(0.62, 0.58, 0.52), "plain"))
+	# The roadway runs into the east anchorage through a tunnel portal (it
+	# carries on under the waterfront to the city), so the deck doesn't just
+	# stop at a blank wall: a dark mouth in a dressed-stone surround. Drawn
+	# only – it's flush with the block, which already collides.
+	var portal := _kit("bridge_portal")
+	var fx := x_east - 2.0
+	var mouth := Color(0.035, 0.035, 0.04)
+	var dressed := Color(0.7, 0.66, 0.58)
+	_ksolid(portal, fx - 0.06, zc - 8.4, fx + 0.02, zc + 8.4, deck, deck + 5.2, mouth, false)
+	_ksolid(portal, fx - 0.45, zc - 9.4, fx + 0.02, zc + 9.4, deck + 5.2, deck + 6.4, dressed, false)
+	for sz: float in [-1.0, 1.0]:
+		_ksolid(portal, fx - 0.45, zc + sz * 8.4, fx + 0.02, zc + sz * 9.4, deck, deck + 5.2, dressed, false)
+	# Tunnel lamps glow inside the mouth.
+	for lz: float in [-6.0, -2.0, 2.0, 6.0]:
+		_ksolid(portal, fx - 0.1, zc + lz - 0.35, fx - 0.05, zc + lz + 0.35, deck + 4.6, deck + 4.8, Color(1.0, 0.85, 0.55), false)
 	# West anchorage: the roadway runs over it onto the approach viaduct; the
 	# cables go down into stone housings either side.
 	_add(_building([[x_west - 16.0, zc - 10.5, x_west + 2.0, zc + 10.5, -2.0, deck - 2.0]], Style.STONE,

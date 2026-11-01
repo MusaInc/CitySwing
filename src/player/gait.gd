@@ -63,6 +63,9 @@ class Foot:
 
 
 var feet := {"l": Foot.new("l"), "r": Foot.new("r")}
+## Touchdowns so far (footstep sounds poll this) and where the last one was.
+var touchdowns := 0
+var last_touchdown := Vector3.ZERO
 var phase := 0.0          # 0..1 gait clock (left touchdown at 0)
 var freq := 0.0           # cycles per second
 var duty := 0.6           # stance fraction of the cycle
@@ -374,6 +377,8 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 				f.planted = true
 				f.pos = f.cur
 				f.normal = f.target_n
+				touchdowns += 1
+				last_touchdown = f.cur
 				if f.target != Vector3.ZERO and Vector2(f.cur.x - f.target.x, f.cur.z - f.target.z).length() < 0.06:
 					f.pos.y = f.target.y
 				else:

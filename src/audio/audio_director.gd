@@ -14,6 +14,7 @@ const SHOTS := ["knockout", "grapple_fire", "grapple_attach", "grapple_miss", "r
 var _step_dist := 0.0
 var _step_i := 0
 var _horn_in := 9.0
+var _rig_steps := false  # footsteps come from the rig's foot plants
 
 var player: Player
 var atmosphere: Atmosphere
@@ -97,9 +98,19 @@ func attach_player(p: Player) -> void:
 	p.bumped.connect(func(spd: float, _n: Vector3):
 		play("bump", linear_to_db(clampf(spd / 10.0, 0.25, 0.9)), randf_range(0.9, 1.1))
 		Settings.haptic(int(clampf(spd * 2.5, 8.0, 30.0)), 0.35))
+	var rig := p.get_node_or_null("Rig")
+	if rig and rig.has_signal("footstep"):
+		rig.footstep.connect(_on_footstep)
+		_rig_steps = true
 	p.wall_kicked.connect(func():
 		play("wall_kick", -2.0)
 		Settings.haptic(25, 0.6))
+
+
+## A building rushing past: a short, bright whoosh (higher when faster).
+func close_call(speed: float, razor: bool) -> void:
+	play("release_whoosh", -3.0 if razor else -6.0, 1.35 + speed / 90.0)
+	Settings.haptic(14 if razor else 8, 0.4 if razor else 0.25)
 
 
 func attach_weather(a: Atmosphere) -> void:
@@ -182,15 +193,32 @@ func _footsteps(dt: float) -> void:
 	if vh < 0.8:
 		_step_dist = 0.0
 		return
+	if _rig_steps:
+		return  # the rig plays them on each real touchdown
 	_step_dist += vh * dt
 	var stride := 0.65 + 0.07 * vh
 	if _step_dist < stride:
 		return
 	_step_dist -= stride
-	var pos := player.global_position
+	_step_sound(player.global_position, vh)
+
+
+func _on_footstep(pos: Vector3) -> void:
+	if player == null or player.s.attached or player.stunned or not player.is_on_floor():
+		return
+	var v := player.s.velocity
+	var vh := Vector2(v.x, v.z).length()
+	if vh < 0.5:
+		return  # settle shuffles on the spot stay quiet
+	_step_sound(pos, vh)
+
+
+func _step_sound(pos: Vector3, vh: float) -> void:
 	var surf := "gravel" if player.height_above_ground() > 3.0 else "concrete"
 	var world := get_parent().get_node_or_null("World") if get_parent() else null
 	if surf == "concrete" and world and world.get("layout") and world.layout.is_park(Vector2(pos.x, pos.z)):
 		surf = "grass"
 	_step_i = (_step_i + 1 + randi() % 2) % 3
-	play("step_%s_%d" % [surf, _step_i], linear_to_db(clampf(0.25 + vh / 14.0, 0.25, 0.75)), randf_range(0.94, 1.06))
+	# Sprinting lands harder: louder and a touch lower.
+	play("step_%s_%d" % [surf, _step_i], linear_to_db(clampf(0.25 + vh / 14.0, 0.25, 0.85)),
+		randf_range(0.94, 1.06) - clampf((vh - 10.0) * 0.008, 0.0, 0.06))

@@ -25,6 +25,8 @@ extends Node3D
 ## (Measure poses here: right after process_frame the capsule has already
 ## moved for the next frame while the limbs haven't.)
 signal posed
+## A running/walking foot touched down (the gait's own plant, so sounds match the feet).
+signal footstep(pos: Vector3)
 
 const MODEL_PATH := "res://assets/models/character.glb"
 const GEAR_PATH := "res://assets/models/gear.glb"
@@ -1193,7 +1195,10 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		g.begin(ank, _facing, ground, player.s.velocity)
 	var run0 := g.run
 	var crouch := (0.012 + 0.05 * run0 + 0.03 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
+	var td := g.touchdowns
 	g.update(dt, player.s.velocity, _facing, player.global_position, hips_w, ground, crouch)
+	if g.touchdowns != td:
+		footstep.emit(g.last_touchdown)
 	_gait_live = true
 	var run := g.run
 	var spr := g.sprint

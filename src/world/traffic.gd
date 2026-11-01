@@ -143,6 +143,25 @@ func build_network() -> void:
 						ln.reverse()
 					_add_lane(ln, loop, LANE_V.get(kind, 10.0), piece)
 			piece += 1
+	# The suspension bridge and its approach viaduct: two lanes each way from
+	# the tunnel portal in the island's anchorage, over the strait and down
+	# onto Westbank. Both ends turn round out of sight (inside the anchorage;
+	# on the mainland, past the viaduct's foot).
+	if not layout.is_mainland:
+		var x_in := 62.0
+		var x_out := CityLayout.APPROACH_END + 4.0
+		var axis := PackedVector2Array()
+		var nb := int((x_in - x_out) / 6.0)
+		for i in nb + 1:
+			axis.append(Vector2(lerpf(x_in, x_out, float(i) / nb), CityLayout.BRIDGE_Z))
+		for o: float in [2.4, 6.0]:
+			for sgn: float in [1.0, -1.0]:
+				# (Same side-of-the-road convention as the streets above.)
+				var ln := CityLayout._offset_line(axis, o * sgn)
+				if sgn < 0.0:
+					ln.reverse()
+				_add_lane(ln, false, 14.0, piece, [], func(x: float, _z: float) -> float: return CityLayout.approach_y(x))
+		piece += 1
 	# Roundabouts: two lanes, one way (anticlockwise seen from above, north up).
 	for rb in R.roundabouts:
 		for dr: float in [-3.2, 3.2]:
@@ -171,7 +190,7 @@ static func _rotate_loop(pc: PackedVector2Array, disc: PackedVector2Array) -> Pa
 	return pc
 
 
-func _add_lane(line2: PackedVector2Array, loop: bool, v: float, piece: int, conn_y := []) -> int:
+func _add_lane(line2: PackedVector2Array, loop: bool, v: float, piece: int, conn_y := [], height := Callable()) -> int:
 	# Resample every STEP m on the road surface.
 	var src := line2.duplicate()
 	if loop:
@@ -188,7 +207,8 @@ func _add_lane(line2: PackedVector2Array, loop: bool, v: float, piece: int, conn
 			seg += 1
 		var sl := maxf(src[seg].distance_to(src[seg + 1]), 1e-4)
 		var q := src[seg].lerp(src[seg + 1], clampf((target - acc) / sl, 0.0, 1.0))
-		res.append(Vector3(q.x, layout.terrain.road_y(q.x, q.y) + 0.02, q.y))
+		var ry: float = height.call(q.x, q.y) if height.is_valid() else layout.terrain.road_y(q.x, q.y)
+		res.append(Vector3(q.x, ry + 0.02, q.y))
 	if loop:
 		res[n - 1] = res[0]
 	var id := l_base.size()
@@ -240,6 +260,7 @@ var _seg_grid := {}
 func _near(p: Vector3) -> Dictionary:
 	var out := {}
 	var p2 := Vector2(p.x, p.z)
+	var elevated := p.y - layout.terrain.road_y(p.x, p.z) > 3.0
 	var k := Vector2i(floori(p.x / 32.0), floori(p.z / 32.0))
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
@@ -251,6 +272,8 @@ func _near(p: Vector3) -> Dictionary:
 				var b := Vector2(lp[i + 1].x, lp[i + 1].z)
 				var q := Geometry2D.get_closest_point_to_segment(p2, a, b)
 				var d := q.distance_to(p2)
+				if elevated != (lp[i].y - layout.terrain.road_y(lp[i].x, lp[i].z) > 3.0):
+					continue  # one is up on the bridge deck, the other on the ground
 				if d < JOIN_R and d < float(out.get(li, [INF])[0]):
 					out[li] = [d, (i + q.distance_to(a) / maxf(a.distance_to(b), 1e-4)) * STEP]
 	return out
@@ -355,7 +378,16 @@ func _connector(A: Vector3, dA: Vector3, B: Vector3, dB: Vector3, from: int, to:
 		var bi := layout.block_at(line[i].x, line[i].y)
 		if bi >= 0 and layout.blocks[bi]["kind"] in ["block", "plaza", "green", "park"]:
 			return -1
-	var id := _add_lane(line, false, minf(l_v[from], l_v[to]) * 0.8, -1)
+	# Heights: ease between the two ends (a connector up on the bridge deck
+	# stays on the deck instead of dropping to the terrain under it).
+	var on_level := absf(A.y - layout.terrain.road_y(A.x, A.z)) > 1.0 or absf(B.y - layout.terrain.road_y(B.x, B.z)) > 1.0
+	var hf := Callable()
+	if on_level:
+		var a2 := Vector2(A.x, A.z)
+		var span := maxf(a2.distance_to(Vector2(B.x, B.z)), 0.01)
+		hf = func(x: float, z: float) -> float:
+			return lerpf(A.y, B.y, clampf(a2.distance_to(Vector2(x, z)) / span, 0.0, 1.0)) - 0.02
+	var id := _add_lane(line, false, minf(l_v[from], l_v[to]) * 0.8, -1, [], hf)
 	l_next[id] = to
 	l_snext[id] = s_to
 	l_feeds[to].append(id)
@@ -667,6 +699,16 @@ func _decide(id: int) -> void:
 			var f := _follower(id)
 			if f >= 0:
 				_queue_behind(f, id)
+		elif _at_rest(id) and car_s(id, now) < l_len[li] - 1.5:
+			# Parked short of the line (it was queued behind a car that has
+			# since turned off): creep up to the line instead of sitting there.
+			_rebase(id, true, l_len[li])
+			var f2 := _follower(id)
+			if f2 >= 0:
+				c_ek[f2] = EV_FOLLOW
+				c_ev[f2] = now + 0.7
+		if c_wait[id] < 0.0:
+			c_wait[id] = now
 		c_ek[id] = EV_DECIDE
 		c_ev[id] = now + 0.4
 		return

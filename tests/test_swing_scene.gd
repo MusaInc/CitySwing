@@ -186,3 +186,34 @@ class _Jump:
 		kicked = kicked or jump
 		var mv := Vector3.ZERO if kicked else Vector3(-1, 0, 0)
 		return {"move": mv, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": jump}
+
+
+## Close calls (NearMiss): flying past a facade at speed pays out; flying
+## into one doesn't.
+func test_close_call_past_a_facade(t) -> void:
+	var nm := NearMiss.new()
+	add_child(nm)
+	nm.set_player(player)
+	var got: Array = []
+	nm.close_call.connect(func(d: float, spd: float, razor: bool): got.append([d, spd, razor]))
+	player.bot = _Idle.new()
+	# Tower 1 spans x -24..-8, z -68..-52: skim its +x face 1.6 m out.
+	player.global_position = Vector3(-6.4, 50, -42)
+	player.s.velocity = Vector3(0, 2, -26)
+	for i in 100:
+		player.s.velocity.x = 0.0
+		await get_tree().physics_frame
+	t.check(got.size() == 1, "one close call for a pass along the wall (got %d)" % got.size())
+	if got.size() == 1:
+		t.note("passed %.2f m off the wall at %d km/h" % [got[0][0], int(got[0][1] * 3.6)])
+	# Head-on into the same tower: a crash, never a close call.
+	got.clear()
+	player.respawn()
+	await get_tree().physics_frame
+	player.global_position = Vector3(6.0, 45, -60)
+	player.s.velocity = Vector3(-26, 0, 0)
+	for i in 60:
+		await get_tree().physics_frame
+	t.check(got.is_empty(), "flying into the wall is not a close call (got %d)" % got.size())
+	nm.queue_free()
+

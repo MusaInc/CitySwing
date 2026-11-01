@@ -40,6 +40,8 @@ var _worst_ms := 0.0
 var _worst_t := 0.0
 var _lines_seed := 0.0
 var _perfect_t := 0.0
+var _close_t := 0.0        # "CLOSE CALL" callout timer
+var _close_txt := ""
 var _perfect_n := 0
 var _lines_boost := 0.0  # extra speed-line burst after a perfect release
 ## Speed lines start at this speed (m/s) and peak at SPEED_LINES_FULL.
@@ -64,6 +66,13 @@ func on_perfect(streak: int) -> void:
 	_perfect_t = 0.9
 	_perfect_n = streak
 	_lines_boost = 1.0
+
+
+## Close call past a facade: a quick white/cyan callout under PERFECT.
+func on_close_call(razor: bool, coins_won: int) -> void:
+	_close_t = 0.8
+	_close_txt = ("RAZOR CLOSE" if razor else "CLOSE CALL") + ("  +%d" % coins_won if coins_won > 0 else "")
+	_lines_boost = maxf(_lines_boost, 0.6)
 
 
 ## Wall knockout: red flash from the edges and a shaking KNOCKED OUT.
@@ -98,6 +107,7 @@ func _process(dt: float) -> void:
 	_banner_t -= dt
 	_lines_seed += dt
 	_perfect_t = maxf(_perfect_t - dt, 0.0)
+	_close_t = maxf(_close_t - dt, 0.0)
 	_lines_boost = maxf(_lines_boost - dt * 1.6, 0.0)
 	_reticle_spin += dt * 1.4
 	_ko_t = maxf(_ko_t - dt / maxf(Engine.time_scale, 0.05), 0.0)
@@ -201,6 +211,16 @@ func _draw() -> void:
 		var pp := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.24 - age * 30.0)
 		draw_string(_font_black, pp + Vector2(2, 3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
 		draw_string(_font_black, pp, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.82, 0.4, a))
+	if _close_t > 0.0:
+		# Slides in from the side it happened on feel: a small, fast callout
+		# (lower and lighter than PERFECT so the two can share the screen).
+		var age := 0.8 - _close_t
+		var a := clampf(_close_t / 0.3, 0.0, 1.0)
+		var fs := int(24 * (1.0 + 0.35 * exp(-age * 16.0)))
+		var tw := _font_black.get_string_size(_close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var pp := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.32 - age * 18.0)
+		draw_string(_font_black, pp + Vector2(2, 3), _close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
+		draw_string(_font_black, pp, _close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.75, 0.95, 1.0, a))
 	if pointer != Vector3.INF:
 		_draw_pointer(cam)
 	if gadgets and gadgets.enabled and gadgets.kind() != "":

@@ -633,9 +633,12 @@ func show_results(r: Dictionary) -> void:
 	box.add_child(_big(headline))
 	box.add_child(_label(detail, 20, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 	var g2 := HBoxContainer.new()
-	g2.add_child(_tile("%d" % r.get("swings", 0), "Swings", 190))
-	g2.add_child(_tile("×%d" % r.get("chain", 0), "Longest chain", 190))
-	g2.add_child(_tile("%d km/h" % int(r.get("top_speed", 0.0) * 3.6), "Top speed", 190))
+	var tw := 140 if r.has("close_calls") else 190  # four tiles fit the 640 px page
+	g2.add_child(_tile("%d" % r.get("swings", 0), "Swings", tw))
+	g2.add_child(_tile("×%d" % r.get("chain", 0), "Longest chain", tw))
+	g2.add_child(_tile("%d km/h" % int(r.get("top_speed", 0.0) * 3.6), "Top speed", tw))
+	if r.has("close_calls"):
+		g2.add_child(_tile("%d" % r["close_calls"], "Close calls", tw))
 	box.add_child(g2)
 	if r.has("coins"):
 		var cr := HBoxContainer.new()

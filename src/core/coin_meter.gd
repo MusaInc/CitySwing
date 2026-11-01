@@ -20,6 +20,9 @@ const MAX_LEVEL := int((MAX_MULT - 1.0) / STEP)
 const SAVE_EVERY := 8.0
 ## Tokens found in Free Swing (first time) pay a flat bonus.
 const TOKEN_COINS := 100
+## Close calls: coins (× the multiplier) and metres toward the next step.
+const CLOSE_COINS := 3
+const CLOSE_METRES := 25.0
 
 var player: Player
 ## Only true in a human-played run (not the title autopilot or benchmark).
@@ -81,6 +84,17 @@ func lose() -> void:
 	progress = 0.0
 	if was > 1.0:
 		multiplier_changed.emit(1.0, false, was)
+
+
+## A close call past a building (NearMiss): razor passes pay double.
+func close_call(razor: bool) -> int:
+	if not active:
+		return 0
+	var k := 2 if razor else 1
+	var n := int(ceil(CLOSE_COINS * k * multiplier()))
+	bonus(n)
+	_advance(CLOSE_METRES * k)
+	return n
 
 
 ## Pays for `metres` swung and moves the multiplier along.

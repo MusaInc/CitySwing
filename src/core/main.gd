@@ -18,6 +18,7 @@ var camera: SwingCamera
 var rig: CharacterRig
 var rope: RopeVisual
 var coins: CoinMeter
+var near_miss: NearMiss
 var gadgets: Gadgets
 var hud: Hud
 var touch: TouchControls
@@ -90,6 +91,10 @@ func _ready() -> void:
 	coins.name = "Coins"
 	add_child(coins)
 	coins.set_player(player)
+	near_miss = NearMiss.new()
+	near_miss.name = "NearMiss"
+	add_child(near_miss)
+	near_miss.set_player(player)
 	dress(Shop.look())
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
@@ -128,6 +133,9 @@ func _ready() -> void:
 	hud.coins = coins
 	coins.multiplier_changed.connect(hud.on_multiplier)
 	coins.earned.connect(hud.on_coins)
+	near_miss.close_call.connect(func(_d: float, spd: float, razor: bool):
+		hud.on_close_call(razor, coins.close_call(razor))
+		audio.close_call(spd, razor))
 	# Wall knockout: hit-stop + slow-mo, camera jolt, red flash, the slam.
 	impact_fx = ImpactFx.new()
 	impact_fx.name = "ImpactFx"
@@ -199,7 +207,7 @@ func _ready() -> void:
 			"stats": menus.show_stats()
 			"results": menus.show_results({"mode": "trial", "time": 71.4, "course": "Canyon Sprint", "par": 84.4,
 				"best": 71.4, "new_best": true, "medal": Progress.Medal.SILVER, "swings": 24, "chain": 17,
-				"top_speed": 41.0, "unlocks": ["Violet"], "coins": 312, "best_mult": 4.5})
+				"top_speed": 41.0, "unlocks": ["Violet"], "coins": 312, "best_mult": 4.5, "close_calls": 7})
 	if args.has("nohud"):
 		ui.visible = false
 	if OS.has_feature("web"):
@@ -293,6 +301,7 @@ func start_mode(kind: String, arg: String) -> void:
 	mode.start()
 	if kind != "benchmark":
 		coins.start_run()
+		near_miss.run_count = 0
 		gadgets.enabled = true
 	state = State.PLAYING
 	menus.hide_all()
@@ -365,6 +374,7 @@ func _on_finished(result: Dictionary) -> void:
 	gadgets.enabled = false
 	result["coins"] = coins.run_coins
 	result["best_mult"] = coins.best_mult
+	result["close_calls"] = near_miss.run_count
 	state = State.RESULTS
 	touch.visible = false
 	player.input_enabled = false
