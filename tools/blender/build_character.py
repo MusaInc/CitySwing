@@ -108,7 +108,7 @@ def hood(o, material, rim_mat):
     # Pole forward: the face opening is cut along one clean ring of latitude.
     bmesh.ops.rotate(bm, verts=bm.verts, matrix=Matrix.Rotation(-math.pi / 2, 3, "X"))
     c = o(0, -0.024, 0.138)
-    rad = Vector((0.128, 0.142, 0.13))
+    rad = Vector((0.142, 0.16, 0.146))
     drop = []
     for v in bm.verts:
         d = v.co.normalized()
@@ -182,23 +182,23 @@ def paint_panels(body, mats):
                 # A blend from the colour transfer (seat, cuffs): snap to the
                 # nearest garment key so shop recolours apply everywhere.
                 k_ = min(key, key=lambda n: sum((c[i] - key[n][i]) ** 2 for i in range(3)))
-                if z < 0.858 and ax < 0.17 and k_ in ("jacket", "jacket_dk"):
+                if z < 0.785 and ax < 0.19 and k_ in ("jacket", "jacket_dk"):
                     k_ = "pants"
                 c = key[k_]
                 col.data[li].color = (c[0], c[1], c[2], col.data[li].color[3])
-            if (near(c, key["jacket"]) or near(c, key["jacket_dk"])) and z < 0.858 and ax < 0.17:
+            if (near(c, key["jacket"]) or near(c, key["jacket_dk"])) and z < 0.785 and ax < 0.19:
                 want = "pants"  # under the hem: the joggers
             elif near(c, key["jacket"]):
-                torso = ax < 0.235 and 0.86 < z < 1.56
+                torso = ax < 0.26 and 0.78 < z < 1.56
                 if torso:
                     ang = math.degrees(math.atan2(y, ax))  # 0 = side, 90 = front, -90 = back
-                    hem = z < 0.915
-                    side = abs(ang) < 2.2 and 0.95 < z < 1.42 and ax > 0.12
+                    hem = z < 0.835
+                    side = abs(ang) < 2.2 and 0.85 < z < 1.42 and ax > 0.14
                     # Kangaroo pocket: stitched outline (sides, bottom, top).
-                    pk = y > 0.1 and ax < 0.132 and 0.966 < z < 1.126
-                    pocket = pk and (ax > 0.118 or z < 0.976 or z > 1.115)
+                    pk = y > 0.12 and ax < 0.152 and 0.865 < z < 1.045
+                    pocket = pk and (ax > 0.138 or z < 0.876 or z > 1.034)
                     # Pocket openings: slanted slits at each side.
-                    slit = y > 0.1 and 0.07 < ax < 0.13 and abs((z - 0.985) - (0.13 - ax) * 2.3) < 0.006 and z < 1.11
+                    slit = y > 0.12 and 0.08 < ax < 0.15 and abs((z - 0.885) - (0.15 - ax) * 2.3) < 0.006 and z < 1.03
                     if hem or side or pocket or slit:
                         want = "jacket_dk"
                 elif z > 1.0:
@@ -324,6 +324,8 @@ def build():
     emblem = M("emblem", (0.96, 0.74, 0.22), 0.5)
     ink = M("ink", (0.07, 0.07, 0.09), 0.6)
     cord = M("cord", (0.7, 0.68, 0.64), 0.85)
+    mask_m = M("mask", (0.14, 0.14, 0.15), 0.8)
+    lens_w = M("lens_white", (0.93, 0.93, 0.9), 0.25)
     outsole = M("outsole", (0.15, 0.14, 0.14), 0.9)
 
     # ================================================================ body
@@ -347,11 +349,11 @@ def build():
     # straight past the waist, filling out over chest and back and carried
     # past the shoulder joint (dropped shoulder).
     src.append(K.paint(tube("hoodie", [
-        ((0, 0, 0.874), 0.15, 0.1, -0.006), ((0, 0, 0.866), 0.19, 0.13, -0.004), ((0, 0, 0.912), 0.192, 0.132, -0.002),
-        ((0, 0, 0.955), 0.19, 0.134, 0.003), ((0, 0, 0.99), 0.186, 0.135, 0.004),
-        ((0, 0, 1.045), 0.174, 0.129, 0.006), ((0, 0, 1.1), 0.169, 0.127, 0.008), ((0, 0, 1.17), 0.177, 0.131, 0.012),
-        ((0, 0, 1.24), 0.196, 0.141, 0.014), ((0, 0, 1.31), 0.213, 0.149, 0.016), ((0, 0, 1.38), 0.224, 0.147, 0.012),
-        ((0, 0, 1.44), 0.22, 0.133, 0.004), ((0, 0, 1.49), 0.192, 0.112), ((0, 0, 1.535), 0.125, 0.094)], segs=30), jacket))
+        ((0, 0, 0.8), 0.17, 0.115, -0.006), ((0, 0, 0.792), 0.215, 0.152, -0.004), ((0, 0, 0.84), 0.218, 0.156, -0.002),
+        ((0, 0, 0.9), 0.214, 0.158, 0.004), ((0, 0, 0.97), 0.206, 0.156, 0.006),
+        ((0, 0, 1.05), 0.2, 0.152, 0.008), ((0, 0, 1.12), 0.202, 0.152, 0.01), ((0, 0, 1.19), 0.21, 0.156, 0.012),
+        ((0, 0, 1.26), 0.226, 0.162, 0.014), ((0, 0, 1.33), 0.236, 0.166, 0.014), ((0, 0, 1.39), 0.232, 0.16, 0.01),
+        ((0, 0, 1.44), 0.212, 0.144, 0.004), ((0, 0, 1.485), 0.17, 0.12), ((0, 0, 1.53), 0.12, 0.1)], segs=32), jacket))
     for sx in (-1, 1):
         side = "l" if sx < 0 else "r"
         # Chest and shoulder blades read softly through the jersey.
@@ -361,15 +363,15 @@ def build():
                                          ((sx * 0.205, 0.0, 1.49), 0.062, 0.062)], segs=14), jacket))
         # Dropped shoulder: the seam sits down the arm; the fabric rounds
         # over the deltoid rather than hugging it.
-        src.append(K.paint(K.sphere("shoulder", 0.083, J["upper_arm_" + side] + Vector((sx * 0.018, 0.004, -0.004)),
-                                    None, 16, 10, (0.98, 1.08, 1.02)), jacket))
+        src.append(K.paint(K.sphere("shoulder", 0.092, J["upper_arm_" + side] + Vector((sx * 0.03, 0.004, -0.06)),
+                                    None, 16, 10, (1.0, 1.08, 0.8)), jacket))
     # Fabric folds: blousing ridges over the hem band (front and back, offset
     # side to side), a diagonal drag fold from each armpit, and a soft roll
     # at the small of the back.
-    for (x, y, z, sx_, sz_, rot) in ((0.05, 0.134, 0.958, 0.075, 0.009, 0.08), (-0.075, 0.132, 0.952, 0.06, 0.008, -0.12),
-                                      (0.02, -0.13, 0.96, 0.09, 0.01, -0.05), (-0.1, -0.116, 0.965, 0.05, 0.008, 0.2),
-                                      (0.13, 0.075, 0.99, 0.045, 0.007, 0.5), (-0.135, 0.06, 0.985, 0.04, 0.007, -0.4),
-                                      (0.0, -0.13, 1.06, 0.1, 0.008, 0.0)):
+    for (x, y, z, sx_, sz_, rot) in ((0.05, 0.16, 0.86, 0.085, 0.011, 0.08), (-0.08, 0.158, 0.85, 0.07, 0.01, -0.12),
+                                      (0.02, -0.158, 0.86, 0.1, 0.012, -0.05), (-0.11, -0.14, 0.87, 0.06, 0.01, 0.2),
+                                      (0.16, 0.09, 0.9, 0.05, 0.009, 0.5), (-0.165, 0.075, 0.89, 0.045, 0.009, -0.4),
+                                      (0.0, -0.156, 1.0, 0.11, 0.01, 0.0)):
         f = K.sphere("fold", 1.0, (0, 0, 0), None, 14, 8, (sx_, 0.016, sz_))
         f.rotation_euler = (0, rot, math.atan2(x, y) * 0.0)
         f.location = (x, y, z)
@@ -378,14 +380,14 @@ def build():
     for sx in (-1, 1):
         f = K.sphere("drag", 1.0, (0, 0, 0), None, 12, 8, (0.012, 0.012, 0.07))
         f.rotation_euler = (0.0, sx * 0.55, 0.0)
-        f.location = (sx * 0.165, 0.07, 1.33)
+        f.location = (sx * 0.19, 0.085, 1.31)
         bpy.context.view_layer.update()
         src.append(K.paint(f, jacket))
     # Kangaroo pocket: a patch slightly proud of the front, narrower at the
     # top; its outline and side slits are stitched in paint_panels.
-    pocket = K.box("pocket", (0.25, 0.022, 0.15), (0, 0.129, 1.046), jacket, bevel=0.009, segs=2)
+    pocket = K.box("pocket", (0.29, 0.012, 0.17), (0, 0.153, 0.955), jacket, bevel=0.005, segs=2)
     for v in pocket.data.vertices:
-        v.co.x *= 1.0 - 0.12 * max(0.0, (v.co.z - 1.046) / 0.075)
+        v.co.x *= 1.0 - 0.12 * max(0.0, (v.co.z - 0.955) / 0.085)
     src.append(pocket)
     # Neckline: the hood joins the body in a soft rolled seam.
     src.append(K.paint(tube("neckline", [((0, -0.004, 1.5), 0.112, 0.1), ((0, 0.0, 1.535), 0.104, 0.094),
@@ -399,15 +401,15 @@ def build():
     for side, sx in (("l", -1), ("r", 1)):
         a, e, w = J["upper_arm_" + side], J["forearm_" + side], J["hand_" + side]
         src.append(K.paint(tube("upper_arm", [
-            (along(a, e, -0.08), 0.078, 0.078), (along(a, e, 0.15), 0.072, 0.077, 0.004), (along(a, e, 0.45), 0.067, 0.074, 0.006),
-            (along(a, e, 0.72), 0.061, 0.066, 0.002), (along(a, e, 0.92), 0.056, 0.058), (along(a, e, 1.03), 0.055, 0.056)], segs=18), jacket))
+            (along(a, e, -0.08), 0.095, 0.095), (along(a, e, 0.15), 0.09, 0.094, 0.004), (along(a, e, 0.45), 0.084, 0.088, 0.006),
+            (along(a, e, 0.72), 0.077, 0.08, 0.002), (along(a, e, 0.92), 0.071, 0.072), (along(a, e, 1.03), 0.07, 0.07)], segs=18), jacket))
         pushed = 0.06 if side == "l" else 0.0
         src.append(K.paint(tube("forearm", [
-            (along(e, w, -0.05), 0.055, 0.056), (along(e, w, 0.14), 0.058, 0.057, 0.004), (along(e, w, 0.36), 0.054, 0.051),
-            (along(e, w, 0.55 - pushed), 0.049, 0.046), (along(e, w, 0.63 - pushed), 0.054, 0.05),
-            (along(e, w, 0.7 - pushed), 0.047, 0.044), (along(e, w, 0.77 - pushed), 0.052, 0.048),
-            (along(e, w, 0.83 - pushed), 0.045, 0.042), (along(e, w, 0.86 - pushed), 0.042, 0.038)], segs=18), jacket))
-        src.append(K.paint(tube("cuff", [(along(e, w, 0.84 - pushed), 0.041, 0.037), (along(e, w, 1.0 - pushed), 0.036, 0.032)],
+            (along(e, w, -0.05), 0.07, 0.07), (along(e, w, 0.14), 0.072, 0.07, 0.004), (along(e, w, 0.36), 0.067, 0.064),
+            (along(e, w, 0.55 - pushed), 0.06, 0.057), (along(e, w, 0.63 - pushed), 0.066, 0.062),
+            (along(e, w, 0.7 - pushed), 0.058, 0.055), (along(e, w, 0.77 - pushed), 0.064, 0.06),
+            (along(e, w, 0.83 - pushed), 0.054, 0.05), (along(e, w, 0.86 - pushed), 0.048, 0.044)], segs=18), jacket))
+        src.append(K.paint(tube("cuff", [(along(e, w, 0.84 - pushed), 0.046, 0.042), (along(e, w, 1.0 - pushed), 0.04, 0.036)],
                                 segs=16), jacket_dk))
         if pushed > 0.0:  # the bare wrist between the pushed cuff and the glove
             src.append(K.paint(tube("wrist", [(along(e, w, 0.92), 0.033, 0.028), (along(e, w, 1.03), 0.033, 0.028)], segs=14), glove))
@@ -424,17 +426,17 @@ def build():
     for side, sx in (("l", -1), ("r", 1)):
         h, k, f = J["thigh_" + side], J["shin_" + side], J["foot_" + side]
         src.append(K.paint(tube("thigh", [
-            (along(h, k, -0.02), 0.088, 0.104), (along(h, k, 0.12), 0.093, 0.112, 0.012), (along(h, k, 0.4), 0.092, 0.106, 0.018),
-            (along(h, k, 0.7), 0.085, 0.091, 0.012), (along(h, k, 0.92), 0.072, 0.075, 0.004), (along(h, k, 1.0), 0.069, 0.072, 0.006)],
+            (along(h, k, -0.02), 0.094, 0.11), (along(h, k, 0.12), 0.104, 0.122, 0.012), (along(h, k, 0.4), 0.104, 0.118, 0.018),
+            (along(h, k, 0.7), 0.096, 0.104, 0.012), (along(h, k, 0.92), 0.084, 0.088, 0.004), (along(h, k, 1.0), 0.081, 0.085, 0.006)],
             segs=20), pants))
-        src.append(K.paint(K.sphere("knee", 0.066, k + Vector((0, 0.02, 0)), None, 14, 10, (1.0, 1.08, 1.05)), pants))
+        src.append(K.paint(K.sphere("knee", 0.078, k + Vector((0, 0.022, 0)), None, 14, 10, (1.0, 1.08, 1.05)), pants))
         bunch = 0.012 if side == "r" else 0.0
         src.append(K.paint(tube("shin", [
-            (along(k, f, 0.0), 0.068, 0.07), (along(k, f, 0.2), 0.069, 0.078, -0.016), (along(k, f, 0.42), 0.062, 0.069, -0.012),
-            (along(k, f, 0.64), 0.052, 0.054, -0.004), (along(k, f, 0.74), 0.056 + bunch * 0.4, 0.058, -0.002),
-            (along(k, f, 0.8), 0.05, 0.051), (along(k, f, 0.85), 0.055, 0.056 + bunch * 0.3),
-            (along(k, f, 0.885), 0.049, 0.05)], segs=20), pants))
-        src.append(K.paint(tube("ankle_cuff", [(along(k, f, 0.88), 0.049, 0.051), (along(k, f, 0.985), 0.047, 0.049)], segs=16), pants_dk))
+            (along(k, f, 0.0), 0.08, 0.082), (along(k, f, 0.2), 0.08, 0.088, -0.014), (along(k, f, 0.42), 0.074, 0.08, -0.01),
+            (along(k, f, 0.64), 0.064, 0.066, -0.004), (along(k, f, 0.74), 0.068 + bunch * 0.4, 0.07, -0.002),
+            (along(k, f, 0.8), 0.06, 0.061), (along(k, f, 0.85), 0.065, 0.066 + bunch * 0.3),
+            (along(k, f, 0.885), 0.057, 0.058)], segs=20), pants))
+        src.append(K.paint(tube("ankle_cuff", [(along(k, f, 0.88), 0.056, 0.058), (along(k, f, 0.985), 0.053, 0.055)], segs=16), pants_dk))
         for kk, (dz, rot) in enumerate(((0.012, 0.25), (-0.014, -0.2))):
             c_ = K.sphere("knee_crease", 1.0, (0, 0, 0), None, 10, 6, (0.045, 0.008, 0.008))
             c_.rotation_euler = (0, rot * sx, 0)
@@ -570,33 +572,35 @@ def build():
     # web colour, each set in an ink outline. No skin, hair or ears showing.
     hc = J["head"]
     o = lambda x, y, z: hc + Vector((x, y, z - 0.028))  # noqa: E731  (head sits a little lower on the neck)
-    mask = jacket_dk
+    mask = mask_m
     head = []
-    head.append(K.sphere("cranium", 0.096, o(0, -0.012, 0.135), mask, 24, 16, (0.9, 1.04, 1.0)))
+    head.append(K.sphere("cranium", 0.098, o(0, -0.012, 0.135), mask, 24, 16, (0.9, 1.04, 1.0)))
     for pl in head[-1].data.polygons:
         pl.use_smooth = True
-    # Jaw and chin: a defined, slightly squared chin and cheekbones.
-    head.append(K.smooth(K.paint(tube("face", [(o(0, 0.034, 0.03), 0.038, 0.04), (o(0, 0.03, 0.05), 0.066, 0.068),
-                                                (o(0, 0.02, 0.095), 0.08, 0.084), (o(0, 0.01, 0.14), 0.084, 0.088)], segs=22), mask), 1))
-    nose = K.paint(tube("nose", [(o(0, 0.088, 0.138), 0.01, 0.007), (o(0, 0.102, 0.108), 0.014, 0.01),
-                                 (o(0, 0.104, 0.098), 0.017, 0.009), (o(0, 0.094, 0.09), 0.014, 0.006)], segs=10), mask)
+    head.append(K.smooth(K.paint(tube("face", [(o(0, 0.034, 0.03), 0.04, 0.042), (o(0, 0.03, 0.05), 0.068, 0.07),
+                                                (o(0, 0.02, 0.095), 0.082, 0.086), (o(0, 0.01, 0.14), 0.086, 0.09)], segs=22), mask), 1))
+    nose = K.paint(tube("nose", [(o(0, 0.09, 0.138), 0.009, 0.006), (o(0, 0.103, 0.108), 0.013, 0.009),
+                                 (o(0, 0.105, 0.098), 0.015, 0.008), (o(0, 0.096, 0.09), 0.013, 0.005)], segs=10), mask)
     head.append(K.smooth(nose, 1))
+    # A stitched seam down the middle of the mask (forehead to chin).
+    for i in range(7):
+        z = 0.2 - i * 0.028
+        y = 0.07 + 0.03 * math.sin(i / 6.0 * math.pi)
+        head.append(K.box("seam", (0.004, 0.006, 0.014), o(0, y + 0.024, z), ink))
     for sx in (-1, 1):
-        # Lens: a flattened teardrop tilted up at the outer corner, on the
-        # mask's surface; the ink rim sits just behind it and shows round it.
-        for nm, mat_, sc, dy in (("lens_rim", ink, (0.041, 0.012, 0.028), 0.091), ("eye_lens", glow, (0.034, 0.01, 0.021), 0.095)):
-            e = K.sphere(nm, 1.0, (0, 0, 0), mat_, 16, 10, sc)
+        # Lenses: big, matte white, set in heavy black rims – angled up and
+        # out so the mask reads as alert, a little mischievous. Not lit.
+        for nm, mat_, sc, dy in (("lens_rim", ink, (0.05, 0.014, 0.034), 0.09), ("eye_lens", lens_w, (0.04, 0.011, 0.025), 0.096)):
+            e = K.sphere(nm, 1.0, (0, 0, 0), mat_, 18, 10, sc)
             for v in e.data.vertices:
-                # Teardrop: the outer corner sweeps up and to a point, the
-                # inner edge is flat along the nose, the lower edge straight.
                 u = v.co.x * sx / sc[0]
                 if u > 0:
-                    v.co.z += u * u * sc[2] * 0.7
-                    v.co.x *= 1.0 + 0.25 * u
+                    v.co.z += u * u * sc[2] * 0.9
+                    v.co.x *= 1.0 + 0.3 * u
                 if v.co.z < 0:
-                    v.co.z *= 0.6
-            e.rotation_euler = (0.15, -sx * 0.2, sx * -0.18)  # outer corner up
-            e.location = o(sx * 0.037, dy, 0.124)
+                    v.co.z *= 0.55
+            e.rotation_euler = (0.18, -sx * 0.24, sx * -0.24)
+            e.location = o(sx * 0.04, dy, 0.126)
             bpy.context.view_layer.update()
             head.append(e)
     part("head", head, hc)
@@ -604,8 +608,8 @@ def build():
     # Under the chin the hood's front edges wrap the throat and run into the
     # neckline: a soft cowl round the neck (part of the hood, so headwear
     # that replaces the hood takes it too).
-    cowl = K.smooth(K.paint(tube("cowl", [((0, -0.004, 1.528), 0.104, 0.095), ((0, 0.006, 1.57), 0.09, 0.084, 0.004),
-                                          ((0, 0.016, 1.608), 0.077, 0.074, 0.008), ((0, 0.02, 1.626), 0.07, 0.068, 0.01)],
+    cowl = K.smooth(K.paint(tube("cowl", [((0, -0.01, 1.52), 0.13, 0.112), ((0, 0.0, 1.55), 0.112, 0.098, 0.004),
+                                          ((0, 0.01, 1.58), 0.09, 0.082, 0.008), ((0, 0.014, 1.595), 0.078, 0.072, 0.01)],
                                      segs=22), jacket), 1)
     part("hood", [hood(o, jacket, jacket_dk), cowl], hc)
 
@@ -617,8 +621,8 @@ def build():
     cords = []
     for sx, drop in ((-1, 0.045), (1, 0.0)):
         x = sx * 0.037
-        pts = [Vector((x, 0.112, 1.512)), Vector((x + sx * 0.004, 0.147, 1.47)), Vector((x + sx * 0.007, 0.163, 1.41)),
-               Vector((x + sx * 0.008, 0.168, 1.365 - drop * 0.6)), Vector((x + sx * 0.008, 0.169, 1.345 - drop))]
+        pts = [Vector((x, 0.128, 1.512)), Vector((x + sx * 0.004, 0.17, 1.47)), Vector((x + sx * 0.007, 0.19, 1.41)),
+               Vector((x + sx * 0.008, 0.197, 1.35 - drop * 0.6)), Vector((x + sx * 0.008, 0.199, 1.32 - drop))]
         cords.append(K.smooth(K.paint(tube("cord", [(q, 0.0045, 0.003) for q in pts], segs=8), cord), 1))
         cords.append(K.paint(tube("aglet", [(pts[-1] + Vector((0, 0.001, 0.004)), 0.0064, 0.0064),
                                             (pts[-1] + Vector((0, 0.001, -0.022)), 0.0058, 0.0058)], segs=8), metal))
@@ -635,8 +639,8 @@ def build():
                                                  (Vector((0, 0.003, -0.225)), 0.04, 0.036), (Vector((0, 0.002, -0.24)), 0.039, 0.035)],
                                      segs=18, front=Vector((0, 1, 0))), gear), 1),
              K.box("module", (0.05, 0.03, 0.085), (0, 0.045, -0.18), gear, bevel=0.012, segs=2),
-             K.box("nozzle", (0.022, 0.026, 0.03), (0, 0.052, -0.236), metal, bevel=0.006),
-             K.box("led", (0.034, 0.005, 0.01), (0, 0.061, -0.165), glow),
+             K.box("nozzle", (0.022, 0.026, 0.03), (0, 0.052, -0.236), strap, bevel=0.006),
+             K.box("grip_tape", (0.054, 0.006, 0.014), (0, 0.062, -0.16), strap),
              K.paint(tube("strap_g", [(Vector((0, 0, -0.128)), 0.052, 0.051), (Vector((0, 0, -0.14)), 0.052, 0.051)], segs=16), strap)]
     part("forearm_r", gaunt, Vector((0, 0, 0)), arm_rest("r", "forearm_r"))
 
@@ -694,20 +698,20 @@ def build():
     for side, sx in (("l", -1), ("r", 1)):
         z0 = Vector((0, 0, 0))
         upper = K.smooth(K.paint(tube("shoe_upper", [
-            (Vector((0, -0.078, -0.07)), 0.041, 0.032), (Vector((0, -0.05, -0.06)), 0.052, 0.054), (Vector((0, 0.0, -0.066)), 0.056, 0.057),
-            (Vector((0, 0.07, -0.081)), 0.058, 0.045), (Vector((0, 0.14, -0.092)), 0.054, 0.031), (Vector((0, 0.188, -0.098)), 0.042, 0.021),
-            (Vector((0, 0.212, -0.1)), 0.022, 0.012)], segs=18, front=Vector((0, 0, 1))), shoe), 1)
-        collar_ = (K.paint(tube("shoe_collar", [(Vector((0, -0.016, -0.05)), 0.056, 0.06), (Vector((0, -0.02, -0.012)), 0.053, 0.057),
-                                                       (Vector((0, -0.024, -0.004)), 0.05, 0.054)], segs=16), shoe))
+            (Vector((0, -0.084, -0.066)), 0.047, 0.036), (Vector((0, -0.054, -0.056)), 0.06, 0.058), (Vector((0, 0.0, -0.062)), 0.064, 0.061),
+            (Vector((0, 0.07, -0.077)), 0.066, 0.049), (Vector((0, 0.142, -0.088)), 0.062, 0.035), (Vector((0, 0.194, -0.094)), 0.049, 0.025),
+            (Vector((0, 0.22, -0.096)), 0.026, 0.015)], segs=18, front=Vector((0, 0, 1))), shoe), 1)
+        collar_ = (K.paint(tube("shoe_collar", [(Vector((0, -0.016, -0.05)), 0.064, 0.068), (Vector((0, -0.022, -0.008)), 0.062, 0.066),
+                                                       (Vector((0, -0.026, 0.004)), 0.058, 0.062)], segs=16), shoe))
         tongue = (K.paint(tube("tongue", [(Vector((0, 0.012, -0.004)), 0.026, 0.008), (Vector((0, 0.05, -0.045)), 0.028, 0.009),
                                                    (Vector((0, 0.1, -0.07)), 0.026, 0.008)], segs=10, front=Vector((0, 0, 1))), shoe))
         mid = K.smooth(K.paint(tube("midsole", [
-            (Vector((0, -0.094, -0.1)), 0.032, 0.019), (Vector((0, -0.076, -0.108)), 0.052, 0.024), (Vector((0, 0.0, -0.111)), 0.061, 0.021),
-            (Vector((0, 0.08, -0.113)), 0.063, 0.019), (Vector((0, 0.16, -0.111)), 0.057, 0.017), (Vector((0, 0.207, -0.103)), 0.038, 0.014),
-            (Vector((0, 0.226, -0.094)), 0.014, 0.009)], segs=18, front=Vector((0, 0, 1))), shoe), 1)
+            (Vector((0, -0.1, -0.096)), 0.04, 0.03), (Vector((0, -0.082, -0.104)), 0.062, 0.034), (Vector((0, 0.0, -0.108)), 0.07, 0.03),
+            (Vector((0, 0.08, -0.11)), 0.072, 0.027), (Vector((0, 0.16, -0.108)), 0.066, 0.024), (Vector((0, 0.212, -0.1)), 0.046, 0.02),
+            (Vector((0, 0.236, -0.09)), 0.018, 0.013)], segs=18, front=Vector((0, 0, 1))), shoe), 1)
         outs = (K.paint(tube("outsole", [
-            (Vector((0, -0.09, -0.123)), 0.034, 0.006), (Vector((0, -0.07, -0.128)), 0.05, 0.007), (Vector((0, 0.0, -0.13)), 0.058, 0.007),
-            (Vector((0, 0.08, -0.13)), 0.06, 0.007), (Vector((0, 0.16, -0.126)), 0.054, 0.007), (Vector((0, 0.205, -0.116)), 0.034, 0.006)],
+            (Vector((0, -0.096, -0.125)), 0.042, 0.007), (Vector((0, -0.076, -0.13)), 0.06, 0.008), (Vector((0, 0.0, -0.132)), 0.068, 0.008),
+            (Vector((0, 0.08, -0.132)), 0.07, 0.008), (Vector((0, 0.16, -0.128)), 0.064, 0.008), (Vector((0, 0.212, -0.118)), 0.042, 0.007)],
             segs=16, front=Vector((0, 0, 1))), outsole))
         heel = (K.paint(tube("heel_counter", [(Vector((0, -0.096, -0.084)), 0.03, 0.026), (Vector((0, -0.07, -0.082)), 0.05, 0.03),
                                                        (Vector((0, -0.03, -0.086)), 0.057, 0.026)], segs=16, front=Vector((0, 0, 1))), sole))
@@ -743,8 +747,8 @@ def build():
 
     def body_w(p, c):
         if is_(c, kj) or is_(c, kjd):
-            if abs(p.x) < 0.24 and p.z < 1.2:
-                return smoothstep(1.1, 0.87, p.z)
+            if abs(p.x) < 0.27 and p.z < 1.2:
+                return smoothstep(1.08, 0.8, p.z)
             if abs(p.x) >= 0.2 and p.z < 1.45:  # sleeves: freer toward the cuff
                 return 0.35 * smoothstep(1.3, 0.95, p.z)
         if (is_(c, kp) or is_(c, kpd)) and p.z < 0.55:
