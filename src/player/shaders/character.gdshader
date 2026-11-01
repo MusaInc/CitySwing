@@ -28,6 +28,7 @@ const vec3 K_PANTS = vec3(0.118, 0.141, 0.200);
 const vec3 K_PANTS_DK = vec3(0.078, 0.090, 0.129);
 const vec3 K_SNEAKER = vec3(0.929, 0.929, 0.894);
 const vec3 K_GLOVE = vec3(0.098, 0.098, 0.106);
+const vec3 K_MASK = vec3(0.141, 0.141, 0.149);
 
 // Cloth (secondary motion, CharacterRig._update_cloth): UV2.x is how freely
 // a vertex moves (0 = held by the body … 1 = the hoodie's hem, the hood's
@@ -44,6 +45,21 @@ uniform vec3 cloth_wind_dir = vec3(0.0, 0.0, 1.0);  // world, where the air come
 // Baked ambient occlusion (build_character.py bake_ao): UV = (ao, 1) on the
 // meshes that carry it; anything else (UV.y = 0) stays unshaded.
 varying float v_ao;
+varying vec2 v_fab;     // fabric coords (m)
+varying float v_cloth;  // 1 = knit fabric (hoodie, joggers, mask), 0 = trainers, gloves, gear
+
+float hash21(vec2 p) {
+	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return fract((p3.x + p3.y) * p3.z);
+}
+
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash21(i), hash21(i + vec2(1, 0)), f.x), mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), f.x), f.y);
+}
 
 float is_key(vec3 c, vec3 k) {
 	vec3 d = abs(c - k);
@@ -51,8 +67,11 @@ float is_key(vec3 c, vec3 k) {
 }
 
 void vertex() {
-	v_ao = UV.y > 0.5 ? UV.x : 1.0;
-	float cw = UV2.x;
+	// UV2 = (0.5 + 0.5 ao, cloth weight); < 0.25 = no data (shop gear).
+	bool has_data = UV2.x > 0.25;
+	v_ao = has_data ? clamp(UV2.x * 2.0 - 1.0, 0.0, 1.0) : 1.0;
+	float cw = has_data ? UV2.y : 0.0;
+	v_fab = UV;
 	if (cw > 0.001) {
 		mat3 to_world = mat3(MODEL_MATRIX);
 		vec3 n_w = normalize(to_world * NORMAL);
@@ -71,6 +90,8 @@ void vertex() {
 	}
 	vec3 c = COLOR.rgb;
 	vec3 o = c;
+	v_cloth = max(max(is_key(c, K_JACKET), is_key(c, K_JACKET_DK)), max(is_key(c, K_PANTS), is_key(c, K_PANTS_DK)));
+	v_cloth = max(v_cloth, is_key(c, K_MASK) * 0.6);
 	if (COLOR.a < 0.5) {
 		o = glow_color;
 	} else {
@@ -98,15 +119,34 @@ void fragment() {
 	ALBEDO = base * mix(0.55, 1.0, smoothstep(0.1, 0.95, ao));
 	AO = ao;
 	AO_LIGHT_AFFECT = 0.0;
-	// Suit fabric has a soft sheen; trainers and gloves stay matte.
-	ROUGHNESS = mix(mix(0.6, 0.38, wetness), 0.3, glow);
+	float cloth = v_cloth;
+	if (cloth > 0.0) {
+		// Knit: fine ribs running up the garment, a heathered yarn mottle,
+		// and broad soft tonal variation (dye, wear) – fabric, not plastic.
+		// Faded out where a rib would be smaller than a pixel.
+		float px = length(fwidth(v_fab));
+		float near_k = 1.0 - smoothstep(0.004, 0.012, px);
+		float rib = 0.5 + 0.5 * sin(v_fab.x * 6.2832 * 85.0);
+		float yarn = vnoise(v_fab * vec2(220.0, 90.0));
+		float tone = vnoise(v_fab * 6.0);
+		float k = cloth * near_k;
+		ALBEDO *= 1.0 - 0.09 * k * rib - 0.07 * k * yarn;
+		ALBEDO *= mix(1.0, 0.9 + 0.2 * tone, cloth);
+		// Wrinkle shading in the creases (AO-driven), stronger than skin-tight.
+		ALBEDO *= mix(1.0, 0.82 + 0.18 * ao, cloth);
+	}
+	// Cotton is matte with a soft, wide sheen at grazing angles (velvet-like
+	// rim from the fibres); trainers and gloves are a little glossier.
+	ROUGHNESS = mix(mix(mix(0.55, 0.36, wetness), 0.92, cloth), 0.3, glow);
+	SPECULAR = mix(0.5, 0.25, cloth);
 	EMISSION = COLOR.rgb * glow * 2.5;
-	// Two-tone rim: warm on the sun side, cool sky-blue elsewhere, so the
-	// silhouette separates from both lit and shaded facades at a distance.
-	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
+	float rim = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	vec3 n_w = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
 	float sun_side = clamp(dot(n_w, sun_dir) * 0.5 + 0.5, 0.0, 1.0);
+	// Fabric sheen: the garment's own colour brightening at the silhouette.
+	ALBEDO += base * rim * 0.22 * cloth * ao;
+	// A faint cool/warm edge keeps the silhouette readable against facades
+	// (much softer than before: it read as a glowing plastic outline).
 	vec3 rim_c = mix(vec3(0.55, 0.75, 1.0), mix(rim_color, vec3(0.6, 0.7, 1.0), night), sun_side);
-	// (At night a cooler, softer moonlit rim keeps the silhouette readable.)
-	EMISSION += rim_c * rim * rim_strength * mix(1.0, 0.75, night) * (1.0 - glow) * ao;
+	EMISSION += rim_c * pow(rim, 1.6) * rim_strength * 0.35 * mix(1.0, 0.75, night) * (1.0 - glow) * ao;
 }

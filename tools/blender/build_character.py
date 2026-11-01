@@ -239,6 +239,33 @@ def cloth_uv(ob, weight, rest=None):
             uv.data[li].uv = (max(0.0, min(1.0, weight(p, c))), 0.0)
 
 
+def _repack(ob, _body):
+    me = ob.data
+    mw = Matrix.Identity(4)
+    if "rest" in ob:
+        r = list(ob["rest"])
+        mw = Matrix([r[0:4], r[4:8], r[8:12], r[12:16]])
+    ao = me.uv_layers["ao"]
+    cl = me.uv_layers["cloth"]
+    vals = [(ao.data[i].uv[0], cl.data[i].uv[0]) for i in range(len(me.loops))]
+    fab = []
+    for poly in me.polygons:
+        n = poly.normal
+        for li in poly.loop_indices:
+            p = mw @ me.vertices[me.loops[li].vertex_index].co
+            # Wrap round the vertical: knit ribs run up the garment.
+            u = math.atan2(p.x, p.y) * 0.16 if abs(n.z) < 0.8 else p.x
+            fab.append((li, (u, p.z)))
+    while len(me.uv_layers) > 0:
+        me.uv_layers.remove(me.uv_layers[0])
+    f = me.uv_layers.new(name="fabric")
+    for li, uv in fab:
+        f.data[li].uv = uv
+    a = me.uv_layers.new(name="aocloth")
+    for i, (aov, cw) in enumerate(vals):
+        a.data[i].uv = (0.5 + 0.5 * aov, cw)
+
+
 def smoothstep(a, b, x):
     t = max(0.0, min(1.0, (x - a) / (b - a)))
     return t * t * (3.0 - 2.0 * t)
@@ -761,6 +788,11 @@ def build():
             cloth_uv(ob, lambda p, c: smoothstep(1.5, 1.33, p.z), Matrix.Translation(J["chest"]))
         else:
             cloth_uv(ob, lambda p, c: 0.0)
+    # Repack for the shader (Godot reads two UV sets): UV = fabric coordinates
+    # (metres on the rest-pose surface, for the knit), UV2 = (0.5 + 0.5 ao,
+    # cloth weight). UV2.x < 0.25 means "no data" (shop gear).
+    for ob in parts + [body]:
+        _repack(ob, body if ob is body else None)
 
     bpy.ops.object.select_all(action="DESELECT")
     rig.select_set(True)
