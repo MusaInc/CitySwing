@@ -99,6 +99,7 @@ func _ready() -> void:
 	add_child(homes)
 	homes.setup(player, rig, (world as CityWorld).layout if world is CityWorld else null)
 	homes.owned = func(id: String) -> bool: return Homes.owns(id)
+	homes.entered_home.connect(_rested)
 	near_miss = NearMiss.new()
 	near_miss.name = "NearMiss"
 	add_child(near_miss)
@@ -347,6 +348,8 @@ func start_mode(kind: String, arg: String) -> void:
 		coins.start_run()
 		near_miss.run_count = 0
 		gadgets.enabled = true
+	if kind == "free" and homes.inside() != "":
+		_rested.call_deferred(homes.inside())  # (after the FREE SWING banner)
 	state = State.PLAYING
 	menus.hide_all()
 	hud.visible = true
@@ -381,6 +384,17 @@ func spawn_at_home(id: String, force := false) -> bool:
 		return false
 	homes.spawn_in(h, world, camera)
 	return true
+
+
+## Home is where you rest: starting at home, or climbing back in through the
+## window, lifts the coin multiplier to the home's level (tier 1: none,
+## up to ×3 in the penthouse) – owning a better home pays.
+func _rested(id: String) -> void:
+	var h := homes.home_by_id(id)
+	if h.is_empty() or coins == null:
+		return
+	if coins.rested(int(h["tier"])):
+		hud.flash("RESTED  ×%s" % Hud._fmt_mult(coins.multiplier()), 1.8)
 
 
 func spawn_on_random_rooftop() -> Dictionary:

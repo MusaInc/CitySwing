@@ -43,9 +43,19 @@ func _physics_process(dt: float) -> void:
 		_prev = p
 
 
-func _process(_dt: float) -> void:
+var _tip_t := 0.0
+
+
+func _process(dt: float) -> void:
 	if not running:
 		return
+	# First sessions: point out the job beacons once you've had a swing.
+	if jobs and int(SaveData.data.get("jobs_done", 0)) == 0 and jobs.active.is_empty():
+		_tip_t += dt
+		hud.hint = "Land on a glowing beacon to take a job" if _tip_t > 8.0 and _tip_t < 16.0 else ""
+	elif hud.hint != "" and _tip_t > 0.0:
+		hud.hint = ""
+		_tip_t = 0.0
 	# No banner: the minimap shows the tokens (the nearest one pinned to its
 	# rim when it's off the map); totals live in pause / results / stats.
 	if tokens and hud.minimap:
@@ -96,6 +106,7 @@ func stop() -> void:
 func _exit_tree() -> void:
 	if is_instance_valid(hud):
 		hud.pointer = Vector3.INF
+		hud.hint = ""
 		if hud.minimap:
 			hud.minimap.markers = []
 	if tokens:

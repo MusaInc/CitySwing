@@ -262,10 +262,9 @@ func _show_main() -> void:
 	_brand(root)
 	var col := _menu_column(root)
 	var trained: bool = SaveData.data["tutorial_done"]
-	var tokens := SaveData.token_count()
 	var mc := Progress.medal_counts()
 	var best_e: float = SaveData.data["best_endurance_m"]
-	var play := _menu_row("PLAY", "Free swing  ·  %d/%d tokens" % [tokens, Progress.TOKEN_TOTAL],
+	var play := _menu_row("PLAY", "Jobs, homes, tokens  ·  %s" % Contracts.rank_name(int(SaveData.data.get("rep", 0))),
 		func(): start_mode.emit("free", ""), 34, true)
 	_reg("free", play)
 	var train := _menu_row("Training", "Start here" if not trained else "Swing, release, steer",
@@ -936,13 +935,15 @@ func _job_row(c: Dictionary, id: int, back: Callable) -> PanelContainer:
 ## confirming tap) / how many coins it needs. In Free Swing, owned homes can
 ## be gone to right away.
 var homes_info: Array = []   # [{id, name, height, price}] (main fills it from the layout)
+## One line on each home's character (HomeInteriors builds them to match).
+const HOME_STYLE := ["Courier studio", "Scandi one-bed", "Industrial loft", "Marble & walnut", "Pool, mezzanine, Hall of Fame"]
 var _home_confirm := ""
 
 
 func show_homes(back: Callable, in_game := false) -> void:
 	var box := _page("homes", "Homes", back, 640)
 	var cur := Homes.selected()
-	box.add_child(_label("Live up the city: each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in.",
+	box.add_child(_label("Each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in. Coming home rests you: your coin multiplier starts higher the better the home.",
 		15, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 	var bal := _coin_chip(Shop.coins(), 18)
 	box.add_child(bal)
@@ -960,8 +961,9 @@ func show_homes(back: Callable, in_game := false) -> void:
 		tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tx.add_theme_constant_override("separation", 0)
 		tx.add_child(_label(hi["name"], 22, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
-		tx.add_child(_label("Tier %d  ·  %d m above the street" % [i + 1, int(hi["height"])], 14, DIM, "semibold",
-			HORIZONTAL_ALIGNMENT_LEFT))
+		var perk := "  ·  rested ×%s" % Hud._fmt_mult(1.0 + i * CoinMeter.STEP) if i > 0 else ""
+		tx.add_child(_label("%s  ·  %d m up%s" % [HOME_STYLE[i] if i < HOME_STYLE.size() else "Tier %d" % (i + 1),
+			int(hi["height"]), perk], 14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 		row.add_child(tx)
 		if id == cur:
 			row.add_child(_chip("home", ACCENT, "HOME", 16))
