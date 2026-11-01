@@ -1,3 +1,28 @@
+# Status: 2026-11-01 (premium redesign, v0.14.0)
+
+## Redesign pass (latest)
+
+Visual QA report and images: `docs/qa/VISUAL_QA.md`.
+
+- **Minimap** (`src/ui/minimap.gd`, `src/ui/shaders/minimap.gdshader`): replaces the TOKENS banner and the km/swings line. Baked once at startup by a one-shot SubViewport 2-D render of the real layout (island and mainland coasts, road surface, blocks, parks, plazas, set pieces, basins, every footprint shaded by height, rail, bridge and approach) at 1.5 m/px RGB8, about 6 MB with mipmaps. Drawn as one shader quad: a soft disc that rotates with the camera, with zoom easing from 95 to 175 m with speed. Overlay: hero arrow, north tick, at most 5 markers by priority (next goal pinned to the rim). Free Swing feeds tokens; Time Trial feeds the next three rings. The mode readout (trial clock, endurance) sits compactly under the map. Token totals moved to the pause menu, stats and results. Tests: `tests/test_minimap.gd`.
+- **Cinematic title** (`src/camera/cinematic_director.gd`): five shots (golden hour, canyon, skyline, momentum, rooftops). Each sets its time of day, starts the ShowcasePilot on a chosen avenue leg, and drives `SwingCamera.cine`: the offset from the hero is smoothed (not the absolute position), the open side of the street is picked per cut, and the lens shift puts the hero about 22% left of centre, clear of the menu. Slow motion is eased in canyon and momentum. Cuts dip through Night Ink. `--cine=N` starts on shot N (captures). Leaving the title restores the clock, weather and time scale.
+- **Menu** (`menus._show_main`, `_menu_row`, `_menu_column`, `_brand`): a minimal right-aligned column at top-right, a small wordmark bottom-left, `MenuParts.edge_shade` instead of the dark left panel. Every action and test ID is kept (free/trial/endurance/training/shop/shop_card/stats/settings). `_safe_rect()` only applies the screen-space safe area to full-screen windows (on windowed desktop it pushed the column off-screen).
+- **Wardrobe shop** (`menus.show_shop`, `src/ui/thumb_studio.gd`):
+  - Left side: category sidebar, a grid of real-render thumbnails (isolated studio SubViewport with a CharacterRig, one item per frame, cached for the session; webs show a line in their colour), and a detail bar with one action (Wear / Buy → Confirm / unlock requirement).
+  - Right side: the hero, live, on a real rooftop (director `enter_shop`: the nearest 55–110 m rooftop spawn to the CBD, facing the open side, 16.9 h light, idle actions off), framed per category. Drag to orbit, pinch/wheel to zoom, double-click or the View button to reset.
+  - Selecting only previews; leaving restores the equipped look.
+- **Landing**: off-balance catch (`CharacterRig.stumble_t`) when landing moving sideways to the body or out of a banked air turn: arms out, torso tips and rights itself, and the gait takes the steps. Test: `test_sideways_landing_stumbles`.
+- **Consistency**: page headings are now 34 px white; the gold primary card, glass cards and chips are shared across pause, results, stats, settings and shop.
+
+Measured (VPS, software Vulkan, `--mode=free --seed=4 --stats`, same frame): draw calls 191 → 198, primitives 337.5k → 337.9k, texture memory 42.1 → 49.2 MB (the minimap), static memory 339.6 → 341.4 MB. Tests: 114/114. No device FPS measurements.
+
+Not done:
+- Hood and sleeve twist (no cloth bones).
+- Ragdoll and get-up transitions are unchanged.
+- No world/terrain changes in this pass.
+- Hats/face glyphs are coloured drawings, not mono icons.
+- The ledge_dive get-up joint check is still intermittent (pre-existing: it failed 1 of 3 runs on the code without the stumble too).
+
 # Status: 2026-11-01 (character realism pass, v0.13.0)
 
 ## Character pass (latest)

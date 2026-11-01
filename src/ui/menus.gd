@@ -995,7 +995,7 @@ func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0, 
 			back.call())
 		head.add_child(bb)
 		_reg("back", bb)
-	var t := _label(title, 46, ACCENT, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	var t := _label(title.capitalize() if title == title.to_upper() else title, 34, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT)
 	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(t)
 	col.add_child(head)
