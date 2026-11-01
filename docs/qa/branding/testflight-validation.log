@@ -1,0 +1,4 @@
+testflight	Archive (unsigned; the export step signs in the cloud)	2026-11-01T21:39:13.2876930Z ** ARCHIVE SUCCEEDED **
+testflight	Upload to TestFlight	2026-11-01T21:39:59.4542270Z ** EXPORT SUCCEEDED **
+testflight	Wait for App Store Connect processing	2026-11-01T21:42:31.5903850Z build 29: VALID (uploaded 2026-11-01T13:41:06-08:00)
+testflight	Wait for App Store Connect processing	2026-11-01T21:42:31.5906080Z FINAL_STATE VALID

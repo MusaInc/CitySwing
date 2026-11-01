@@ -1,5 +1,10 @@
 # Branding verification — 0.17.1
 
+**TestFlight 0.17.1 (29): VALID**, confirmed by App Store Connect on
+1 November 2026 at 21:42 UTC. [Successful workflow](https://github.com/MusaInc/CitySwing/actions/runs/41353016767).
+Released game source: `4c40fa69fc45215ed13895f9f8c7741847f558ef`.
+Later commits contain only test expectation fixes and verification records.
+
 The logo, icons, engine launch artwork, loading scene and live start screen now
 share the main menu's Outfit / gold / white / Night Ink identity.
 
@@ -34,3 +39,8 @@ Courier's deliberately white trainers. Updated that expectation and added a
 separate shoe-colour independence check; the entire shop suite then passed
 5/5. Both unmodified run logs are retained (`regression-tests.log` and
 `shop-tests.log`). No production behaviour was changed for this test correction.
+
+The subsequent complete confirmation run passed **125 tests, 0 failures** in
+306.9 seconds. See [final full-suite log](regression-final.log). This includes
+startup retry, wardrobe, character assets, spawning, apartment transitions,
+collision, traversal, touch targeting, modes, economy and world systems.
