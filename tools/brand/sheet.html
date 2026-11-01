@@ -1,49 +1,10 @@
-<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="brand.css"><script src="wordmark.js"></script>
-<!-- One-page brand sheet (assets/brand/brand_sheet.png). Mirrors docs/BRAND.md. -->
-<style>
-body{width:1600px;height:2220px;background:#110D26;color:#F7F3EA;padding:80px;box-sizing:border-box}
-h1{font:900 30px Outfit;letter-spacing:.3em;color:#FFC93C;margin:0 0 8px}
-h2{font:900 22px Outfit;letter-spacing:.25em;color:rgba(247,243,234,.55);margin:56px 0 20px}
-p{font:600 22px/1.5 Outfit;color:rgba(247,243,234,.75);margin:0;max-width:1100px}
-.row{display:flex;gap:24px;align-items:center}
-.row.pal{align-items:stretch;flex-wrap:nowrap}
-.tile{border-radius:28px;overflow:hidden}
-.sw{width:210px;border-radius:22px;overflow:hidden;background:#1d1838}
-.sw div:first-child{height:120px}.sw div:last-child{padding:14px 18px;font:700 18px/1.4 Outfit}
-.sw span{display:block;font-weight:600;color:rgba(247,243,234,.6)}
-.type div{font-family:Outfit}
-.btn{border-radius:18px;padding:22px 34px;font:900 26px Outfit;letter-spacing:.04em}
-</style>
-<h1>CITY SWING · BRAND</h1>
-<p>Momentum is everything. A bright, bold dusk city; one hero, one web line, gold sun. Shapes are simple and flat,
-type is heavy and leans forward like it's moving.</p>
-<h2>LOGO</h2>
-<div class="row">
-  <div class="tile" style="background:#43286F;padding:30px 50px;width:760px;height:360px;box-sizing:border-box"><svg id="wm1" style="width:100%;height:100%"></svg></div>
-  <img src="../../assets/brand/mark.png" style="width:300px">
-  <img class="tile" src="../../assets/brand/icon_1024.png" style="width:300px">
-</div>
-<h2>PALETTE</h2>
-<div class="row pal">
-  <div class="sw"><div style="background:#FFC93C"></div><div>Signal Gold<span>#FFC93C · primary, CTAs</span></div></div>
-  <div class="sw"><div style="background:#FF4D3D"></div><div>Ember<span>#FF4D3D · hero suit, alerts</span></div></div>
-  <div class="sw"><div style="background:#5CF2D0"></div><div>Web Teal<span>#5CF2D0 · tokens, focus</span></div></div>
-  <div class="sw"><div style="background:#F7F3EA"></div><div>Web White<span>#F7F3EA · text, web line</span></div></div>
-  <div class="sw"><div style="background:#43286F"></div><div>Dusk<span>#43286F · panels, sky</span></div></div>
-  <div class="sw"><div style="background:#110D26;outline:2px solid #2c2650"></div><div>Night Ink<span>#110D26 · type, silhouettes</span></div></div>
-</div>
-<h2>TYPE · OUTFIT</h2>
-<div class="type">
-  <div style="font-weight:900;font-size:84px;font-style:italic;transform:skewX(-9deg);transform-origin:left">SWING HARDER</div>
-  <div style="font-weight:700;font-size:40px">Titles &amp; buttons · Outfit Bold</div>
-  <div style="font-weight:600;font-size:28px;color:rgba(247,243,234,.7)">Body &amp; captions · Outfit SemiBold</div>
-</div>
-<h2>UI</h2>
-<div class="row">
-  <div class="btn" style="background:#FFC93C;color:#110D26">FREE SWING</div>
-  <div class="btn" style="background:rgba(247,243,234,.08);color:#F7F3EA">Time Trial</div>
-  <div class="btn" style="background:rgba(247,243,234,.08);color:#F7F3EA;outline:3px solid #FFC93C">Focused</div>
-</div>
-<h2>BANNER</h2>
-<img class="tile" src="../../assets/brand/splash.png" style="width:1440px">
-<script>document.fonts.load("900 100px Outfit").then(() => drawWordmark(document.getElementById("wm1")));</script>
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="brand.css">
+<style>body{background:var(--ink);color:var(--web);padding:90px;font-family:Outfit}h1{font-size:24px;color:var(--gold);letter-spacing:.2em}h2{margin-top:70px;font-size:18px;letter-spacing:.2em;opacity:.5}.row{display:flex;align-items:center;gap:90px}.row img{width:280px}p{font-size:26px;color:#a6a2b1;line-height:1.5}.pal{display:flex;gap:20px}.sw{width:240px;padding:30px 20px;border-top:70px solid var(--c);font-size:24px}.hero{width:100%;margin-top:20px}#logo{width:850px;height:340px;object-fit:contain}small{display:block;font-size:18px;opacity:.5;margin-top:12px}</style>
+<h1>CITY SWING / VISUAL IDENTITY</h1>
+<p>The city takes centre stage. Flat gold, warm white and Night Ink.<br>Outfit typography. One open arc, one rising cable.</p>
+<h2>PRIMARY LOCKUP / ASCENT MARK</h2>
+<div class="row"><img id="logo" src="../../assets/brand/wordmark_stacked.png"><img src="../../assets/brand/icon_1024.png"></div>
+<h2>CORE PALETTE</h2><div class="pal"><div class="sw" style="--c:#FFC93C">Signal Gold<small>#FFC93C / action</small></div><div class="sw" style="--c:#F7F3EA">Web White<small>#F7F3EA / typography</small></div><div class="sw" style="--c:#211A3B">Night Ink<small>#110D26 / ground</small></div></div>
+<h2>TYPE / OUTFIT</h2><div style="font-weight:900;font-size:90px">THE CITY IS YOURS.</div><p>Black / titles. Bold / actions. SemiBold / supporting text.</p>
+<h2>STARTUP / THE SAME IDENTITY BEFORE THE CITY APPEARS</h2><img class="hero" src="../../assets/brand/splash.png">
+<h2>MAIN MENU</h2><p>A compact signature at bottom left. Gold actions at right.<br>The live city and the hero remain the focus.</p>

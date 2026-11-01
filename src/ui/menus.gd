@@ -141,7 +141,8 @@ func _show_splash() -> void:
 	root.add_child(MenuParts.floor_fade(0.45))
 	_brand(root, true)
 	var col := _menu_column(root)
-	var tap := _label("TAP TO START", 22, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_RIGHT)
+	var tap := _label("TAP TO START" if DisplayServer.is_touchscreen_available() else "PRESS TO START",
+		22, ACCENT, "black", HORIZONTAL_ALIGNMENT_RIGHT)
 	col.add_child(tap)
 	var tw := tap.create_tween().set_loops()
 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
@@ -170,7 +171,7 @@ func _brand(root: Control, studio := false) -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(MenuParts.Logo.new(0.36))
+	box.add_child(MenuParts.Logo.new(0.64 if studio else 0.48))
 	if studio:
 		box.add_child(_label("A MUSA STUDIOS GAME", 12, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 	root.add_child(box)

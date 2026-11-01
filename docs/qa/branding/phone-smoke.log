@@ -1,0 +1,23 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+Vulkan 1.4.305 - Forward Mobile - Using Device #0: Unknown - llvmpipe (LLVM 19.1.7, 256 bits)
+
+  PASS captured loading
+Mainland: 554 buildings, 56 chunks, 905 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5651 ms
+Initial city build: 14 chunks in 435 ms
+  PASS launch overlay removed after loading
+  PASS game becomes the active scene
+  PASS live title appears first
+  PASS captured start
+  PASS keyboard start opens main menu
+  PASS captured menu
+  PASS pointer Play enters gameplay
+BRANDING_SMOKE PASS
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+     at: cleanup (core/object/object.cpp:2514)
+ERROR: 6 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:795)
+ERROR: Pages in use exist at exit in PagedAllocator: N7Variant5Pools12BucketMediumE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:169)
+ERROR: Pages in use exist at exit in PagedAllocator: N7Variant5Pools11BucketSmallE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:169)

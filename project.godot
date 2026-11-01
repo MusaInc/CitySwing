@@ -5,8 +5,8 @@ config_version=5
 
 config/name="City Swing"
 config/description="Skill-based physics swinging through a stylised procedural city."
-config/version="0.17.0"
-run/main_scene="res://scenes/main.tscn"
+config/version="0.17.1"
+run/main_scene="res://scenes/boot.tscn"
 config/features=PackedStringArray("4.5", "Mobile")
 config/icon="res://assets/icon.png"
 boot_splash/bg_color=Color(0.0667, 0.051, 0.149, 1)

@@ -1,59 +1,74 @@
-# City Swing brand
+# City Swing identity
 
-![Brand sheet](brand_sheet.png)
+![Identity sheet](brand_sheet.png)
 
-**Idea:** momentum is everything. A bold dusk city, one hero, one web line,
-a gold sun. Shapes are flat and simple; type is heavy and leans forward as
-if it's moving.
+The main menu sets the visual language: Outfit lettering, Signal Gold actions,
+warm white text and Night Ink. The city and player provide the imagery.
+The launch artwork uses the same restrained palette, without the old cartoon
+hero, sun, outlined lettering or coloured gradients.
 
-## Assets
+## Logo and icon
 
-Everything is generated from source – edit the source, then
-`node tools/brand/render.mjs` (or `… render.mjs <name>` for one asset).
+An open gold C describes a swinging arc; a rising white cable ends at an anchor.
+The lockup pairs this ascent mark with upright CITY / SWING lettering. It appears
+at bottom left in the live title and main menu. The app icon uses the same mark
+on an opaque Night Ink square, with generous space for platform corner masks.
+The horizontal wordmark is available for wider placements.
 
-| Asset | File | Source | Used for |
-|---|---|---|---|
-| App icon | `assets/icon_1024.png`, `assets/icon.png` (copies of `assets/brand/icon_*.png`) | `tools/brand/icon.svg` | iOS / web icon |
-| Mark | `assets/brand/mark.png` | `mark.svg` (icon scene in a gold-ringed roundel) | avatars, small placements |
-| Wordmark, stacked | `assets/brand/wordmark_stacked.png` | `wordmark.js` + `wordmark_stacked.html` | menus, splash (`MenuParts.Logo`) |
-| Wordmark, horizontal | `assets/brand/wordmark.png` | `wordmark.html` | store art, web |
-| Splash / banner | `assets/brand/splash.png` (2340×1080) | `splash.html` | boot splash, store banner |
-| Brand sheet | `docs/brand_sheet.png` | `sheet.html` | this page |
-
-The hero, sun and skyline are drawn once, in `icon.svg`; the splash copies
-them from there (re-render it after changing the icon).
-
-## Logo
-
-- **CITY** in Web White, wide-tracked; **SWING** in a Signal Gold gradient
-  with a Night Ink outline and drop shadow. Both skewed −9° (forward lean).
-- The web line runs from an anchor dot up and right of the word down to the
-  top of the **G**, ending in a Web Teal grip dot. Two speed streaks sit under
-  the stacked version.
-- Keep the logo on dark or dusk backgrounds. Don't recolour SWING, drop the
-  web line, or straighten the lean.
-
-## Palette
-
-| Name | Hex | Role |
+| Colour | Hex | Use |
 |---|---|---|
-| Signal Gold | `#FFC93C` | primary – calls to action, the logo, focus rings |
-| Ember | `#FF4D3D` | the hero's suit, warnings |
-| Web Teal | `#5CF2D0` | tokens, highlights, the web's grip |
-| Web White | `#F7F3EA` | text, the web line |
-| Dusk | `#43286F` | panels, sky |
-| Night Ink | `#110D26` | text on gold, silhouettes, backgrounds |
+| Signal Gold | `#FFC93C` | Mark, SWING, primary actions and focus |
+| Web White | `#F7F3EA` | CITY, cable, primary text |
+| Night Ink | `#110D26` | Launch background, menu shading |
 
-In code: `UiStyle.GOLD / EMBER / TEAL / WEB / DUSK / INK`.
+Outfit Black is used for the logo and titles, Bold for actions, SemiBold for
+supporting text. The existing licensed fonts live in `assets/fonts`.
+Gameplay's teal collectibles and red warnings retain their existing meanings.
 
-## Type
+## Startup
 
-Outfit (OFL, `assets/fonts`): **Black** for titles and the logo, **Bold** for
-buttons and card titles, **SemiBold** for body and captions.
+`project.godot` uses `assets/brand/splash.png` for the engine boot image. The iOS
+storyboard inherits this image and aspect-fit behaviour from the boot settings
+(`storyboard/image_scale_mode=0`); its background matches Night Ink. This follows
+[Godot 4.5.1's iOS exporter](https://github.com/godotengine/godot/blob/4.5.1-stable/platform/ios/export/export_plugin.cpp).
 
-## UI
+`scenes/boot.tscn` displays the same image before requesting the main scene's
+resources in the background. A thin gold bar reports resource-loader progress.
+The label then switches to “PREPARING STREETS” while the existing synchronous
+city construction runs; no fabricated percentage is shown for this phase.
+The overlay fades away after the game scene initializes. Failure leaves a
+readable retry action. Desktop shows “PRESS TO START”; touch devices show
+“TAP TO START”. The title retains keyboard, controller and full-screen tap input.
 
-- Primary action: a gold card with Night Ink text.
-- Other cards: Night Ink glass (62 %) with a 1 px white hairline; Dusk on
-  hover; a 3 px gold ring on focus.
-- Pills (HUD chips, "TAP TO START"): fully rounded.
+## Editable sources
+
+Run `node tools/brand/render.mjs`, or append an asset name to render just that
+asset. This uses the existing Playwright renderer; set `PLAYWRIGHT` to override
+its local module location. No remote fonts, stock artwork or generated imagery.
+
+| Asset | Source | Runtime output |
+|---|---|---|
+| App icon | `tools/brand/icon.svg` | `assets/icon_1024.png`, `assets/icon.png` |
+| Ascent mark | `tools/brand/mark.svg` | `assets/brand/mark.png` |
+| Logos | `tools/brand/wordmark.js`, HTML wrappers | `assets/brand/wordmark*.png` |
+| Boot artwork | `tools/brand/splash.html` | `assets/brand/splash.png` |
+| Identity sheet | `tools/brand/sheet.html` | `docs/brand_sheet.png` |
+
+Preserve flat colours and the authored clear space. Do not add shadows, outlines,
+character illustrations or gradients to the logo. Update the shared symbol
+geometry in mark, icon and wordmark together.
+
+## Verification
+
+`tools/brand_review.gd` boots the real game, captures loading/title/menu frames,
+checks that the overlay is freed and the game becomes the active scene, sends
+keyboard input to start, then pointer input to Play. Run it with a scratch save:
+
+```sh
+xvfb-run -a godot --rendering-method mobile --resolution 1280x720 \
+  --fixed-fps 30 -s res://tools/brand_review.gd -- \
+  --time=17 --weather=clear --seed=9137 --save=user://branding_capture.json
+```
+
+Add `--brand-out=res://docs/qa/branding/tablet` to capture another aspect ratio.
+Screenshots and verification logs are in `docs/qa/branding`.
