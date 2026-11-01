@@ -214,11 +214,23 @@ void fragment() {
 	float relief = 0.0;
 
 	if (v_kind == KIND_ROOF) {
+		// Building roofs pack their half-extents in UV2.x (negative) and
+		// measure UV from the roof's centre: `edge` = metres to the parapet.
+		float edge = 1e4;
+		if (UV2.x < -0.5) {
+			float pk = floor(-UV2.x - 1.0 + 0.5);
+			vec2 half_ext = vec2(mod(pk, 4096.0), floor(pk / 4096.0)) * 0.25;
+			edge = min(half_ext.x - abs(uv.x), half_ext.y - abs(uv.y));
+			seed = UV2.y;
+		}
 		// Roof membrane panels, softly varied (no per-pixel noise: it shimmers).
 		float n = hash12(floor(uv / 4.0) + seed * 91.0);
 		vec2 pf = abs(fract(uv / 4.0) - 0.5);
 		float seam = step(0.47, max(pf.x, pf.y)) * detail;
-		albedo = base * (0.9 + 0.1 * n) * (1.0 - 0.15 * seam);
+		// Pale finishes were reading as white slabs in full sun: real roofs
+		// sit in the mid greys.
+		vec3 rb = base * mix(1.0, 0.72, smoothstep(0.36, 0.56, dot(base, vec3(0.33))));
+		albedo = rb * (0.9 + 0.1 * n) * (1.0 - 0.15 * seam);
 		// Weathering: broad soft patches (puddle stains, newer membrane) from
 		// a smoothed 9 m lattice, and a paver walkway on some roofs.
 		vec2 g = uv / 9.0 + seed * 17.0;
@@ -226,11 +238,29 @@ void fragment() {
 		vec2 gf = smoothstep(0.0, 1.0, fract(g));
 		float blot = mix(mix(hash12(gi), hash12(gi + vec2(1, 0)), gf.x),
 			mix(hash12(gi + vec2(0, 1)), hash12(gi + vec2(1, 1)), gf.x), gf.y);
-		albedo *= mix(0.84, 1.08, blot);
+		albedo *= mix(0.8, 1.08, blot);
+		// Gravel aggregate, only up close (where a pixel covers a few stones).
+		float near_k = 1.0 - smoothstep(0.025, 0.06, length(fwidth(uv)));
+		if (near_k > 0.0) {
+			float grit = hash12(floor(uv * 9.0) + seed * 7.0);
+			albedo *= 1.0 + (grit - 0.5) * 0.16 * near_k;
+		}
 		if (fract(seed * 13.7) < 0.45) {
 			float lane = abs(fract(uv.x / 23.0 + seed) - 0.5) * 23.0;
 			vec2 pv = abs(fract(uv / vec2(1.0, 1.0)) - 0.5);
-			albedo = mix(albedo, vec3(0.62, 0.6, 0.56) * (1.0 - 0.25 * step(0.44, max(pv.x, pv.y))), step(lane, 0.8) * detail);
+			albedo = mix(albedo, vec3(0.55, 0.53, 0.5) * (1.0 - 0.25 * step(0.44, max(pv.x, pv.y))), step(lane, 0.8) * detail * step(1.5, edge));
+		}
+		if (edge < 1e3) {
+			// Dirt and standing water collect along the parapet; a lighter
+			// metal flashing strip runs right at its foot; drains every ~12 m.
+			albedo *= mix(0.7, 1.0, smoothstep(0.25, 2.2, edge));
+			float flash = step(edge, 0.3) * detail;
+			albedo = mix(albedo, vec3(0.5, 0.51, 0.52), flash * 0.7);
+			vec2 dpos = abs(fract(uv / 12.0 + 0.5) - 0.5) * 12.0;
+			float drain = step(edge, 0.9) * step(0.35, edge) * step(min(dpos.x, dpos.y), 0.28) * detail;
+			albedo = mix(albedo, vec3(0.08, 0.08, 0.09), drain * 0.9);
+			// Water stain fanning out from each drain.
+			albedo *= 1.0 - 0.18 * detail * (1.0 - smoothstep(0.0, 2.2, length(vec2(min(dpos.x, dpos.y), edge - 0.6))));
 		}
 		rough = 0.95;
 	} else if (v_kind == KIND_TRIM) {

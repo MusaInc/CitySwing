@@ -119,7 +119,7 @@ func _ready() -> void:
 	sun.name = "Sun"
 	sun.light_angular_distance = 0.6
 	sun.shadow_enabled = preset.get("shadows", true)
-	sun.shadow_bias = 0.04
+	sun.shadow_bias = 0.1
 	sun.shadow_normal_bias = 1.2
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 220.0

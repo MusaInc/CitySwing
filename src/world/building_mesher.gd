@@ -303,7 +303,7 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 			var ch := cornice_h(b)
 			walls(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
 			bottom(x0 - o, z0 - o, x1 + o, z1 + o, y1 - ch * 0.5, trim, KIND_TRIM, style, seed)
-			top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, KIND_ROOF, style, seed)
+			roof_top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, seed)
 			if b["kind"] != "bridge":
 				_parapet(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, trim)
 				if not glassy:
@@ -320,7 +320,7 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 				for aw in awning_runs(b):
 					_awning(aw[0], aw[1], aw[2], aw[3], (aw[3] as Color).darkened(0.15))
 		else:
-			top(x0, z0, x1, z1, y1, roof, KIND_ROOF, style, seed)
+			roof_top(x0, z0, x1, z1, y1, roof, seed)
 
 
 ## Architectural features (features()) as their own mesh: CityWorld draws it
@@ -355,6 +355,11 @@ func add_skyline(b: Dictionary) -> void:
 	for d in features(b)["draw"]:
 		if d.size() > 2 and d[2] is String:
 			var bx: AABB = d[0]
+			if d.size() > 3 and d[3] == "roof":
+				# Crown deck: the roof you land on gets the roof finish.
+				walls(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1], KIND_TRIM, 0, 0)
+				roof_top(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.end.y, d[1], fmod(float(b["seed"]) * 3.7, 1.0))
+				continue
 			solid(bx.position.x, bx.position.z, bx.end.x, bx.end.z, bx.position.y, bx.end.y, d[1])
 	_end()
 
@@ -677,7 +682,7 @@ static func _features(b: Dictionary) -> Dictionary:
 			out["col"].append(r)
 		# The deck across the top: the roof you land on.
 		var deck := _aabb(x0 + 0.3, z0 + 0.3, x1 - 0.3, z1 - 0.3, ry + ch2 - 0.3, ry + ch2)
-		out["draw"].append([deck, col.darkened(0.35).lerp(Color(0.5, 0.5, 0.5), 0.5), "far"])
+		out["draw"].append([deck, ROOF_COLORS[int(float(b["seed"]) * 997.0) % 4], "far", "roof"])
 		out["col"].append(deck)
 		var caps: Array[AABB] = []
 		_ring(caps, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, ry + ch2, ry + ch2 + PARAPET, 0.4)
@@ -1421,6 +1426,37 @@ func _slab(T: CityTerrain, outers: Array, holes: Array, height: Callable, col: C
 				C = t
 				n = -n
 			_ground_tri(A, B, C, n.normalized(), col)
+
+
+## A building's flat roof. UVs run from the roof's centre and UV2.x packs its
+## half-extents (negative = "roof with extents"), so building.gdshader knows
+## how far each pixel is from the parapet: grime and flashing along the edges,
+## drains, a walkway – all without extra vertices.
+func roof_top(x0: float, z0: float, x1: float, z1: float, y: float, col: Color, seed: float) -> void:
+	var cx := (x0 + x1) * 0.5
+	var cz := (z0 + z1) * 0.5
+	var hx := minf(floorf((x1 - x0) * 2.0), 4095.0)  # half-extent in ¼ m
+	var hz := minf(floorf((z1 - z0) * 2.0), 4095.0)
+	var i := verts.size()
+	var a := Vector3(x0, y, z0)
+	var b := Vector3(x1, y, z0)
+	var c := Vector3(x1, y, z1)
+	var d := Vector3(x0, y, z1)
+	var n := Vector3.UP
+	if _xf_on:
+		a = xf * a
+		b = xf * b
+		c = xf * c
+		d = xf * d
+		n = xf.basis * n
+	verts.append_array([a, b, c, d])
+	normals.append_array([n, n, n, n])
+	var cc := Color(col.r, col.g, col.b, KIND_ROOF / 8.0)
+	colors.append_array([cc, cc, cc, cc])
+	uvs.append_array([Vector2(x0 - cx, z0 - cz), Vector2(x1 - cx, z0 - cz), Vector2(x1 - cx, z1 - cz), Vector2(x0 - cx, z1 - cz)])
+	var s2 := Vector2(-(1.0 + hx + hz * 4096.0), seed)
+	uv2s.append_array([s2, s2, s2, s2])
+	indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
 
 
 ## Upward-facing triangle with world-XZ UVs (ground shader), KIND_ROOF.
