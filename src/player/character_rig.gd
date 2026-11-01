@@ -189,6 +189,7 @@ var _scarf_prev: Array[Vector3] = []
 
 
 func _ready() -> void:
+	_irng.seed = 9137  # idle choices: varied, but repeatable run to run
 	var parts := _load_parts()
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://src/player/shaders/character.gdshader")
@@ -417,6 +418,7 @@ func set_facing(dir: Vector3) -> void:
 # ------------------------------------------------------------------ events
 func on_landed(speed: float) -> void:
 	var impact := maxf(speed, player.land_impact if player else 0.0)
+	cloth_kick(Vector3.DOWN * clampf(impact * 0.045, 0.0, 0.9))
 	_land_squash = clampf(impact / 22.0, 0.15, 1.0)
 	var vh := Vector3(player.s.velocity.x, 0, player.s.velocity.z).length() if player else 0.0
 	if ragdolling or (player and player.stunned):
@@ -668,6 +670,18 @@ func _on_respawned() -> void:
 	_prev_vel = player.s.velocity if player else Vector3.ZERO
 	_accel = Vector3.ZERO  # the teleport is not an acceleration
 	_loco = 0.0
+	# Idle life, anticipation and cloth start fresh too (no state leaking
+	# from the last life into the next).
+	exert = 0.0
+	idle_action = ""
+	_idle_t = 0.0
+	_idle_next = 3.0
+	_idle_sink = 0.0
+	_gaze = Vector2.ZERO
+	_antic = 0.0
+	cloth = Vector3.ZERO
+	_cloth_v = Vector3.ZERO
+	_cloth_air = Vector3.ZERO
 	_contact = 0.0
 	_was_grounded = false
 	for sd in ["l", "r"]:
@@ -749,6 +763,7 @@ func _process(dt: float) -> void:
 	_guard_limbs()
 	_no_pops(dt)
 	_update_scarf(dt)
+	_update_cloth(dt)
 	_sync_skeleton()
 	# Closed hands on the line, and loose fists when running or flying (open
 	# flat palms read as waving); open hands when standing.
@@ -819,6 +834,7 @@ func _update_animated(dt: float) -> void:
 	var vh := Vector3(v.x, 0.0, v.z)
 	var hs := vh.length()
 	var speed := v.length()
+	_update_exert(dt, hs if player.is_on_floor() else speed, player.is_on_floor())
 	var on_rope := player.line_state != Player.Line.IDLE
 	# Kerbs and steps down lift the capsule off the floor for a few frames:
 	# the body keeps walking through them (animation only) instead of
@@ -1153,6 +1169,7 @@ func _update_animated(dt: float) -> void:
 		_gait.reset()  # next time on the feet, start from where they are
 		_gait_amp = 0.0
 
+	_reach_next(q, body, dt, air and not on_rope and _trick == "" and _release_t <= 0.0 and _takeoff_t <= 0.0)
 	_drive_springs(q, dt, on_rope, grounded)
 	if air:
 		_ground_t -= dt
@@ -1194,7 +1211,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 			ank[sd] = _plant[sd][0] if _plant.has(sd) else (bones["foot_" + sd] as Node3D).global_position
 		g.begin(ank, _facing, ground, player.s.velocity)
 	var run0 := g.run
-	var crouch := (0.012 + 0.05 * run0 + 0.03 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
+	var crouch := (0.012 + 0.038 * run0 + 0.018 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
 	var td := g.touchdowns
 	g.update(dt, player.s.velocity, _facing, player.global_position, hips_w, ground, crouch)
 	if g.touchdowns != td:
@@ -1276,25 +1293,9 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	for b in ["thigh_l", "thigh_r", "shin_l", "shin_r", "foot_l", "foot_r"]:
 		q[b] = _rot[b]
 	if amp < 0.35:
-		# Idle: slow breathing, weight shifting from leg to leg, a glance about.
-		# The weight sits on one leg (that hip up, the other knee loose) and
-		# only now and then swaps over; the shoulders counter the hip and the
-		# head tilts with an easy nod – relaxed, not standing to attention.
-		var k := 1.0 - amp / 0.35
-		var br := sin(_time * 1.5)
-		var shift := clampf(sin(_time * 0.21) * 2.4, -1.0, 1.0)
-		q["hips"] = (q["hips"] as Quaternion).slerp(_rz(shift * 0.06) * _ry(shift * 0.04), k)
-		q["spine"] = (q["spine"] as Quaternion).slerp(_rz(-shift * 0.05) * _rx(-0.015), k)
-		q["chest"] = (q["chest"] as Quaternion).slerp(_rx(0.03 + br * 0.022) * _rz(-shift * 0.035) * _ry(-shift * 0.05), k)
-		q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.02), k)
-		q["head"] = (q["head"] as Quaternion).slerp(_ry(sin(_time * 0.31) * 0.2) * _rz(shift * 0.05)
-			* _rx(0.02 + br * 0.01 + maxf(sin(_time * 0.9), 0.0) * 0.04), k)
-		# Relaxed: shoulders soft, elbows a little bent, hands by the thighs.
-		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-0.13 - br * 0.012) * _rx(0.06) * _ry(0.3), k)
-		q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion).slerp(_rz(0.13 + br * 0.012) * _rx(0.05) * _ry(-0.3), k)
-		q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.3 + br * 0.02), k)
-		q["forearm_r"] = (q["forearm_r"] as Quaternion).slerp(_rx(0.27 + br * 0.02), k)
-		_hip_shift = lerpf(_hip_shift, shift * 0.025, k)
+		_idle_pose(q, 1.0 - amp / 0.35, dt)
+	else:
+		_idle_reset()
 	_standing = not g.moving
 	# Turning: the head leads toward where the stick points, the chest
 	# follows a little – the body visibly decides before it goes.
@@ -1304,7 +1305,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		q["head"] = _ry(lead * 0.5) * (q["head"] as Quaternion)
 		q["neck"] = _ry(lead * 0.15) * (q["neck"] as Quaternion)
 		q["chest"] = _ry(lead * 0.12) * (q["chest"] as Quaternion)
-	return bob - crouch - _land_squash * 0.18 - push * 0.03
+	return bob - crouch - _land_squash * 0.18 - push * 0.03 - _idle_sink
 
 
 ## On the web. The rope arm is solved with two-bone IK so the hand sits on
@@ -1410,8 +1411,20 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 			# Free hand: out wide for balance on the way down, reaching ahead
 			# and up toward the next anchor on the way up.
 			var reach_up := up * (1.0 - _lgrip * 2.0)
-			q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rx(2.1) * _rz(-0.45), reach_up * 0.75)
-			q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.45), reach_up * 0.75)
+			var ru := _rx(2.1) * _rz(-0.45)
+			var rf := _rx(0.45)
+			var tg := player.targeting
+			if tg and tg.pick_ok:
+				# Toward the web it would actually take next (above the line
+				# of travel), not just "up".
+				var sh_l := (bones["upper_arm_l"] as Node3D).global_position
+				var dn := (tg.pick - sh_l).normalized()
+				if dn.y > -0.2:
+					var ik_n := _two_bone(chest_basis, dn, 0.5, Vector3(-0.75, -0.2, 0.6))
+					ru = ik_n[0]
+					rf = ik_n[1]
+			q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(ru, reach_up * 0.75)
+			q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(rf, reach_up * 0.75)
 	# Swinging forward: the body leans into the arc (see the body lean in
 	# _update_animated), chest out, head up toward where it's going, and the
 	# free arm spreads out wide and a little back like a wing – dipping or
@@ -2393,6 +2406,270 @@ func _aim_bone(b: String, parent_basis: Basis, dir: Vector3, rest_axis: Vector3)
 
 
 # -------------------------------------------------------------------- scarf
+## Flying between webs: once the release has played out, the web arm comes
+## up toward the anchor the hero will take next – anticipation, so the next
+## shot reads before it fires. (Eases in and out; not during tricks, dives or
+## the take-off.)
+var _antic := 0.0
+
+
+func _reach_next(q: Dictionary, body: Basis, dt: float, ok: bool) -> void:
+	var tg := player.targeting
+	var want := 0.0
+	var dir := Vector3.ZERO
+	var shoulder := (bones["upper_arm_r"] as Node3D).global_position
+	if ok and tg and tg.pick_ok and _swan < 0.2 and _air_t > 0.3:
+		dir = (tg.pick - shoulder).normalized()
+		if dir.y > -0.1:
+			want = 0.6
+	_antic = move_toward(_antic, want, dt * (2.5 if want > _antic else 4.0))
+	if _antic <= 0.01 or dir == Vector3.ZERO:
+		return
+	var chest_basis := body * Basis(_rot["spine"]) * Basis(_rot["chest"])
+	var ik := _two_bone(chest_basis, dir, 0.5, Vector3(0.75, -0.2, 0.6))
+	q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion).slerp(ik[0], _antic)
+	q["forearm_r"] = (q["forearm_r"] as Quaternion).slerp(ik[1], _antic)
+
+
+# ------------------------------------------------------------- idle life
+## Standing still never freezes: breathing that follows how hard the hero has
+## just been working (heavy and fast after a sprint or a long swing, slow when
+## rested), weight that settles on one leg and now and then moves over, a gaze
+## that wanders to somewhere and holds, and occasional unscripted-looking
+## actions picked at random, at random intervals: a glance over the shoulder,
+## rolling the shoulders, shaking the arms out, checking the web gauntlet
+## (pulling the cuff over it), a neck stretch. Context changes the mix: on a
+## roof edge the hero looks down at the drop and sits back from it; high up
+## in the wind the body leans into it; winded after a sprint the hero bends
+## forward, hands loose, getting their breath back before anything else.
+const IDLE_ACTIONS := {
+	"glance_back": 2.3, "shoulder_roll": 1.5, "shake_out": 1.3, "gauntlet": 2.6, "neck": 1.8, "look_down": 2.8,
+}
+var exert := 0.0            # 0..1 how hard the hero has been working (breathing)
+var idle_action := ""       # current idle action ("" = none); read by tests
+var _idle_t := 0.0
+var _idle_next := 3.0
+var _idle_dur := 1.0
+var _idle_side := 1.0
+var _breath := 0.0
+var _shift := 0.0
+var _shift_goal := 1.0
+var _shift_next := 4.0
+var _gaze := Vector2.ZERO   # current head yaw/pitch offset (rad)
+var _gaze_goal := Vector2.ZERO
+var _gaze_next := 1.5
+var _edge := 0.0            # 0..1 standing at a drop in front
+var _edge_probe := 0.0
+var _idle_sink := 0.0       # m the hips sink (winded)
+var _idle_k := 0.0
+var _irng := RandomNumberGenerator.new()
+
+
+## Starts an idle action now (review tools; the game picks them itself).
+func play_idle(action: String, side := 1.0) -> void:
+	idle_action = action
+	_idle_dur = float(IDLE_ACTIONS.get(action, 2.0))
+	_idle_t = 0.0
+	_idle_side = side
+
+
+func _idle_reset() -> void:
+	idle_action = ""
+	_idle_t = 0.0
+	_idle_next = minf(_idle_next, 2.5 + _irng.randf() * 3.0)
+	_idle_sink = move_toward(_idle_sink, 0.0, 0.01)
+	_idle_k = 0.0
+
+
+## Work rate → breathing. Called every frame from _update_animated.
+func _update_exert(dt: float, speed: float, grounded: bool) -> void:
+	var work := 0.0
+	if grounded:
+		work = clampf((speed - 4.0) / 10.0, 0.0, 1.0) * 0.09
+	elif player.s.attached:
+		work = 0.05
+	exert = clampf(exert + work * dt - (0.07 if speed < 2.0 else 0.0) * dt, 0.0, 1.0)
+
+
+func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
+	_idle_k = k
+	var winded := smoothstep(0.45, 0.85, exert)
+	# Breathing: rate 0.25 Hz rested → 0.6 Hz winded, slightly irregular.
+	_breath += dt * TAU * lerpf(0.24, 0.62, exert) * (0.9 + 0.2 * sin(_time * 0.37))
+	var br := sin(_breath)
+	var br_amp := lerpf(0.018, 0.05, exert)
+	# Weight: on one leg, moving over now and then (not on a timer).
+	_shift_next -= dt
+	if _shift_next <= 0.0:
+		_shift_goal = -_shift_goal if _irng.randf() < 0.8 else _shift_goal * 0.4
+		_shift_next = _irng.randf_range(3.5, 9.0)
+	_shift = move_toward(_shift, _shift_goal, dt * 0.9)
+	var shift := _shift * _shift * (3.0 - 2.0 * absf(_shift)) * signf(_shift)  # eased
+	# Edge: is there a drop just ahead? (probed a few times a second)
+	_edge_probe -= dt
+	if _edge_probe <= 0.0:
+		_edge_probe = 0.3
+		var from := player.global_position + _facing * 0.85 + Vector3.UP * 0.3
+		var eq := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.5, player.collision_mask, [player.get_rid()])
+		var at_edge := get_world_3d().direct_space_state.intersect_ray(eq).is_empty()
+		_edge = 1.0 if at_edge else 0.0
+	var edge_k := _edge
+	var high := clampf((player.height_above_ground() - 25.0) / 80.0, 0.0, 1.0)
+	# Gaze: pick somewhere to look, ease to it, hold it a while.
+	_gaze_next -= dt
+	if _gaze_next <= 0.0:
+		_gaze_goal = Vector2(_irng.randf_range(-0.75, 0.75), _irng.randf_range(-0.12, 0.1))
+		if edge_k > 0.5 and _irng.randf() < 0.5:
+			_gaze_goal = Vector2(_irng.randf_range(-0.3, 0.3), -0.42)  # down at the street
+		_gaze_next = _irng.randf_range(1.6, 4.5)
+	_gaze = _gaze.lerp(_gaze_goal, 1.0 - exp(-2.2 * dt))
+	# Occasional actions (not while winded).
+	_idle_next -= dt
+	if idle_action == "" and _idle_next <= 0.0 and winded < 0.2:
+		var pool := ["glance_back", "shoulder_roll", "shake_out", "gauntlet", "neck"]
+		if edge_k > 0.5 or high > 0.3:
+			pool += ["look_down", "look_down", "glance_back"]
+		else:
+			pool += ["gauntlet", "shoulder_roll"]
+		var pick: String = pool[_irng.randi_range(0, pool.size() - 1)]
+		if pick == "look_down" and edge_k < 0.5:
+			pick = "neck"
+		idle_action = pick
+		_idle_dur = float(IDLE_ACTIONS[pick]) * _irng.randf_range(0.85, 1.2)
+		_idle_t = 0.0
+		_idle_side = -1.0 if _irng.randf() < 0.5 else 1.0
+	var a_u := 0.0
+	var env := 0.0
+	if idle_action != "":
+		_idle_t += dt
+		a_u = _idle_t / _idle_dur
+		env = smoothstep(0.0, 0.22, a_u) * (1.0 - smoothstep(0.72, 1.0, a_u))
+		if a_u >= 1.0:
+			idle_action = ""
+			_idle_next = _irng.randf_range(3.5, 9.0)
+	# --- base: relaxed stance -------------------------------------------------
+	var lean_f := -0.015 + 0.03 * edge_k  # sits back from a drop (+ = back for torso bones)
+	var wind_f := 0.0
+	if high > 0.0:
+		# High up in the wind: lean a little into it.
+		var w_into := -wind.dot(_facing)  # >0: the air comes from the front
+		wind_f = clampf(w_into * 0.012, -0.06, 0.06) * high
+	q["hips"] = (q["hips"] as Quaternion).slerp(_rz(shift * 0.06) * _ry(shift * 0.04), k)
+	q["spine"] = (q["spine"] as Quaternion).slerp(_rz(-shift * 0.05) * _rx(lean_f - wind_f - winded * 0.42), k)
+	q["chest"] = (q["chest"] as Quaternion).slerp(_rx(0.03 + br * br_amp * (1.0 + winded) - winded * 0.26) * _rz(-shift * 0.035)
+		* _ry(-shift * 0.05), k)
+	q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.02 + winded * 0.26), k)
+	var head := _ry(_gaze.x * (1.0 - env * 0.8)) * _rz(shift * 0.05) * _rx(_gaze.y * (1.0 - winded) + br * br_amp * 0.3 + winded * 0.3)
+	q["head"] = (q["head"] as Quaternion).slerp(head, k)
+	# Arms: soft, hanging; shoulders lift with each breath. Winded, they hang
+	# forward off the bent body.
+	for sd in ["l", "r"]:
+		var sdg := 1.0 if sd == "r" else -1.0
+		var asym := 0.02 if sd == "l" else 0.0
+		q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion).slerp(
+			_rz(sdg * (0.13 + asym + br * br_amp * 0.4)) * _rx(0.05 + winded * 0.62) * _ry(-0.3 * sdg * (1.0 - winded)), k)
+		q["forearm_" + sd] = (q["forearm_" + sd] as Quaternion).slerp(_rx(0.28 + asym * 2.0 + br * 0.02 - winded * 0.1), k)
+	_idle_sink = lerpf(_idle_sink, winded * 0.085, 1.0 - exp(-3.0 * dt))
+	_hip_shift = lerpf(_hip_shift, shift * 0.025, k)
+	if env <= 0.0:
+		return
+	# --- actions ------------------------------------------------------------
+	var e := env * k
+	var sdg := _idle_side
+	var t := _idle_t
+	match idle_action:
+		"glance_back":
+			q["head"] = (q["head"] as Quaternion).slerp(_ry(1.05 * sdg) * _rx(-0.05), e)
+			q["neck"] = (q["neck"] as Quaternion).slerp(_ry(0.3 * sdg), e)
+			q["chest"] = (q["chest"] as Quaternion).slerp(_ry(0.22 * sdg) * (q["chest"] as Quaternion), e * 0.8)
+		"shoulder_roll":
+			var r := sin(a_u * TAU)
+			var r2 := cos(a_u * TAU)
+			for sd in ["l", "r"]:
+				var s2 := 1.0 if sd == "r" else -1.0
+				q["upper_arm_" + sd] = (q["upper_arm_" + sd] as Quaternion) * _rz(s2 * 0.16 * maxf(r, 0.0) * e) * _rx(-0.22 * r2 * e)
+			q["chest"] = (q["chest"] as Quaternion) * _rx(0.07 * r2 * e)
+			q["head"] = (q["head"] as Quaternion) * _rz(0.12 * sin(a_u * PI) * sdg * e)
+		"shake_out":
+			var f := sin(t * 19.0) * e
+			var f2 := sin(t * 23.0 + 1.1) * e
+			q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion) * _rx(0.07 * f) * _rz(-0.05 * f2)
+			q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion) * _rx(0.07 * f2) * _rz(0.05 * f)
+			q["forearm_l"] = (q["forearm_l"] as Quaternion) * _rx(0.18 * f2)
+			q["forearm_r"] = (q["forearm_r"] as Quaternion) * _rx(0.18 * f)
+			q["chest"] = (q["chest"] as Quaternion) * _ry(0.05 * sin(t * 7.0) * e)
+		"gauntlet":
+			# Raise the launcher arm, look at the wrist, tug the cuff over it
+			# with the other hand.
+			var tug := maxf(sin(clampf((a_u - 0.35) / 0.4, 0.0, 1.0) * PI * 2.0), 0.0) * e
+			q["upper_arm_r"] = (q["upper_arm_r"] as Quaternion).slerp(_rx(0.55) * _rz(0.32) * _ry(0.65), e)
+			q["forearm_r"] = (q["forearm_r"] as Quaternion).slerp(_rx(1.75), e)
+			q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rx(0.62 + 0.05 * tug) * _rz(-0.12) * _ry(-0.75), e)
+			q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(1.45 - 0.12 * tug), e)
+			q["head"] = (q["head"] as Quaternion).slerp(_ry(0.32) * _rx(-0.42), e)
+			q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.12), e)
+		"neck":
+			var nt := sin(a_u * TAU) * sdg
+			q["head"] = (q["head"] as Quaternion).slerp(_rz(0.26 * nt) * _rx(-0.06), e)
+			q["neck"] = (q["neck"] as Quaternion).slerp(_rz(0.1 * nt), e)
+		"look_down":
+			q["head"] = (q["head"] as Quaternion).slerp(_ry(0.25 * sdg) * _rx(-0.55), e)
+			q["neck"] = (q["neck"] as Quaternion).slerp(_rx(-0.2), e)
+			q["chest"] = (q["chest"] as Quaternion).slerp(_rx(-0.06) * (q["chest"] as Quaternion), e * 0.7)
+
+
+## Clothing secondary motion (character.gdshader applies it to the hoodie
+## hem, sleeves, hood and cords by their cloth weight): one damped spring for
+## the fabric's offset, chasing where the air, inertia and gravity would put
+## it. Underdamped, so the hem swings past and settles after a stop or a
+## landing instead of freezing.
+##   * air: wind minus the body's velocity – the hem and hood stream back when
+##     running, lift when falling, flap at speed; a breeze that grows with
+##     height (and gusts) keeps them alive standing on a roof.
+##   * inertia: sudden acceleration leaves the fabric behind.
+##   * gravity: upside down (flips, dives) the hem falls toward the sky.
+const CLOTH_K := 85.0      # 1/s² (~1.5 Hz)
+const CLOTH_C := 6.5       # 1/s (underdamped: a wobble or two)
+const CLOTH_MAX := 0.16    # m at weight 1
+const WIND_DIR := Vector3(0.78, 0.0, -0.62)
+var cloth := Vector3.ZERO  # current offset (world, m at weight 1); read by tests
+var _cloth_v := Vector3.ZERO
+var _cloth_t := 0.0
+var _cloth_air := Vector3.ZERO
+var wind := Vector3.ZERO   # ambient wind at the hero (world m/s)
+
+
+func _update_cloth(dt: float) -> void:
+	if _mat == null or dt <= 0.0:
+		return
+	_cloth_t += dt
+	var h := player.height_above_ground() if player else 0.0
+	var gust := 0.65 + 0.35 * sin(_cloth_t * 0.37) * sin(_cloth_t * 1.13 + 0.4) + 0.15 * sin(_cloth_t * 2.9)
+	wind = WIND_DIR * (1.4 + 5.0 * clampf(h / 140.0, 0.0, 1.0)) * gust
+	var air := wind - (player.s.velocity if player else Vector3.ZERO)
+	_cloth_air = _cloth_air.lerp(air, 1.0 - exp(-10.0 * dt))
+	var a_len := _cloth_air.length()
+	var target := Vector3.ZERO
+	if a_len > 0.01:
+		target = _cloth_air / a_len * 0.14 * (1.0 - exp(-a_len / 13.0))
+	target -= _accel.limit_length(40.0) * 0.0016
+	var up := (bones["spine"] as Node3D).global_basis.y.normalized()
+	target += (Vector3.DOWN + up) * 0.055
+	target = target.limit_length(CLOTH_MAX)
+	_cloth_v += ((target - cloth) * CLOTH_K - _cloth_v * CLOTH_C) * dt
+	cloth += _cloth_v * dt
+	cloth = cloth.limit_length(CLOTH_MAX * 1.15)
+	_mat.set_shader_parameter("cloth_drag", cloth)
+	_mat.set_shader_parameter("cloth_flutter", smoothstep(3.0, 32.0, a_len))
+	_mat.set_shader_parameter("cloth_time", _cloth_t)
+	_mat.set_shader_parameter("cloth_wind_dir", _cloth_air / maxf(a_len, 0.01))
+
+
+## Landings and wall hits shake the fabric (the hem bounces and settles).
+func cloth_kick(v: Vector3) -> void:
+	_cloth_v += v
+
+
 func _reset_scarf() -> void:
 	_scarf_pts.clear()
 	_scarf_prev.clear()

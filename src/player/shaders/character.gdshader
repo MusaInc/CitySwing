@@ -29,6 +29,18 @@ const vec3 K_PANTS_DK = vec3(0.078, 0.090, 0.129);
 const vec3 K_SNEAKER = vec3(0.929, 0.929, 0.894);
 const vec3 K_GLOVE = vec3(0.098, 0.098, 0.106);
 
+// Cloth (secondary motion, CharacterRig._update_cloth): UV2.x is how freely
+// a vertex moves (0 = held by the body … 1 = the hoodie's hem, the hood's
+// peak, the cord ends). The rig integrates one damped spring per character
+// for the fabric's lag against the air (wind − velocity), inertia and
+// gravity, and passes it in world space; the shader offsets free vertices by
+// it, never inward through the body (the inward part is flattened, as fabric
+// pressed against the torso), and adds a travelling flutter at speed.
+uniform vec3 cloth_drag = vec3(0.0);      // world metres at weight 1
+uniform float cloth_flutter = 0.0;         // 0..1
+uniform float cloth_time = 0.0;
+uniform vec3 cloth_wind_dir = vec3(0.0, 0.0, 1.0);  // world, where the air comes from → goes
+
 // Baked ambient occlusion (build_character.py bake_ao): UV = (ao, 1) on the
 // meshes that carry it; anything else (UV.y = 0) stays unshaded.
 varying float v_ao;
@@ -40,6 +52,23 @@ float is_key(vec3 c, vec3 k) {
 
 void vertex() {
 	v_ao = UV.y > 0.5 ? UV.x : 1.0;
+	float cw = UV2.x;
+	if (cw > 0.001) {
+		mat3 to_world = mat3(MODEL_MATRIX);
+		vec3 n_w = normalize(to_world * NORMAL);
+		vec3 p_w = to_world * VERTEX;
+		vec3 off = cloth_drag * cw;
+		// Fabric can't go into the body: flatten the inward part.
+		float inward = dot(off, n_w);
+		off -= n_w * min(inward, 0.0) * 0.92;
+		// Flutter: ripples travelling along the hem with the airflow,
+		// mostly outward (cloth billows, it doesn't fold into the body).
+		float ph = dot(p_w, cloth_wind_dir) * 14.0 + dot(p_w, vec3(0.7, 0.0, -0.7)) * 9.0;
+		float rip = sin(cloth_time * 17.0 - ph) * 0.6 + sin(cloth_time * 29.0 - ph * 1.7 + 1.3) * 0.4;
+		off += n_w * (0.35 + 0.65 * rip) * cloth_flutter * cw * 0.016;
+		off += cloth_wind_dir * rip * cloth_flutter * cw * 0.01;
+		VERTEX += inverse(to_world) * off;
+	}
 	vec3 c = COLOR.rgb;
 	vec3 o = c;
 	if (COLOR.a < 0.5) {

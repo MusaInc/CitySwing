@@ -324,7 +324,7 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			p.y = f.from.y + up * ey
 			# (A sprint's heel comes up behind, but not tucked against the seat
 			# for half the stride: that read as running sitting down.)
-			var lift_h := lerpf(0.1, 0.3 + 0.04 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
+			var lift_h := lerpf(0.1, 0.26 + 0.03 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
 			# (Peak skewed early running – the heel kicks up behind – with zero
 			# vertical speed at lift and touchdown: no pops.)
 			var wk := f.w + 0.15 * f.w * (1.0 - f.w)

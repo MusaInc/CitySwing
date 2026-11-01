@@ -254,3 +254,40 @@ class _Idle:
 	var jump := false
 	func drive(_p, _dt) -> Dictionary:
 		return {"move": Vector3.ZERO, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": jump}
+
+
+## Hoodie secondary motion: the fabric trails the motion through the air,
+## stays within its bounds, and settles (not frozen, not drifting) standing.
+func test_clothing_trails_motion_and_settles(t) -> void:
+	player.respawn(Vector3(0, 60, 60))
+	await get_tree().physics_frame
+	player.s.velocity = Vector3(0, -2, -24)  # flying fast toward -z
+	var trail := 0.0
+	var worst := 0.0
+	for i in 30:
+		player.s.velocity.z = -24.0
+		await get_tree().process_frame
+		trail = rig.cloth.z
+		worst = maxf(worst, rig.cloth.length())
+	t.check(trail > 0.05, "hem streams back against the flight (cloth.z %.3f m)" % trail)
+	t.check(worst <= CharacterRig.CLOTH_MAX * 1.15 + 1e-3, "cloth offset bounded (%.3f m)" % worst)
+	# Standing on the ground: it settles to a small breeze offset.
+	player.respawn(Vector3(20, 1.0, -120))
+	for i in 180:
+		await get_tree().process_frame
+	t.check(rig.cloth.length() < 0.05, "standing, the hoodie hangs (cloth %.3f m)" % rig.cloth.length())
+	t.note("flying trail %.3f m, standing %.3f m" % [trail, rig.cloth.length()])
+
+
+## Standing still the hero keeps living: idle actions come by themselves
+## within ~15 s and breathing follows exertion.
+func test_idle_has_life(t) -> void:
+	player.respawn(Vector3(20, 1.0, -120))
+	rig.exert = 0.0
+	var seen := {}
+	for i in 60 * 16:
+		await get_tree().process_frame
+		if rig.idle_action != "":
+			seen[rig.idle_action] = true
+	t.check(seen.size() >= 1, "idle actions played: %s" % str(seen.keys()))
+	t.note("idle actions in 16 s: %s" % str(seen.keys()))

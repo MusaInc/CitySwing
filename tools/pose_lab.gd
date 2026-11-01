@@ -4,11 +4,11 @@ extends SceneTree
 ## motion reads clearly), saved as frames + one contact sheet per scenario.
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --rendering-method mobile \
 ##     --resolution 640x480 --fixed-fps 30 -s res://tools/pose_lab.gd -- <outdir> [scenario,...]
-## Scenarios: idle run steps jump swing swing34 swingfast release wallrun crash
+## Scenarios (also idlelife edge winded): idle run steps jump swing swing34 swingfast release wallrun crash
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 ##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts"]
 
 var player: Player
 var rig: CharacterRig
@@ -124,6 +124,52 @@ func _sc_idle() -> void:
 	_look_y = 0.78
 	await _film("idle_face", 1.0, [0.5])
 	_look_y = 0.1
+
+
+## Long idle on the ground: breathing, weight shifts, gaze, idle actions.
+func _sc_idlelife() -> void:
+	_reset(Vector3(0, 1.0, 20))
+	rig.exert = 0.0
+	_cam_off = Vector3(1.5, 0.35, -2.0)
+	var t := []
+	for i in 16:
+		t.append(1.0 + i * 1.5)
+	await _film("idlelife", 25.0, t)
+
+
+## Each idle action, close up (forced one after another).
+func _sc_idleacts() -> void:
+	_reset(Vector3(0, 1.0, 20))
+	rig.exert = 0.0
+	_cam_off = Vector3(1.3, 0.45, -1.7)
+	_look_y = 0.45
+	for a in CharacterRig.IDLE_ACTIONS:
+		await _film("act_" + a + "_settle", 1.0, [])
+		rig.play_idle(a, 1.0)
+		var d: float = CharacterRig.IDLE_ACTIONS[a]
+		await _film("act_" + a, d, [d * 0.2, d * 0.4, d * 0.55, d * 0.75])
+	_look_y = 0.1
+
+
+## Standing a step back from a roof edge (the 20 m block's south side).
+func _sc_edge() -> void:
+	_reset(Vector3(40, 21.0, 16.2))
+	rig.exert = 0.0
+	_cam_off = Vector3(2.4, 0.4, -2.2)
+	var t := []
+	for i in 12:
+		t.append(1.0 + i * 1.6)
+	await _film("edge", 20.0, t)
+
+
+## Sprint, stop, get the breath back.
+func _sc_winded() -> void:
+	var sc := _reset(Vector3(-60, 1.0, 20))
+	sc.human_steer = true
+	sc.move = Vector3.RIGHT
+	rig.exert = 0.8
+	_cam_off = Vector3(0.6, 0.3, 3.2)
+	await _film("winded", 7.0, [0.5, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.5], {0.6: func(): sc.move = Vector3.ZERO})
 
 
 func _sc_run() -> void:

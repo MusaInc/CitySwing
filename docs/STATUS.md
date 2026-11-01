@@ -1,3 +1,28 @@
+# Status: 2026-11-01 (character realism pass, v0.13.0)
+
+## Character pass (latest)
+
+Brief: make the hero a believable urban athlete in a hoodie, joggers and trainers, with clothing that moves, natural idle life and better body mechanics. Before/after: `docs/character_before_after.png`.
+
+- **Model** (`tools/blender/build_character.py`, same bones/joints/palette keys, so shop recolours and gear still work):
+  - Pullover hoodie: relaxed body bloused over a ribbed hem that covers the hips, dropped shoulders, roomy sleeves bunching above ribbed cuffs (the left cuff pushed up), kangaroo pocket with stitched outline and slits, side seams, soft fold ridges (blouse, armpit drag, small of back, inner elbows).
+  - Roomy jersey hood (1.6 cm thick, lining round the opening, centre-back seam, drooping peak, loose folds) plus a neck cowl. Drawcords with aglets (left longer) replace the back spool on the chest part.
+  - Joggers: knee bag, rear-knee creases, gathered bunching cuffs, a quiet side seam (the accent stripe, knee pads, belt, emblem and raglan panels are gone).
+  - Layered trainers: knit upper, padded collar, tongue, white midsole, dark outsole, accent heel counter/eyestay/tab, flat laces, and a loose loop on the left.
+  - Blended colour-transfer corners are snapped to the nearest palette key (they used to escape shop recolours).
+- **Cloth motion**: per-vertex cloth weight in UV2 (hem, lower back, sleeves toward the cuffs, lower legs, hood back/peak, cord ends). `CharacterRig._update_cloth` runs one underdamped spring per character: air (wind − velocity; the wind grows with height and gusts), inertia, gravity when inverted, and kicks on landing. `character.gdshader` offsets the vertices, never inward (the inward part is flattened) and adds an outward-biased flutter at speed. Cost: one spring on the CPU plus a few ALU per weighted vertex.
+- **Idle life** (`_idle_pose`): exertion-driven breathing, weight shifts at random intervals, gaze targets that hold, and random idle actions (glance back, shoulder roll, shake-out, gauntlet check with a cuff tug, neck stretch, look down). Winded after hard running: bent over, arms loose, deeper breathing, then recovery. At a roof edge the hero sits back and looks down at the drop; high up, a lean into the wind. Review with pose_lab `idlelife`, `edge`, `winded`, `idleacts` (`CharacterRig.play_idle`).
+- **Swing/air**: the free hand reaches toward the real next pick (`targeting.pick`) on the upswing, and between webs the web arm comes up toward the next anchor (anticipation, `_reach_next`).
+- **Run**: less high-knee and less sink (swing-foot lift 0.30→0.26 m, pelvis crouch reduced). In the motion audit at sprint, pops fell slightly in most locomotion scenarios and float was unchanged.
+- New rig state is reset in `_on_respawned` (it leaked between motion-audit scenarios and broke run_into_wall).
+- Tests: test_character `test_clothing_trails_motion_and_settles` and `test_idle_has_life`. 111/111 pass.
+- Cost: character drawn triangles 21.7k → 24.1k (hood +1k, trainers +0.6k each, cords +0.2k). Body still 9,000. No new draw calls or bones.
+
+Not done:
+- No cloth bones. The hood doesn't turn independently of the head, and the sleeves don't twist.
+- Landing variants and ragdoll were left as they were (soft/roll/three-point already existed; no "awkward landing" correction yet).
+- The face is still the masked head with glowing lenses (the user asked earlier for an always-covered face).
+
 # Status: 2026-11-01 (quality & polish overhaul)
 
 ## Polish pass (latest)
