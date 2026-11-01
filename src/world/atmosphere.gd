@@ -92,7 +92,7 @@ func _ready() -> void:
 	env.ambient_light_color = Color(0.56, 0.66, 0.9)
 	# Half sky, half "bounce": shaded streets read as cool grey stone and
 	# asphalt lit by the sunlit facades around them, not a flat blue.
-	env.ambient_light_sky_contribution = 0.15
+	env.ambient_light_sky_contribution = 0.38
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
@@ -101,15 +101,15 @@ func _ready() -> void:
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_depth_curve = 1.45
 	env.fog_sun_scatter = 0.3
-	env.fog_aerial_perspective = 0.4
+	env.fog_aerial_perspective = 0.7
 	env.fog_sky_affect = 0.15
 	env.glow_enabled = preset.get("glow", true)
 	env.glow_intensity = 0.4
 	env.glow_bloom = 0.05
 	env.glow_hdr_threshold = 1.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.04
-	env.adjustment_contrast = 1.05
+	env.adjustment_saturation = 1.1
+	env.adjustment_contrast = 1.12
 	env.adjustment_color_correction = grade_lut()
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -246,7 +246,7 @@ func _apply(dt: float, instant: bool) -> void:
 		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
 		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.5, 0.26)], [8.0, Color(1.0, 0.72, 0.48)],
 			[25.0, Color(1.0, 0.84, 0.64)], [60.0, Color(1.0, 0.95, 0.88)]])
-		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.2], [10.0, 1.9], [25.0, 2.3], [60.0, 2.5]])
+		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.3], [10.0, 2.1], [25.0, 2.65], [60.0, 2.85]])
 		sky_mat.set_shader_parameter("sun_glow", 1.0)
 		sky_mat.set_shader_parameter("disc_size", 0.9993)
 		sky_mat.set_shader_parameter("disc_k", 6.0)
@@ -299,7 +299,7 @@ func _apply(dt: float, instant: bool) -> void:
 		sky_mat.set_shader_parameter("flash", fl)
 
 	# --- ambient, exposure, fog.
-	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.5], [2.0, 0.58], [20.0, 0.72]]) \
+	env.ambient_light_energy = _rampf(el, [[-15.0, 0.5], [-4.0, 0.5], [2.0, 0.5], [20.0, 0.56]]) \
 		* (1.0 + 0.25 * overcast) + fl * 2.0
 	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
 	# dusky at sunset, moonlit blue at night).
@@ -310,9 +310,9 @@ func _apply(dt: float, instant: bool) -> void:
 	# 130 m fog start turned the whole city grey from the top floors).
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
-	env.fog_depth_begin = lerpf(130.0, 12.0, fog) * (1.0 + 4.5 * alt * (1.0 - fog))
+	env.fog_depth_begin = lerpf(220.0, 12.0, fog) * (1.0 + 4.0 * alt * (1.0 - fog))
 	env.fog_depth_end = lerpf(2600.0, 520.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_density = lerpf(0.62, 0.97, fog) * (1.0 - 0.35 * alt * (1.0 - fog))
+	env.fog_density = lerpf(0.46, 0.97, fog) * (1.0 - 0.35 * alt * (1.0 - fog))
 	env.fog_light_color = hor.lerp(Color(0.68, 0.77, 0.9), 0.35 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
 	env.fog_light_energy = lerpf(1.0, 0.55, night)
 	env.fog_sun_scatter = 0.3 * day_light * (1.0 - overcast)
