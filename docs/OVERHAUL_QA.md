@@ -32,3 +32,13 @@ This is a tested visual/system iteration, not a claim of finished AAA art. Inter
 ## Acceptance result
 
 Final full suite: **122 passed, 0 failed**, 298.6 seconds on the VPS. The final penthouse gameplay capture measured 113 draw calls, 172,564 primitives, 357.4 MB static and 154.5 MB video memory. Some thin character details still show aliasing in software-rendered motion captures; real-device visual review is outstanding. This release does not claim to resolve every art-quality aspiration in the broader brief.
+
+The final committed home suite was rerun after adjusting bedroom furniture clearance: **8 passed, 0 failed** (55.4 seconds).
+
+### In-game captures
+
+[Hero standing](qa/overhaul/hero-standing.png) · [Running](qa/overhaul/hero-running.png) · [Swinging](qa/overhaul/hero-swinging.png) · [Skyline](qa/overhaul/skyline.png) · [Waterfront](qa/overhaul/waterfront.png) · [Starter](qa/overhaul/starter.png) · [Starter view](qa/overhaul/starter-view.png) · [Mid-tier home](qa/overhaul/loft.png) · [Penthouse](qa/overhaul/penthouse.png) · [Penthouse gameplay view](qa/overhaul/penthouse-view.png) · [Window entry](qa/overhaul/window-entry.png) · [Window exit](qa/overhaul/window-exit.png)
+
+[Full test log](qa/overhaul/tests.log) · [Committed apartment test log](qa/overhaul/home-tests.log)
+
+TestFlight upload: version **0.16.0**, build **26**, source commit `72b25c8a57419f9616defeab7c86881c95ada0a5`. The archive and upload steps succeeded in [release run 41336273328](https://github.com/MusaInc/CitySwing/actions/runs/41336273328); Apple processing completed successfully at 2026-11-01 18:26:17 UTC: **FINAL_STATE VALID**. The workflow finished successfully.

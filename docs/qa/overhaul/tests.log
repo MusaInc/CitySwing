@@ -1,0 +1,272 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+
+        · skeleton vs pivots: worst joint offset 0.0 mm
+  ok    test_animation.test_skinned_body_follows_the_rig
+        · web hand off the line: worst 5.4 cm over 99 taut frames; free hand out 0.63 m
+  ok    test_animation.test_web_hand_stays_on_the_line
+        · running 11.0 m/s: stance foot moves 1.0 m/s over ground (9% of body speed)
+  ok    test_animation.test_running_feet_plant_instead_of_sliding
+        · steps: 12 step-ups, top 0.62 m, ended at x=39.1; ankle sink 0.0 cm; flat planted foot off the surface 0.1 cm mean, 4.8 cm worst (149 samples)
+  ok    test_animation.test_running_up_and_down_kerbs
+        · ragdoll hinge checks: 0 bad of 532
+  ok    test_animation.test_ragdoll_joints_bend_the_right_way
+        · hips sank to -0.38 m (standing 0.05), chest leaned forward up to 0.92
+  ok    test_animation.test_high_drop_lands_in_a_forward_crouch
+        · swinging: worst torso-vs-rope 18°, worst web-arm-vs-anchor 24° over 109 frames
+  ok    test_character.test_hangs_along_the_rope_and_reaches_for_the_anchor
+        · dive: body axis vs velocity 23°
+  ok    test_character.test_fast_dive_stretches_out_head_first
+  ok    test_character.test_springs_stay_stable_and_bounded
+  ok    test_character.test_animation_never_affects_physics
+        · wall run peak 2.4 m above the hit
+  ok    test_character.test_slow_head_on_wall_hit_becomes_a_wall_run
+        · knockout at 35 m/s: bounced 5.5 m/s off the wall, head thrown 0.64 m back relative to the hips, down 2.6 s
+  ok    test_character.test_fast_head_on_wall_hit_knocks_you_out
+        · JUMP 0.5 s early: ko=true; 0.1 s before: saved=true ko=false
+  ok    test_character.test_timed_jump_kicks_off_instead
+        · hit-stop + slow motion lasted 1.09 s of real time
+  ok    test_character.test_knockout_hit_stop_restores_time
+        · ragdoll worst link stretch 0.0%, recovered 1.9 s after the fall started
+  ok    test_character.test_crash_ragdolls_then_recovers
+  ok    test_character.test_crash_on_the_rope_keeps_the_web
+        · flying trail 0.098 m, standing 0.005 m
+  ok    test_character.test_clothing_trails_motion_and_settles
+        · idle actions in 16 s: ["shoulder_roll", "neck"]
+  ok    test_character.test_idle_has_life
+  ok    test_character.test_sideways_landing_stumbles
+  ok    test_city.test_layout_is_deterministic
+        · districts { "waterfront": 121, "cbd": 234, "georgian": 326, "midtown": 213, "docks": 447 }, >100 m: 552, <35 m: 429, props 2769, lanes 1644
+  ok    test_city.test_layout_has_districts_landmarks_and_swing_heights
+  ok    test_city.test_buildings_do_not_overlap_streets_or_each_other
+  ok    test_city.test_whole_layout_repeats_exactly
+  ok    test_city.test_island_has_sea_round_it
+        · waterfront 94%  georgian 85%  midtown 99%  cbd 94%  docks 74%  
+  ok    test_city.test_every_district_is_swingable
+Mainland: 554 buildings, 56 chunks, 953 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5227 ms
+        · chunks loaded around spawn: 8, mean gen 26.1 ms
+  ok    test_city.test_world_builds_collision_and_streams
+Mainland: 554 buildings, 56 chunks, 883 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5278 ms
+        · 73 road-field probes
+  ok    test_city.test_road_field_matches_the_roads
+Mainland: 554 buildings, 56 chunks, 849 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5361 ms
+        · 1536 furniture items { "sign_post": 270, "bin": 326, "bollard": 270, "bench": 326, "bus_shelter": 58, "planter": 152, "hydrant": 134 }
+  ok    test_city.test_street_furniture_stays_on_the_pavement
+Mainland: 554 buildings, 56 chunks, 910 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5364 ms
+  ok    test_city.test_traffic_lod_and_tight_culling
+Mainland: 554 buildings, 56 chunks, 911 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5308 ms
+        · city run 0: 594 m from start, 27 swings, best chain 24, top 188 km/h, street touches 1
+        · city run 1: 248 m from start, 18 swings, best chain 17, top 237 km/h, street touches 0
+        · city run 2: 490 m from start, 31 swings, best chain 14, top 180 km/h, street touches 1
+  ok    test_city.test_expert_swings_through_generated_city
+Mainland: 554 buildings, 56 chunks, 810 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5240 ms
+        · homes: starter 22 m, city 36 m, loft 68 m, sky 126 m, penthouse 292 m
+  ok    test_homes.test_five_homes_in_real_buildings_with_views
+Mainland: 554 buildings, 56 chunks, 874 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5883 ms
+  ok    test_homes.test_spawn_inside_and_run_out_of_the_window
+Mainland: 554 buildings, 56 chunks, 870 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5850 ms
+  ok    test_homes.test_catch_the_sill_and_climb_in
+Mainland: 554 buildings, 56 chunks, 904 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5487 ms
+  ok    test_homes.test_vault_in_fast_and_refuse_reckless_entry
+Mainland: 554 buildings, 56 chunks, 778 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5174 ms
+  ok    test_homes.test_ownership_and_purchases
+Mainland: 554 buildings, 56 chunks, 869 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5461 ms
+  ok    test_homes.test_every_home_spawn_and_window_corridor
+Mainland: 554 buildings, 56 chunks, 991 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5436 ms
+  ok    test_homes.test_respawn_cancels_window_transition
+Mainland: 554 buildings, 56 chunks, 961 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5611 ms
+  ok    test_homes.test_vault_speeds_remain_inside_window_clearance
+  ok    test_minimap.test_map_is_oriented_to_the_heading
+  ok    test_minimap.test_zoom_widens_with_speed_smoothly
+Mainland: 554 buildings, 56 chunks, 846 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5502 ms
+  ok    test_modes.test_recorded_flights_clear_every_gate
+Mainland: 554 buildings, 56 chunks, 835 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5517 ms
+        · canyon: done rings 10/10, 53.1 s (par 58.6)
+  ok    test_modes.test_course_canyon_flyable
+Mainland: 554 buildings, 56 chunks, 1090 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 6269 ms
+        · waterfront: done rings 10/10, 56.4 s (par 62.1)
+  ok    test_modes.test_course_waterfront_flyable
+Mainland: 554 buildings, 56 chunks, 906 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5777 ms
+        · beacon: done rings 8/8, 52.5 s (par 58.0)
+  ok    test_modes.test_course_beacon_flyable
+Mainland: 554 buildings, 56 chunks, 929 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5898 ms
+        · uptown: done rings 14/14, 65.3 s (par 72.0)
+  ok    test_modes.test_course_uptown_flyable
+Mainland: 554 buildings, 56 chunks, 862 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5090 ms
+        · spires: done rings 6/6, 27.5 s (par 30.4)
+  ok    test_modes.test_course_spires_flyable
+Mainland: 554 buildings, 56 chunks, 880 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5331 ms
+        · switchback: done rings 10/10, 68.2 s (par 75.1)
+  ok    test_modes.test_course_switchback_flyable
+Mainland: 554 buildings, 56 chunks, 1133 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5938 ms
+        · riverside: done rings 9/9, 54.7 s (par 60.4)
+  ok    test_modes.test_course_riverside_flyable
+Mainland: 554 buildings, 56 chunks, 954 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5651 ms
+        · grand_tour: done rings 22/22, 132.4 s (par 145.9)
+  ok    test_modes.test_course_grand_tour_flyable
+Mainland: 554 buildings, 56 chunks, 1001 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 6476 ms
+  ok    test_modes.test_endurance_ends_on_street
+Mainland: 554 buildings, 56 chunks, 884 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5550 ms
+        · start 0: training reached step 5/7
+  ok    test_modes.test_training_steps_advance_when_performed
+Mainland: 554 buildings, 56 chunks, 879 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5460 ms
+  ok    test_modes.test_personal_bests_persist
+  ok    test_motion_quality.test_feet_never_sink_or_hover
+        · idle: planted foot drift 0.00 m/s average
+        · walk_stop: planted foot drift 0.00 m/s average
+        · accelerate: planted foot drift 0.04 m/s average
+        · steps: planted foot drift 0.01 m/s average
+        · drop: planted foot drift 0.11 m/s average
+        · run_jump: planted foot drift 0.02 m/s average
+        · release_refire: planted foot drift 0.07 m/s average
+        · swing_to_land: planted foot drift 0.03 m/s average
+        · roll_land: planted foot drift 0.03 m/s average
+        · wall_run: planted foot drift 0.00 m/s average
+        · run_into_wall: planted foot drift 0.01 m/s average
+        · ledge_dive: planted foot drift 0.64 m/s average
+  ok    test_motion_quality.test_planted_feet_hold_their_ground
+  ok    test_motion_quality.test_joints_stay_in_anatomical_range
+        · run_jump: fastest bone 2861°/s (shin_r ground@3.10), 24 pops
+        · swing_slow: fastest bone 873°/s (forearm_l rope@2.63), 0 pops
+        · swing_fast: fastest bone 540°/s (upper_arm_r fire@0.12), 0 pops
+        · rapid_webs: fastest bone 1963°/s (upper_arm_r fire@1.33), 0 pops
+        · tricks: fastest bone 460°/s (upper_arm_l air@0.12), 0 pops
+        · drop: fastest bone 1664°/s (shin_l hard@1.25), 0 pops
+  ok    test_motion_quality.test_no_pose_pops
+        · dive: body up·world-up reached -0.90; upright again before the ground: true
+  ok    test_motion_quality.test_jumping_off_a_building_dives_head_first
+  ok    test_motion_quality.test_web_hand_stays_on_the_line_in_every_swing
+  ok    test_physics.test_free_fall_matches_kinematics
+  ok    test_physics.test_small_angle_pendulum_period
+        · worst relative energy error over 20 s: 0.1399%
+  ok    test_physics.test_large_swing_conserves_energy_without_drag
+  ok    test_physics.test_rope_never_stretches
+  ok    test_physics.test_downswing_accelerates_naturally
+  ok    test_physics.test_slack_rope_is_free_fall
+  ok    test_physics.test_slack_snap_is_inelastic
+  ok    test_physics.test_release_preserves_velocity_exactly
+  ok    test_physics.test_reel_in_conserves_angular_momentum
+        · energy passive 1413 vs pumped 1966
+  ok    test_physics.test_reel_pumping_adds_energy
+  ok    test_physics.test_drag_bleeds_energy_and_caps_speed
+  ok    test_physics.test_air_steering_has_limited_authority
+  ok    test_physics.test_swing_steering_is_tangential
+  ok    test_physics.test_ground_run_and_jump
+  ok    test_physics.test_overspeed_landing_keeps_flow
+  ok    test_physics.test_params_resource_loads
+  ok    test_physics.test_attach_rejects_out_of_range
+        · jump apex 6.7 m
+  ok    test_physics.test_jump_is_high
+        · energy without pull 1315, with automatic pull 1641; shortest line 28.2 m
+  ok    test_physics.test_auto_tighten_pumps_each_swing
+        · lowest point 9.8 m (clearance 8 m)
+  ok    test_physics.test_auto_tighten_keeps_the_arc_off_the_street
+        · 90° turn at 11 m/s: lined up after 0.22 s, 20° after 3 frames
+  ok    test_physics.test_running_turns_carry_momentum_and_reversals_brake
+        · 75° in the air at 25 m/s: assisted 1.35 s, raw never
+  ok    test_physics.test_human_steering_turns_a_corner_in_the_air
+  ok    test_progress.test_tokens_are_deterministic_and_clear_of_buildings
+  ok    test_progress.test_medal_thresholds
+  ok    test_progress.test_suit_unlocks_follow_progress
+        · redirect 0.0: speed just after the snap 20.4 m/s
+        · redirect 0.7: speed just after the snap 23.7 m/s
+  ok    test_progress.test_snap_redirect_keeps_momentum_but_never_adds_energy
+  ok    test_progress.test_perfect_release_window
+        · character model 1.90 m tall
+  ok    test_scale.test_character_matches_the_world
+  ok    test_scale.test_buildings_streets_and_props_share_one_scale
+        · train car 3.0 × 4.1 × 17.6 m
+  ok    test_scale.test_trains_and_platforms_line_up
+        · 10 balcony railings checked
+  ok    test_scale.test_balconies_are_person_scaled
+  ok    test_shop.test_catalogue_is_consistent
+  ok    test_shop.test_buying_and_equipping
+  ok    test_shop.test_multiplier_climbs_and_knockout_resets
+  ok    test_shop.test_rig_wears_the_look
+  ok    test_shop.test_gadgets
+Mainland: 554 buildings, 56 chunks, 908 ms
+CityWorld: 1341 buildings, 2769 props, 65 chunks, layout+collision 5321 ms
+        · 103 candidate roofs; 40 picks gave 34 distinct spots, 0 consecutive repeats
+  ok    test_spawn_camera.test_random_rooftops_are_valid_and_varied
+        · spot (275.6, 60.0, -590.9); roof run from (275.6, 60.0, -590.9) yaw 112° to (284.4, 66.1, -594.5) (floor=false)
+  ok    test_spawn_camera.test_player_stands_on_spawn_roof
+  ok    test_spawn_camera.test_holding_swing_on_a_fresh_spawn_never_knocks_you_out
+        · camera seed 2: max turn 2.0°/frame, 0 flips, behind travel 82% of 1434 moving frames, hero on screen 100%, 0 snaps, 0 inside, fov 70→88
+        · camera seed 3: max turn 2.0°/frame, 0 flips, behind travel 92% of 1295 moving frames, hero on screen 100%, 0 snaps, 0 inside, fov 70→87
+        · camera seed 4: max turn 2.0°/frame, 0 flips, behind travel 97% of 538 moving frames, hero on screen 100%, 0 snaps, 0 inside, fov 70→82
+        · camera seed 5: max turn 2.0°/frame, 0 flips, behind travel 100% of 1023 moving frames, hero on screen 100%, 0 snaps, 0 inside, fov 70→86
+        · mean behind travel 93%
+  ok    test_spawn_camera.test_camera_is_a_stable_follow_camera
+        · max camera step beyond player motion: 0.86 m (2 webs fired)
+  ok    test_spawn_camera.test_spawn_and_reattach_transitions_are_smooth
+        · launch from (618.0, 15.0, 89.0): fired=false attached=false rose 6.5 m travelled 13 m airborne=false target=(581.0, 76.0, -156.0) rope=37.1
+        · clean launches: 7/8
+  ok    test_spawn_camera.test_swing_launches_cleanly_from_the_street_and_rooftops
+  ok    test_swing_scene.test_targeting_finds_building_geometry
+        · expert distances [41.216365814209, 257.422454833984, 352.037933349609, 420.355041503906, 420.569091796875] (cleared 2/5), novice [51.6324882507324, 51.6325225830078, 51.6325416564941, 51.6443748474121, 51.6467971801758]
+  ok    test_swing_scene.test_skill_gap_expert_vs_novice
+  ok    test_swing_scene.test_cannot_tunnel_through_buildings
+  ok    test_swing_scene.test_release_preserves_momentum_in_scene
+  ok    test_swing_scene.test_falls_respawn_at_last_safe_point
+  ok    test_swing_scene.test_wall_kick_pushes_off
+        · passed 1.60 m off the wall at 106 km/h
+  ok    test_swing_scene.test_close_call_past_a_facade
+  ok    test_touch.test_tap_attaches_exactly_under_the_finger
+        · after 1.5 s: low anchor (14.7, 20.6, -43.3), high anchor (14.5, 28.0, -42.6)
+  ok    test_touch.test_attach_height_changes_the_trajectory
+  ok    test_touch.test_rejections_never_redirect
+  ok    test_touch.test_reattach_and_per_finger_release
+  ok    test_touch.test_held_swing_catches_the_next_target_and_can_be_cancelled
+  ok    test_touch.test_multitouch_roles
+        · wrapped=true, frames with the free segment blocked: 0/135
+  ok    test_touch.test_rope_wraps_round_a_corner_and_never_cuts_through
+        · stick right → pick x=32.0 (gain 23.1 m/s); stick left → pick x=-32.0 (gain 23.1 m/s)
+  ok    test_web_pick.test_left_stick_steers_the_web
+        · 8 starts with a pick, 8 of them clear; 17 of the top candidates would have crashed
+  ok    test_web_pick.test_pick_avoids_swings_into_walls
+        · mainland: 554 buildings { "suburb": 376, "waterfront": 99, "midtown": 79 }, 7 parks, 1885 props, 922 lanes
+  ok    test_world_systems.test_mainland_is_a_real_district
+  ok    test_world_systems.test_water_and_ground_cover_both_lands
+        · loop line 4138 m, 4 stations
+        · steepest grade 11.3%, sharpest turn 5.2° per 2 m
+  ok    test_world_systems.test_rail_lines
+  ok    test_world_systems.test_trains_run_and_stop_at_stations
+  ok    test_world_systems.test_day_night_and_weather
+        · car moved 38.0 m, rider 38.0 m, rider 0.88 m above the roof
+  ok    test_world_systems.test_player_rides_the_train
+
+122 passed, 0 failed  (298.6s)
+WARNING: 1 RID of type "CanvasItem" was leaked.
+     at: _free_rids (servers/rendering/renderer_canvas_cull.cpp:2676)
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+     at: cleanup (core/object/object.cpp:2514)
+ERROR: 8 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:795)
+ERROR: Pages in use exist at exit in PagedAllocator: N7Variant5Pools12BucketMediumE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:169)
+ERROR: Pages in use exist at exit in PagedAllocator: N7Variant5Pools11BucketSmallE
+   at: ~PagedAllocator (./core/templates/paged_allocator.h:169)
