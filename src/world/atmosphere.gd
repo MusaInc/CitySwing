@@ -304,9 +304,13 @@ func _apply(dt: float, instant: bool) -> void:
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
 		[15.0, Color(0.8, 0.76, 0.72)], [40.0, Color(0.8, 0.79, 0.78)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
 	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast)
-	env.fog_depth_begin = lerpf(130.0, 12.0, fog)
-	env.fog_depth_end = lerpf(2600.0, 520.0, fog)
-	env.fog_density = lerpf(0.62, 0.97, fog)
+	# High up, the haze starts further out (looking down 300 m through a
+	# 130 m fog start turned the whole city grey from the top floors).
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
+	env.fog_depth_begin = lerpf(130.0, 12.0, fog) * (1.0 + 4.5 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(2600.0, 520.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_density = lerpf(0.62, 0.97, fog) * (1.0 - 0.35 * alt * (1.0 - fog))
 	env.fog_light_color = hor.lerp(Color(0.68, 0.77, 0.9), 0.35 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
 	env.fog_light_energy = lerpf(1.0, 0.55, night)
 	env.fog_sun_scatter = 0.3 * day_light * (1.0 - overcast)

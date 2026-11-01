@@ -78,6 +78,10 @@ var rail: Callable
 ## Title cinematics (CinematicDirector.camera_xf): callable(dt) -> [Transform3D, fov];
 ## while set it places the camera outright.
 var cine: Callable
+## Extra downward tilt (radians), eased: indoors at a home's window the city
+## is below the horizon (HomeSystem sets it while the hero is inside).
+var look_down := 0.0
+var _look_down := 0.0
 
 
 func _ready() -> void:
@@ -201,6 +205,8 @@ func _process(dt: float) -> void:
 	if target.height_above_ground() < 15.0 and not target.s.attached:
 		# Down at street level: look up at the facades you can swing from.
 		want_pitch = deg_to_rad(6.0)
+	_look_down = lerpf(_look_down, look_down, 1.0 - exp(-2.5 * dt))
+	want_pitch -= _look_down
 	pitch = move_toward(pitch, want_pitch, deg_to_rad(25.0) * dt)
 
 	# Manual look eases back to centre once the player lets go.

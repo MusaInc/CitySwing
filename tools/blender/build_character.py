@@ -649,7 +649,8 @@ def build():
         ang = 0.0
         for i, frac in enumerate((0.45, 0.32, 0.23)):
             ang += curl
-            dd = Matrix.Rotation(ang, 3, "X") @ d
+            # Curl toward the palm (−Y; the knuckles / back of the hand are +Y).
+            dd = Matrix.Rotation(-ang, 3, "X") @ d
             q = p + dd * length * frac
             ph = K.paint(tube("phal", [(p, thick, thick * 0.9), (q, thick * 0.88, thick * 0.82)], segs=8), mat_)
             for pl in ph.data.polygons:
@@ -666,22 +667,22 @@ def build():
         for i in range(4):
             x = (i - 1.5) * 0.0225
             open_ += finger(x, 0.084 - abs(i - 1.2) * 0.011, 0.42, 0.0136, glove, 0.004, (i - 1.5) * 0.03)
-        th = K.smooth(K.paint(tube("thumb_o", [(Vector((sx * -0.034, 0.012, -0.018)), 0.016, 0.015),
-                                             (Vector((sx * -0.054, 0.03, -0.052)), 0.014, 0.013),
-                                             (Vector((sx * -0.058, 0.04, -0.08)), 0.0122, 0.011)], segs=9), glove), 1)
+        th = K.smooth(K.paint(tube("thumb_o", [(Vector((sx * -0.034, -0.012, -0.018)), 0.016, 0.015),
+                                             (Vector((sx * -0.054, -0.03, -0.052)), 0.014, 0.013),
+                                             (Vector((sx * -0.058, -0.04, -0.08)), 0.0122, 0.011)], segs=9), glove), 1)
         open_.append(th)
         part("hand_" + side, open_, hand0, arm_rest(side, "hand_" + side))
-        fist = [K.smooth(K.paint(tube("fistpalm", [(Vector((0, 0, 0.008)), 0.035, 0.026), (Vector((0, 0.004, -0.045)), 0.048, 0.028),
-                                                    (Vector((0, 0.01, -0.08)), 0.049, 0.03)], segs=14), glove), 1)]
+        fist = [K.smooth(K.paint(tube("fistpalm", [(Vector((0, 0, 0.008)), 0.035, 0.026), (Vector((0, -0.004, -0.045)), 0.048, 0.028),
+                                                    (Vector((0, -0.01, -0.08)), 0.049, 0.03)], segs=14), glove), 1)]
         for i in range(4):
             x = (i - 1.5) * 0.0225
-            fist += finger(x, 0.076, 1.25, 0.0135, glove, 0.01)
+            fist += finger(x, 0.076, 1.25, 0.0135, glove, -0.01)
         # Knuckle guard across the back of the fist.
         fist.append(K.smooth(K.paint(tube("knuckles", [(Vector((-0.045, 0.03, -0.08)), 0.012, 0.009),
                                                         (Vector((0.045, 0.03, -0.08)), 0.012, 0.009)], segs=8), strap), 1))
-        fist.append(K.smooth(K.paint(tube("thumb_g", [(Vector((sx * -0.034, 0.015, -0.025)), 0.014, 0.013),
-                                                       (Vector((sx * -0.023, 0.042, -0.06)), 0.0125, 0.0115),
-                                                       (Vector((sx * -0.006, 0.053, -0.075)), 0.011, 0.01)], segs=8), glove), 1))
+        fist.append(K.smooth(K.paint(tube("thumb_g", [(Vector((sx * -0.034, -0.015, -0.025)), 0.014, 0.013),
+                                                       (Vector((sx * -0.023, -0.042, -0.06)), 0.0125, 0.0115),
+                                                       (Vector((sx * -0.006, -0.053, -0.075)), 0.011, 0.01)], segs=8), glove), 1))
         part("hand_%s_grip" % side, fist, hand0, arm_rest(side, "hand_" + side))
 
     # ---- trainers (rest frame of the foot pivot at the ankle; toes +Y): a

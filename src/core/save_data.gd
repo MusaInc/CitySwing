@@ -24,6 +24,8 @@ const DEFAULTS := {
 	"best_multiplier": 1.0,
 	"owned": [],        # bought Shop item ids
 	"outfit": {},       # Shop slot -> item id (the suit stays in "suit")
+	"homes": [],        # bought homes (Homes; the starter is always owned)
+	"home": "starter",  # the home Free Swing starts in
 }
 
 

@@ -155,6 +155,9 @@ var _bank := Vector3.ZERO  # smoothed sideways lean into an air turn (world, hor
 var _turn := 0.0           # -1..1 how hard the body is turning (+ = right); head and arms lead it
 const HARD_TIME := 0.62
 const STUMBLE_TIME := 0.6
+## Window moves (HomeSystem): "hang", "grab", "climb", "vault" and 0..1 progress.
+var ledge_mode := ""
+var ledge_u := 0.0
 var stumble_t := 0.0       # off-balance landing remaining (s); read by tests
 var _stumble_side := 1.0
 var _stumble_k := 1.0
@@ -692,6 +695,7 @@ func _on_respawned() -> void:
 	# from the last life into the next).
 	exert = 0.0
 	stumble_t = 0.0
+	ledge_mode = ""
 	idle_action = ""
 	_idle_t = 0.0
 	_idle_next = 3.0
@@ -1189,7 +1193,9 @@ func _update_animated(dt: float) -> void:
 		_gait.reset()  # next time on the feet, start from where they are
 		_gait_amp = 0.0
 
-	_reach_next(q, body, dt, air and not on_rope and _trick == "" and _release_t <= 0.0 and _takeoff_t <= 0.0)
+	if ledge_mode != "":
+		_pose_ledge(q)
+	_reach_next(q, body, dt, ledge_mode == "" and air and not on_rope and _trick == "" and _release_t <= 0.0 and _takeoff_t <= 0.0)
 	_drive_springs(q, dt, on_rope, grounded)
 	if air:
 		_ground_t -= dt
@@ -2439,6 +2445,55 @@ func _aim_bone(b: String, parent_basis: Basis, dir: Vector3, rest_axis: Vector3)
 
 
 # -------------------------------------------------------------------- scarf
+## Window moves: hanging from the sill (arms up on it, legs loose), pulling
+## up (elbows bend, chest over the sill, a knee comes up onto it), pushing
+## through onto the feet; a vault is a forward dive with the legs tucked.
+func _pose_ledge(q: Dictionary) -> void:
+	var u := ledge_u
+	var hang := {"spine": _rx(0.06), "chest": _rx(0.04), "neck": _rx(0.05), "head": _rx(0.22),
+		"upper_arm_l": _rx(2.7) * _rz(-0.22), "upper_arm_r": _rx(2.7) * _rz(0.22),
+		"forearm_l": _rx(0.35), "forearm_r": _rx(0.35),
+		"thigh_l": _rx(0.22), "thigh_r": _rx(0.08), "shin_l": _rx(-0.45), "shin_r": _rx(-0.25),
+		"foot_l": _rx(0.35), "foot_r": _rx(0.3)}
+	match ledge_mode:
+		"grab":
+			_put(q, hang, smoothstep(0.0, 1.0, u * 1.3))
+		"hang":
+			var sway := sin(u * PI) * 0.06
+			hang["thigh_l"] = _rx(0.22 + sway)
+			hang["thigh_r"] = _rx(0.08 - sway)
+			_put(q, hang, 1.0)
+		"climb":
+			# 0–0.55 pull-up, 0.35–0.8 knee onto the sill, 0.55–1 push through.
+			var pull := smoothstep(0.0, 0.55, u)
+			var push := smoothstep(0.5, 1.0, u)
+			var knee := smoothstep(0.3, 0.6, u) * (1.0 - smoothstep(0.8, 1.0, u))
+			var pose := hang.duplicate()
+			var arm := lerpf(2.7, 0.9, pull)
+			arm = lerpf(arm, 0.25, push)
+			var elbow := lerpf(0.35, 1.7, pull)
+			elbow = lerpf(elbow, 0.3, push)
+			pose["upper_arm_l"] = _rx(arm) * _rz(-0.3)
+			pose["upper_arm_r"] = _rx(arm) * _rz(0.3)
+			pose["forearm_l"] = _rx(elbow)
+			pose["forearm_r"] = _rx(elbow)
+			pose["spine"] = _rx(-0.45 * pull + 0.35 * push)
+			pose["chest"] = _rx(-0.25 * pull + 0.2 * push)
+			pose["head"] = _rx(0.3 - 0.2 * pull)
+			pose["thigh_r"] = _rx(0.08 + 1.5 * knee + 0.4 * push)
+			pose["shin_r"] = _rx(-0.25 - 1.7 * knee)
+			pose["thigh_l"] = _rx(0.22 + 0.5 * push)
+			pose["shin_l"] = _rx(-0.45 - 0.6 * push)
+			_put(q, pose, 1.0 - smoothstep(0.88, 1.0, u))
+		"vault":
+			var e := sin(PI * u)
+			_put(q, {"spine": _rx(-0.55), "chest": _rx(-0.3), "head": _rx(0.45),
+				"upper_arm_l": _rx(1.1) * _rz(-0.35), "upper_arm_r": _rx(1.1) * _rz(0.35),
+				"forearm_l": _rx(0.4), "forearm_r": _rx(0.4),
+				"thigh_l": _rx(1.4), "thigh_r": _rx(1.2), "shin_l": _rx(-1.8), "shin_r": _rx(-1.6),
+				"foot_l": _rx(-0.2), "foot_r": _rx(-0.2)}, e)
+
+
 ## Flying between webs: once the release has played out, the web arm comes
 ## up toward the anchor the hero will take next – anticipation, so the next
 ## shot reads before it fires. (Eases in and out; not during tricks, dives or

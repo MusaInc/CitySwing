@@ -13,6 +13,9 @@ signal restart
 signal quit_to_title
 signal tuning_changed
 signal end_session
+## Homes: go to an owned home now (Free Swing), and "ownership/selection changed".
+signal go_home(id: String)
+signal homes_changed
 ## The hero should wear this Shop.look() (equipped outfit or a try-on).
 signal look_changed(look: Dictionary)
 ## Shop preview camera (main → CinematicDirector): framing by category,
@@ -287,6 +290,8 @@ func _show_main() -> void:
 	_reg("shop_card", shop)
 	_reg("shop", shop)
 	col.add_child(shop)
+	var cur_home: String = Homes.spec(Homes.selected()).get("name", "Starter Bedsit")
+	col.add_child(_reg("homes", _menu_row("Homes", cur_home, func(): show_homes(show_title), 20)))
 	col.add_child(_reg("stats", _menu_row("Progress", "Stats and records", show_stats, 20)))
 	col.add_child(_reg("settings", _menu_row("Settings", "", func(): show_settings(show_title), 20)))
 	var ver := _label("v%s" % ProjectSettings.get_setting("application/config/version", "1.0"), 12, FAINT,
@@ -792,12 +797,83 @@ func show_pause(free_swing := false) -> void:
 	else:
 		box.add_child(_reg("restart", _card("Restart", "From the start line", "restart", func(): restart.emit())))
 	var row := HBoxContainer.new()
+	if free_swing:
+		row.add_child(_reg("homes", _icon_button("home", "Homes", func(): show_homes(show_pause.bind(free_swing), true))))
 	row.add_child(_reg("settings", _icon_button("gear", "Settings", func(): show_settings(show_pause.bind(free_swing)))))
 	if OS.is_debug_build():  # developer tool: not in TestFlight/App Store builds
 		row.add_child(_reg("tuning", _icon_button("tune", "Tuning", show_tuning)))
 	row.add_child(_reg("quit", _icon_button("home", "Title", func(): quit_to_title.emit())))
 	box.add_child(row)
 	b.grab_focus.call_deferred()
+
+
+# ================================================================== homes
+## Five real homes in the city's buildings, from the bedsit to the penthouse:
+## where each is, how high, and one action – Home / Make home / Buy (with a
+## confirming tap) / how many coins it needs. In Free Swing, owned homes can
+## be gone to right away.
+var homes_info: Array = []   # [{id, name, height, price}] (main fills it from the layout)
+var _home_confirm := ""
+
+
+func show_homes(back: Callable, in_game := false) -> void:
+	var box := _page("homes", "Homes", back, 640)
+	var cur := Homes.selected()
+	box.add_child(_label("Live up the city: each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in.",
+		15, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	var bal := _coin_chip(Shop.coins(), 18)
+	box.add_child(bal)
+	for i in homes_info.size():
+		var hi: Dictionary = homes_info[i]
+		var id: String = hi["id"]
+		var owned := Homes.owns(id)
+		var p := PanelContainer.new()
+		p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.7), 16,
+			ACCENT if id == cur else Color(1, 1, 1, 0.08), 2 if id == cur else 1, 12))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 14)
+		p.add_child(row)
+		var tx := VBoxContainer.new()
+		tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tx.add_theme_constant_override("separation", 0)
+		tx.add_child(_label(hi["name"], 22, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
+		tx.add_child(_label("Tier %d  ·  %d m above the street" % [i + 1, int(hi["height"])], 14, DIM, "semibold",
+			HORIZONTAL_ALIGNMENT_LEFT))
+		row.add_child(tx)
+		if id == cur:
+			row.add_child(_chip("home", ACCENT, "HOME", 16))
+		elif owned:
+			var mk := _card("Make home", "", "check", func():
+				Homes.select(id)
+				homes_changed.emit()
+				show_homes(back, in_game), "", false)
+			mk.custom_minimum_size = Vector2(170, 60)
+			row.add_child(_reg("home_select_" + id, mk))
+		else:
+			var price := Homes.price(id)
+			var need := price - Shop.coins()
+			var act: Button
+			if need > 0:
+				act = _card("%s more" % Hud._fmt_int(need), "to buy · %s" % Hud._fmt_int(price), "coin", func(): pass)
+				act.disabled = true
+			elif _home_confirm == id:
+				act = _card("Confirm", "Spend %s" % Hud._fmt_int(price), "coin", func():
+					_home_confirm = ""
+					if Homes.buy(id):
+						Settings.haptic(30, 0.7)
+						_tap(1.4)
+						homes_changed.emit()
+					show_homes(back, in_game), "", true)
+			else:
+				act = _card("Buy", "", "coin", func():
+					_home_confirm = id
+					show_homes(back, in_game), Hud._fmt_int(price), true)
+			act.custom_minimum_size = Vector2(196, 60)
+			row.add_child(_reg("home_buy_" + id, act))
+		if in_game and owned:
+			var go := _icon_button("play", "Go", func(): go_home.emit(id))
+			row.add_child(_reg("home_go_" + id, go))
+		box.add_child(p)
 
 
 # ================================================================= results

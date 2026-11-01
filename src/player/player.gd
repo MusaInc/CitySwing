@@ -69,6 +69,9 @@ var view: Node3D
 ## Optional autopilot (tests / attract mode): object with drive(player, dt) -> Dictionary.
 var bot: Object = null
 var input_enabled := true
+## A scripted move (HomeSystem: window grab/climb/vault) is placing the body:
+## the physics step is skipped while it does.
+var scripted := false
 
 var line_state := Line.IDLE
 var line_tip := Vector3.ZERO
@@ -271,6 +274,9 @@ func height_above_ground() -> float:
 
 func _physics_process(dt: float) -> void:
 	RenderingServer.global_shader_parameter_set(&"player_pos", global_position)  # pedestrians step aside
+	if scripted:
+		controls.jump = Input.is_action_just_pressed("jump") if bot == null else false
+		return
 	# Stun first: input read while stunned must never be applied after recovery.
 	if stunned:
 		_update_stun(dt)
@@ -801,6 +807,7 @@ func recover() -> void:
 
 func respawn(at: Variant = null) -> void:
 	_let_go()
+	scripted = false
 	_armed_touch = -1
 	_launch_pending = false
 	stunned = false

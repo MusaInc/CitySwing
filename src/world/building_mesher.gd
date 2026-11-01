@@ -98,7 +98,7 @@ func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, ua: Vector
 
 ## Four outward walls of an axis-aligned box, UV u running round the perimeter.
 func walls(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col: Color,
-		kind: float, style: float, seed: float, uv_y0 := -1.0) -> void:
+		kind: float, style: float, seed: float, uv_y0 := -1.0, hole := {}) -> void:
 	var vy0 := y0 if uv_y0 < 0.0 else uv_y0
 	var vy1 := vy0 + (y1 - y0)
 	var corners := [Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0), Vector2(x0, z0)]
@@ -108,6 +108,33 @@ func walls(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col
 		var a: Vector2 = corners[k]
 		var b: Vector2 = corners[(k + 1) % 4]
 		var w := a.distance_to(b)
+		if not hole.is_empty() and int(hole["face"]) == k:
+			# A home's window: the face drawn round the opening (left, right,
+			# below the sill, above the lintel), UVs continuous with the rest.
+			var A := [0.0, float(hole["oa0"]), float(hole["oa1"]), w]
+			var Y := [y0, float(hole["oy0"]), float(hole["oy1"]), y1]
+			for ia in 3:
+				for iy in 3:
+					if ia == 1 and iy == 1:
+						continue  # the opening
+					var p0: float = A[ia]
+					var p1: float = A[ia + 1]
+					var h0: float = Y[iy]
+					var h1: float = Y[iy + 1]
+					if p1 - p0 < 0.001 or h1 - h0 < 0.001:
+						continue
+					var pa := a.lerp(b, p0 / w)
+					var pb := a.lerp(b, p1 / w)
+					quad(Vector3(pa.x, h1, pa.y), Vector3(pb.x, h1, pb.y), Vector3(pb.x, h0, pb.y), Vector3(pa.x, h0, pa.y), ns[k],
+						Vector2(u + p0, vy0 + h1 - y0), Vector2(u + p1, vy0 + h1 - y0), Vector2(u + p1, vy0 + h0 - y0),
+						Vector2(u + p0, vy0 + h0 - y0), col, kind, style, seed)
+					_face_span(w, style, seed)
+					var n2 := uv2s.size()
+					for q in 4:  # (the corner shading's 0..1 across the whole face)
+						var t := (p0 if q == 0 or q == 3 else p1) / w
+						uv2s[n2 - 4 + q].x = style + minf(t, 0.999)
+			u += w
+			continue
 		quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
 			Vector2(u, vy1), Vector2(u + w, vy1), Vector2(u + w, vy0), Vector2(u, vy0), col, kind, style, seed)
 		_face_span(w, style, seed)
@@ -293,7 +320,12 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		var z1: float = t[3]
 		var y0: float = t[4]
 		var y1: float = t[5]
-		walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed, y0 - base)
+		var apt: Dictionary = b.get("apt", {})
+		var has_apt := not apt.is_empty() and int(apt["t"]) == i
+		if has_apt:
+			walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed, y0 - base, apt)
+		else:
+			walls(x0, z0, x1, z1, y0, y1, col, wall_kind, style, seed, y0 - base)
 		if b["kind"] == "bridge" or _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
 			# Underside: sky bridges, cantilevered tiers, towers' first tier
 			# (hidden on their podium, but they never show a hole).
@@ -306,7 +338,7 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 			roof_top(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, roof, seed)
 			if b["kind"] != "bridge":
 				_parapet(x0 - o, z0 - o, x1 + o, z1 + o, y1 + ch * 0.5, trim)
-				if not glassy:
+				if not glassy and not has_apt:
 					_ledges(x0, z0, x1, z1, y0, y1, trim, style, seed, base)
 			# Ground-floor plinth band on the base tier.
 			if _has_plinth(b, i):
@@ -517,10 +549,14 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 	var bc := base_course(b)
 	if bc.has_volume():
 		out.append(bc)
+	var apt: Dictionary = b.get("apt", {})
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var y1: float = t[5]
-		out.append(_aabb(t[0], t[1], t[2], t[3], t[4], y1 - ch * 0.5))
+		if not apt.is_empty() and int(apt["t"]) == i:
+			out.append_array(Apartments.split_tier(apt, _aabb(t[0], t[1], t[2], t[3], t[4], y1 - ch * 0.5)))
+		else:
+			out.append(_aabb(t[0], t[1], t[2], t[3], t[4], y1 - ch * 0.5))
 		out.append(_aabb(t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 - ch * 0.5, y1 + ch * 0.5))
 		if kind != "bridge":
 			_ring(out, t[0] - o, t[1] - o, t[2] + o, t[3] + o, y1 + ch * 0.5, y1 + ch * 0.5 + PARAPET, PARAPET_T)
@@ -537,6 +573,32 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 		out.append(AABB(lo, hi - lo))
 	out.append_array(features(b)["col"])
 	return out
+
+
+## Feature boxes clear of a home's window (balconies, fire escapes, fins and
+## ledges never block the opening or the view out).
+static func _clear_of_apt(b: Dictionary, out: Dictionary) -> Dictionary:
+	var apt: Dictionary = b.get("apt", {})
+	if apt.is_empty():
+		return out
+	var f := Apartments.face_of(apt)
+	var keep := _fbox(f, float(apt["oa0"]) - 1.5, float(apt["oa1"]) + 1.5, -1.0, 4.0, float(apt["y0"]) - 3.0,
+		float(apt["y1"]) + 1.0)
+	var res := {"draw": [], "col": [], "beams": []}
+	for d in out["draw"]:
+		if not (d[0] as AABB).intersects(keep):
+			res["draw"].append(d)
+	for c in out["col"]:
+		if not (c as AABB).intersects(keep):
+			res["col"].append(c)
+	for bm in out["beams"]:
+		var bb := AABB(bm[0], Vector3.ZERO).expand(bm[1]).grow(0.3)
+		if not bb.intersects(keep):
+			res["beams"].append(bm)
+	for k in out:
+		if not res.has(k):
+			res[k] = out[k]
+	return res
 
 
 # ------------------------------------------------------------ features
@@ -576,7 +638,7 @@ static func _fpt(f: Array, a: float, o: float, y: float) -> Vector3:
 static func features(b: Dictionary) -> Dictionary:
 	if b.has("_features"):
 		return b["_features"]
-	var out := _features(b)
+	var out := _clear_of_apt(b, _features(b))
 	b["_features"] = out  # (the mesher, awnings and collision all ask)
 	return out
 

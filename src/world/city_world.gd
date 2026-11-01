@@ -125,6 +125,7 @@ func _ready() -> void:
 		_build_water()
 	_build_landmarks()
 	_build_structures()
+	_build_homes()
 	if traffic_density > 0.0 and not car_meshes.is_empty():
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
@@ -533,6 +534,14 @@ var _boulevards: Array = []
 
 func is_water(p: Vector3) -> bool:
 	return layout.is_water(p)
+
+
+## The homes' interiors (one small mesh + lights + furniture collision each).
+func _build_homes() -> void:
+	if layout.apartments == null:
+		return
+	for h in layout.apartments.homes:
+		add_child(HomeInteriors.build(h, building_mat))
 
 
 # ------------------------------------------------------------- materials

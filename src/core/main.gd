@@ -19,6 +19,7 @@ var rig: CharacterRig
 var rope: RopeVisual
 var coins: CoinMeter
 var near_miss: NearMiss
+var homes: HomeSystem
 var gadgets: Gadgets
 var hud: Hud
 var touch: TouchControls
@@ -91,6 +92,11 @@ func _ready() -> void:
 	coins.name = "Coins"
 	add_child(coins)
 	coins.set_player(player)
+	homes = HomeSystem.new()
+	homes.name = "Homes"
+	add_child(homes)
+	homes.setup(player, rig, (world as CityWorld).layout if world is CityWorld else null)
+	homes.owned = func(id: String) -> bool: return Homes.owns(id)
 	near_miss = NearMiss.new()
 	near_miss.name = "NearMiss"
 	add_child(near_miss)
@@ -100,6 +106,12 @@ func _ready() -> void:
 	camera.name = "CameraRig"
 	add_child(camera)
 	camera.set_target(player)
+	homes.camera = camera
+	refresh_home_markers.call_deferred()
+	(func():
+		for h in homes.homes:
+			menus.homes_info.append({"id": h["id"], "name": h["name"], "height": Apartments.floor_height(h),
+				"price": h["price"]})).call_deferred()
 	if world.has_method("set_viewer"):
 		world.set_viewer(camera)
 	audio = AudioDirector.new()
@@ -180,6 +192,13 @@ func _ready() -> void:
 			get_tree().paused = false
 			(mode as FreeSwingMode).stop())
 	menus.look_changed.connect(dress)
+	menus.homes_changed.connect(refresh_home_markers)
+	menus.go_home.connect(func(id: String):
+		menus.hide_all()
+		get_tree().paused = false
+		state = State.PLAYING
+		hud.visible = true
+		spawn_at_home(id, true))
 	menus.preview_focus.connect(func(slot: String): if is_instance_valid(director): director.shop_focus = slot)
 	menus.preview_orbit.connect(func(dx: float): if is_instance_valid(director): director.shop_yaw -= dx)
 	menus.preview_zoom.connect(func(f: float): if is_instance_valid(director): director.shop_zoom = clampf(director.shop_zoom * f, 0.55, 1.7))
@@ -193,6 +212,8 @@ func _ready() -> void:
 	if args.has("mode"):
 		var m := String(args["mode"]).split(":")
 		start_mode(m[0], m[1] if m.size() > 1 else "")
+		if args.has("home"):
+			spawn_at_home(String(args["home"]), true)  # captures: wake up in any home
 	else:
 		to_title()
 	if args.has("front"):
@@ -213,6 +234,7 @@ func _ready() -> void:
 				menus._splash_done = true
 				menus.show_title()
 			"stats": menus.show_stats()
+			"homes": menus.show_homes.call_deferred(menus.show_title)
 			"results": menus.show_results({"mode": "trial", "time": 71.4, "course": "Canyon Sprint", "par": 84.4,
 				"best": 71.4, "new_best": true, "medal": Progress.Medal.SILVER, "swings": 24, "chain": 17,
 				"top_speed": 41.0, "unlocks": ["Violet"], "coins": 312, "best_mult": 4.5, "close_calls": 7})
@@ -306,7 +328,10 @@ func start_mode(kind: String, arg: String) -> void:
 		_:
 			mode = FreeSwingMode.new()
 			_install(mode)
-			spawn_on_random_rooftop()
+			# Your day starts at home (captures/tests with --seed keep the
+			# reproducible rooftop spawns).
+			if not spawn_at_home(arg if arg != "" else Homes.selected()):
+				spawn_on_random_rooftop()
 	mode.finished.connect(_on_finished)
 	mode.start()
 	if kind != "benchmark":
@@ -327,6 +352,28 @@ var _last_spawn := Vector3.INF
 ## Free Swing starts on a random valid rooftop, facing a promising route.
 ## Building collision always exists, so the spawn is safe immediately; the
 ## visible chunks around it are meshed before the first frame.
+## Owned homes on the minimap (the selected one highlighted).
+func refresh_home_markers() -> void:
+	if hud == null or hud.minimap == null or homes == null:
+		return
+	var list: Array = []
+	for h in homes.homes:
+		if Homes.owns(h["id"]):
+			list.append([Apartments.window_center(h), h["id"] == Homes.selected()])
+	hud.minimap.homes = list
+
+
+## In a home, facing its window. `id` must be owned unless forced (captures).
+func spawn_at_home(id: String, force := false) -> bool:
+	if homes == null or homes.homes.is_empty() or (args.has("seed") and not force):
+		return false
+	var h := homes.home_by_id(id)
+	if h.is_empty() or not (force or Homes.owns(id)):
+		return false
+	homes.spawn_in(h, world, camera)
+	return true
+
+
 func spawn_on_random_rooftop() -> Dictionary:
 	if not world.has_method("random_rooftop"):
 		return {}

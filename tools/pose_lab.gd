@@ -8,7 +8,7 @@ extends SceneTree
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 ##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble", "hands"]
 
 var player: Player
 var rig: CharacterRig
@@ -135,6 +135,24 @@ func _sc_idlelife() -> void:
 	for i in 16:
 		t.append(1.0 + i * 1.5)
 	await _film("idlelife", 25.0, t)
+
+
+## Hands up close: standing (open), running (fists), on the web (grip).
+func _sc_hands() -> void:
+	_reset(Vector3(0, 1.0, 20))
+	_cam_off = Vector3(0.9, -0.05, -0.75)
+	_look_y = -0.05
+	await _film("hands_stand_r", 1.0, [0.8])
+	_cam_off = Vector3(-0.9, -0.05, -0.75)
+	await _film("hands_stand_l", 0.3, [0.2])
+	_cam_off = Vector3(0.0, -0.05, -1.1)
+	await _film("hands_stand_front", 0.3, [0.2])
+	var sc := _reset(Vector3(-20, 1.0, 20))
+	sc.move = Vector3.RIGHT
+	_cam_off = Vector3(0.6, 0.2, 1.4)
+	_look_y = 0.1
+	await _film("hands_run", 2.2, [1.6, 1.8, 2.0])
+	_look_y = 0.1
 
 
 ## Landing moving sideways to the facing: the off-balance catch.

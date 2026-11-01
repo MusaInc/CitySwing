@@ -82,6 +82,8 @@ var kit_hulls: Array = []
 var pieces: SetPieces
 ## Railways the trains run on (and the Loop Line's viaduct and stations).
 var rail: RailNetwork
+## The five homes (Apartments.place, after everything else is laid out).
+var apartments: Apartments
 var roads: CityRoads
 ## The ground (see CityTerrain): the landform on a regular grid.
 var terrain := CityTerrain.new()
@@ -128,6 +130,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	_traffic()
 	_sea()
 	_place_plant()
+	apartments = Apartments.place(self)
 	return self
 
 

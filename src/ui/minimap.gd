@@ -27,6 +27,9 @@ const SHADER := preload("res://src/ui/shaders/minimap.gdshader")
 var player: Player
 var camera: SwingCamera
 var markers: Array = []
+## Owned homes: [[world pos, selected]] – small house icons; the selected
+## home is pinned to the rim when off the map.
+var homes: Array = []
 var map_tex: Texture2D
 var _radius := R_SLOW
 var _yaw := 0.0
@@ -139,6 +142,16 @@ func _draw_overlay() -> void:
 			sp = ctr + off.normalized() * (rad - 9.0)
 		_marker(ov, sp, String(m[1]), edge)
 		shown += 1
+	# Homes.
+	for hm in homes:
+		var hp := world_to_map(hm[0])
+		var ho := hp - ctr
+		var sel: bool = hm[1]
+		if ho.length() > rad - 9.0:
+			if not sel:
+				continue
+			hp = ctr + ho.normalized() * (rad - 9.0)
+		_house(ov, hp, sel)
 	# North tick on the rim.
 	var n := world_to_map(pc + Vector3(0, 0, -1000.0)) - ctr
 	var np := ctr + n.normalized() * (rad - 1.0)
@@ -154,6 +167,13 @@ func _draw_overlay() -> void:
 		ctr + Vector2(0, 3.0) * s, ctr + Vector2(-6.0, 6.0) * s])
 	ov.draw_colored_polygon(pts, UiStyle.GOLD)
 	ov.draw_polyline(pts + PackedVector2Array([pts[0]]), Color(0.05, 0.05, 0.06, 0.9), 1.5, true)
+
+
+func _house(ov: Control, p: Vector2, sel: bool) -> void:
+	var col := UiStyle.GOLD if sel else Color(1, 1, 1, 0.85)
+	ov.draw_circle(p, 7.5, Color(0.05, 0.05, 0.06, 0.85))
+	ov.draw_colored_polygon(PackedVector2Array([p + Vector2(-4.5, 0.5), p + Vector2(0, -4.5), p + Vector2(4.5, 0.5)]), col)
+	ov.draw_rect(Rect2(p + Vector2(-3.2, 0.5), Vector2(6.4, 4.0)), col)
 
 
 static func _prio(kind: String) -> int:
