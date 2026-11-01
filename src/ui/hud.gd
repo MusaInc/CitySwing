@@ -20,6 +20,8 @@ var coins: CoinMeter
 ## Live map at the top centre (src/ui/minimap.gd).
 var minimap: Minimap
 var gadgets: Gadgets
+## Free Swing contracts (src/modes/job_board.gd); null elsewhere.
+var jobs: JobBoard
 const GADGET_NAMES := {"boost": "JET BOOST", "glide": "GLIDE", "focus": "SLOW-MO", "surge": "DOUBLE COINS"}
 var _coin_shown := -1.0    # rolling balance readout
 var _gain := 0             # coins in the current "+n" burst
@@ -235,6 +237,8 @@ func _draw() -> void:
 		var pp := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.32 - age * 18.0)
 		draw_string(_font_black, pp + Vector2(2, 3), _close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
 		draw_string(_font_black, pp, _close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.75, 0.95, 1.0, a))
+	if jobs:
+		_draw_jobs(cam, white, shadow)
 	if pointer != Vector3.INF:
 		_draw_pointer(cam)
 	if gadgets and gadgets.enabled and gadgets.kind() != "":
@@ -438,6 +442,8 @@ func _draw_speed_lines() -> void:
 ## Marker on the guided point; an edge arrow when it is off screen.
 func _draw_pointer(cam: Camera3D) -> void:
 	var teal := Color(0.45, 1.0, 0.85, 0.95)
+	if jobs and not jobs.active.is_empty():
+		teal = Color(JobBoard.COL_GOAL, 0.97)
 	var dist := player.global_position.distance_to(pointer)
 	var label := "%d m" % int(dist)
 	var behind := cam.is_position_behind(pointer)
@@ -467,6 +473,126 @@ func _draw_pointer(cam: Camera3D) -> void:
 	var side := Vector2(-dir.y, dir.x)
 	draw_colored_polygon(PackedVector2Array([p + dir * 14.0, p - dir * 8.0 + side * 10.0, p - dir * 8.0 - side * 10.0]), teal)
 	_text(p - dir * 30.0 + Vector2(-18, 5), label, 15, teal, Color(0, 0, 0, 0.4))
+
+
+## Contracts: labels over offer beacons, the active job's card (top right,
+## left of pause), heist crack progress and the settle toast.
+func _draw_jobs(cam: Camera3D, white: Color, shadow: Color) -> void:
+	var pp := player.global_position
+	if jobs.active.is_empty():
+		for o in jobs.offers:
+			var at: Vector3 = (o["start"] as Vector3) + Vector3.UP * 5.0
+			var d := pp.distance_to(at)
+			if d > 650.0 or d < 6.0 or cam.is_position_behind(at):
+				continue
+			var sp := cam.unproject_position(at)
+			if sp.x < 0.0 or sp.x > size.x or sp.y < 0.0 or sp.y > size.y:
+				continue
+			var col: Color = JobBoard.COL_LEGAL if o["legal"] else JobBoard.COL_CRIME
+			var a := clampf(1.4 - d / 650.0, 0.35, 1.0) * (1.0 if o["id"] == jobs.tracked or d < 300.0 else 0.75)
+			var t1: String = o["title"].to_upper()
+			var t2 := "%s  ·  %d m" % [_fmt_int(o["pay"]), int(d)]
+			var fs := 15 if d < 250.0 else 13
+			var w := maxf(_font.get_string_size(t1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x,
+				_font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2).x + 16.0) + 22.0
+			var r := Rect2(sp - Vector2(w * 0.5, 40.0), Vector2(w, 38.0))
+			UiStyle.pill(self, r, Color(UiStyle.INK, 0.62 * a))
+			draw_rect(Rect2(r.position + Vector2(8, 6), Vector2(3, 26)), Color(col, a))
+			_text(r.position + Vector2(16, 17), t1, fs, Color(col, a), Color(shadow, shadow.a * a))
+			_coin_glyph(r.position + Vector2(22, 29), 5.0, a)
+			_text(r.position + Vector2(31, 33), t2, fs - 2, Color(1, 1, 1, 0.85 * a), Color(shadow, shadow.a * a))
+		if not jobs.hold_offer.is_empty():
+			var k := clampf(jobs.hold_t / Contracts.HOLD_TIME, 0.0, 1.0)
+			var c := size * Vector2(0.5, 0.62)
+			draw_arc(c, 34.0, 0.0, TAU, 40, Color(UiStyle.INK, 0.5), 9.0, true)
+			draw_arc(c, 34.0, -PI * 0.5, -PI * 0.5 + TAU * k, 40, JobBoard.COL_CRIME, 6.0, true)
+			_text(c + Vector2(-46, 62), "HOLD STILL", 16, white, shadow)
+	else:
+		_draw_job_card(white, shadow)
+	if not jobs.toast.is_empty():
+		_draw_job_toast(white, shadow)
+
+
+func _coin_glyph(c: Vector2, r: float, a: float) -> void:
+	draw_circle(c, r, Color(UiStyle.GOLD, a))
+	draw_circle(c, r * 0.55, Color(0.85, 0.6, 0.1, a))
+
+
+func _draw_job_card(white: Color, shadow: Color) -> void:
+	var c: Dictionary = jobs.active
+	var legal: bool = c["legal"]
+	var col: Color = JobBoard.COL_LEGAL if legal else JobBoard.COL_CRIME
+	var w := 272.0
+	var h := 96.0 if legal else 118.0
+	var origin := Vector2(size.x - _safe_origin().x - 92.0 - w, _safe_origin().y + 18.0)
+	var r := Rect2(origin, Vector2(w, h))
+	UiStyle.pill(self, r, Color(UiStyle.INK, 0.6))
+	draw_rect(Rect2(origin + Vector2(10, 12), Vector2(3, h - 24)), col)
+	var stops: int = (c["stops"] as Array).size()
+	var title: String = c["title"].to_upper()
+	if stops > 1:
+		title += "  %d/%d" % [jobs.stage, stops]
+	_text(origin + Vector2(22, 26), title, 15, col, shadow)
+	var obj: String = {"rescue": "Land on the medic roof", "survey": "Fly through the survey point",
+		"heist": "Get the case to the fence", "getaway": "Land at the safehouse"}.get(c["type"], "Land on the drop roof")
+	var dist := player.global_position.distance_to(jobs.objective())
+	_text(origin + Vector2(22, 48), obj, 14, Color(1, 1, 1, 0.78), shadow)
+	# Clock: big, turns red in the last 15 s.
+	var tl := maxf(jobs.time_left, 0.0)
+	var urgent := tl < 15.0
+	var clock := "%d:%02d" % [int(tl) / 60, int(tl) % 60]
+	var cc := Color(1.0, 0.36, 0.3) if urgent and fmod(tl, 1.0) > 0.35 else white
+	draw_string(_font_black, origin + Vector2(22, 84), clock, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, cc)
+	var right := "%d m" % int(dist)
+	var rw := _font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+	_text(origin + Vector2(w - rw - 18, 82), right, 17, white, shadow)
+	var pay := "%s" % _fmt_int(c["pay"])
+	var pw := _font.get_string_size(pay, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+	_coin_glyph(origin + Vector2(w - pw - 30, 21), 6.0, 1.0)
+	_text(origin + Vector2(w - pw - 18, 26), pay, 15, white, shadow)
+	if not legal:
+		# Heat: fills toward BUSTED; flashes while a drone has you.
+		var bar := Rect2(origin + Vector2(22, 96), Vector2(w - 44, 8))
+		draw_rect(bar, Color(1, 1, 1, 0.12))
+		var hc := Color(1.0, 0.75, 0.2).lerp(Color(1.0, 0.2, 0.15), jobs.heat)
+		if jobs.spotted and fmod(Time.get_ticks_msec() / 1000.0, 0.4) < 0.2:
+			hc = hc.lightened(0.35)
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * jobs.heat, bar.size.y)), hc)
+		_text(origin + Vector2(22, 92), "SPOTTED" if jobs.spotted else "HEAT", 11, Color(hc, 0.95), shadow)
+	elif c["type"] == "express" and jobs.knockouts > 0:
+		_text(origin + Vector2(110, 82), "−%d%%" % int(minf(jobs.knockouts * Contracts.EXPRESS_KO_CUT,
+			1.0 - Contracts.EXPRESS_FLOOR) * 100.0), 15, Color(1.0, 0.45, 0.35), shadow)
+
+
+func _draw_job_toast(white: Color, shadow: Color) -> void:
+	var t: Dictionary = jobs.toast
+	var age: float = t["t"]
+	var a := clampf(minf(age / 0.25, (4.5 - age) / 0.6), 0.0, 1.0)
+	var ok: bool = t["outcome"] == "done"
+	var head: String = {"done": "CONTRACT COMPLETE", "late": "OUT OF TIME", "busted": "BUSTED",
+		"abandoned": "CONTRACT DROPPED"}[t["outcome"]]
+	var sub := ""
+	if ok:
+		sub = "+%s coins  ·  +%d rep" % [_fmt_int(t["coins"]), t["rep"]]
+		if int(t["bonus"]) > 0:
+			sub += "  ·  time bonus %s" % _fmt_int(t["bonus"])
+	elif int(t["coins"]) < 0:
+		sub = "Fined %s coins" % _fmt_int(-int(t["coins"]))
+	else:
+		sub = String(t["title"])
+	var fs := int(38 * (1.0 + 0.25 * exp(-age * 10.0)))
+	var hw := _font_black.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var y := maxf(size.y * 0.36, (minimap.position.y + minimap.size.y + 60.0) if minimap else 0.0)
+	var hc := Color(UiStyle.GOLD, a) if ok else Color(1.0, 0.38, 0.3, a)
+	draw_string(_font_black, Vector2(size.x / 2.0 - hw / 2.0 + 2, y + 3), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
+	draw_string(_font_black, Vector2(size.x / 2.0 - hw / 2.0, y), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, hc)
+	var sw := _font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
+	_text(Vector2(size.x / 2.0 - sw / 2.0, y + 32), sub, 20, Color(white, a), Color(shadow, shadow.a * a))
+	if t["rank_up"]:
+		var rt := "RANK UP — %s" % String(t["rank"]).to_upper()
+		var rw := _font_black.get_string_size(rt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+		UiStyle.pill(self, Rect2(Vector2(size.x / 2.0 - rw / 2.0 - 18, y + 46), Vector2(rw + 36, 36)), Color(UiStyle.GOLD, 0.9 * a))
+		draw_string(_font_black, Vector2(size.x / 2.0 - rw / 2.0, y + 72), rt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(UiStyle.INK, a))
 
 
 ## Safe-area top-left in HUD pixels (zero on desktop).

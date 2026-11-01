@@ -47,6 +47,8 @@ const TUNABLES := [
 ]
 
 var params: SwingParams  # live params of the player (tuning edits these)
+## Free Swing's contracts while a session runs (main sets it), else null.
+var jobs: JobBoard
 var screen_name := ""    # current screen id (debug bridge / tests)
 var _screen: Control
 var _theme := Theme.new()
@@ -799,10 +801,17 @@ func show_pause(free_swing := false) -> void:
 		var st := HBoxContainer.new()
 		st.add_child(_chip("token", UiStyle.TEAL, "TOKENS %d/%d" % [SaveData.token_count(), Progress.TOKEN_TOTAL], 17))
 		st.add_child(_chip("coin", Color.WHITE, "%s COINS" % Hud._fmt_int(Shop.coins()), 17))
+		var rep := int(SaveData.data.get("rep", 0))
+		st.add_child(_chip("job", UiStyle.GOLD, Contracts.rank_name(rep).to_upper(), 17))
 		box.add_child(st)
 	var b := _card("Resume", "Back to the swing", "play", func(): resume.emit(), "", true)
 	_reg("resume", b)
 	box.add_child(b)
+	if free_swing and jobs:
+		var sub := "Pick up work around the city"
+		if not jobs.active.is_empty():
+			sub = "On the job: %s" % jobs.active["title"]
+		box.add_child(_reg("jobs", _card("Job Board", sub, "job", func(): show_jobs(show_pause.bind(free_swing)), "%d" % jobs.offers.size())))
 	if free_swing:
 		box.add_child(_reg("end", _card("End session", "See your distance and tokens", "check", func(): end_session.emit())))
 	else:
@@ -816,6 +825,109 @@ func show_pause(free_swing := false) -> void:
 	row.add_child(_reg("quit", _icon_button("home", "Title", func(): quit_to_title.emit())))
 	box.add_child(row)
 	b.grab_focus.call_deferred()
+
+
+# =================================================================== jobs
+## Contracts on offer around you (the same ones standing as beacons in the
+## city), your rank, and the job you're on. Tracking an offer points the
+## route arrow and the minimap at its pickup; the job starts when you get
+## there.
+func show_jobs(back: Callable) -> void:
+	var box := _page("jobs", "Job Board", back, 680, 0.35)
+	var rep := int(SaveData.data.get("rep", 0))
+	var r := Contracts.rank_for(rep)
+	# Rank card: name, bar to the next, totals.
+	var rp := PanelContainer.new()
+	rp.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.7), 16, Color(UiStyle.GOLD, 0.35), 1, 14))
+	var rv := VBoxContainer.new()
+	rv.add_theme_constant_override("separation", 6)
+	rp.add_child(rv)
+	var top := HBoxContainer.new()
+	top.add_child(MenuParts.Icon.new("job", UiStyle.GOLD, 30))
+	var rn := _label(Contracts.RANKS[r], 26, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	rn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(rn)
+	var nxt := "MAX RANK" if r >= Contracts.RANKS.size() - 1 else "%d / %d rep  →  %s" % [rep, Contracts.RANK_REP[r + 1], Contracts.RANKS[r + 1]]
+	top.add_child(_label(nxt, 15, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
+	rv.add_child(top)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(0, 8)
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.value = Contracts.rank_progress(rep)
+	bar.add_theme_stylebox_override("background", _box(Color(1, 1, 1, 0.1), 4))
+	bar.add_theme_stylebox_override("fill", _box(UiStyle.GOLD, 4))
+	rv.add_child(bar)
+	rv.add_child(_label("%d done  ·  %d underworld  ·  %d busted  ·  %s coins earned  ·  contracts up to tier %d" % [
+		int(SaveData.data.get("jobs_done", 0)), int(SaveData.data.get("jobs_crime", 0)),
+		int(SaveData.data.get("jobs_busted", 0)), Hud._fmt_int(int(SaveData.data.get("jobs_earned", 0))),
+		Contracts.max_tier(rep)], 14, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(rp)
+	if jobs == null:
+		return
+	if not jobs.active.is_empty():
+		var c := jobs.active
+		box.add_child(_section("On the job"))
+		box.add_child(_job_row(c, -1, back))
+		var ab := _card("Drop the contract", "Counts as failed" + ("" if c["legal"] else " (no fine)"), "back",
+			func():
+				jobs.abandon()
+				show_jobs(back))
+		box.add_child(_reg("job_abandon", ab))
+		return
+	box.add_child(_section("Legal work"))
+	box.add_child(_label("Steady pay and reputation. Land on a teal beacon to take the job.", 14, DIM, "semibold",
+		HORIZONTAL_ALIGNMENT_LEFT))
+	for o in jobs.offers:
+		if o["legal"]:
+			box.add_child(_job_row(o, o["id"], back))
+	box.add_child(_section("Underworld"))
+	box.add_child(_label("About 2.4× the pay – and drones. Stay fast and high: heat builds while one can see you, and getting busted costs a fine.",
+		14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	for o in jobs.offers:
+		if not o["legal"]:
+			box.add_child(_job_row(o, o["id"], back))
+
+
+func _job_row(c: Dictionary, id: int, back: Callable) -> PanelContainer:
+	var legal: bool = c["legal"]
+	var col: Color = JobBoard.COL_LEGAL if legal else JobBoard.COL_CRIME
+	var on := id >= 0 and jobs.tracked == id
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.7), 16,
+		col if on else Color(1, 1, 1, 0.08), 2 if on else 1, 12))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	p.add_child(row)
+	var ic := MenuParts.Icon.new("job" if legal else "crime", col, 34)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(ic)
+	var tx := VBoxContainer.new()
+	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tx.add_theme_constant_override("separation", 0)
+	var tier := " ·  " + "★".repeat(int(c["tier"]))
+	tx.add_child(_label("%s%s" % [c["title"], tier], 21, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
+	var dist := 0
+	if jobs.player:
+		dist = int(jobs.player.global_position.distance_to(c["start"]))
+	var info := "%s  ·  %d m away  ·  %d m route  ·  %ds" % [c["client"], dist, int(Contracts.path_length(c)), int(c["time"])]
+	tx.add_child(_label(info, 14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	var br := _label(c["brief"], 13, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT)
+	br.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tx.add_child(br)
+	row.add_child(tx)
+	var pay := VBoxContainer.new()
+	pay.alignment = BoxContainer.ALIGNMENT_CENTER
+	pay.add_child(_label(Hud._fmt_int(c["pay"]), 24, UiStyle.GOLD, "black", HORIZONTAL_ALIGNMENT_RIGHT))
+	pay.add_child(_label("+%d rep" % int(c["rep"]), 13, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
+	row.add_child(pay)
+	if id >= 0:
+		var tb := _icon_button("check" if on else "play", "Tracking" if on else "Track", func():
+			jobs.track(id)
+			show_jobs(back))
+		tb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(_reg("job_track_%d" % id, tb))
+	return p
 
 
 # ================================================================== homes
@@ -953,6 +1065,9 @@ func show_results(r: Dictionary) -> void:
 		cr.add_child(_chip("coin", Color.WHITE, "BEST ×%s" % Hud._fmt_mult(r.get("best_mult", 1.0)), 20))
 		cr.add_child(_chip("coin", Color.WHITE, "BALANCE %s" % Hud._fmt_int(Shop.coins()), 20))
 		box.add_child(cr)
+	if int(r.get("jobs_session", 0)) > 0 or int(r.get("job_coins", 0)) != 0:
+		box.add_child(_chip("job", UiStyle.GOLD, "%d CONTRACT%s  ·  %s COINS" % [int(r.get("jobs_session", 0)),
+			"" if int(r.get("jobs_session", 0)) == 1 else "S", Hud._fmt_int(int(r.get("job_coins", 0)))], 18))
 	for u in r.get("unlocks", []):
 		box.add_child(_chip("suit", UiStyle.TEAL, "SUIT UNLOCKED: %s" % String(u).to_upper(), 18))
 	var b: Button

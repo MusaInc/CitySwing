@@ -59,6 +59,8 @@ func _ready() -> void:
 	add_child(atmosphere)
 	world = PrototypeWorld.new() if world_kind == "prototype" else CityWorld.new()
 	world.name = "World"
+	if args.has("seed"):
+		world.set_meta("job_seed", int(args["seed"]))  # reproducible contract offers
 	add_child(world)
 	atmosphere.configure(args, world)
 
@@ -214,6 +216,8 @@ func _ready() -> void:
 		start_mode(m[0], m[1] if m.size() > 1 else "")
 		if args.has("home"):
 			spawn_at_home(String(args["home"]), true)  # captures: wake up in any home
+		if args.has("job") and mode is FreeSwingMode and (mode as FreeSwingMode).jobs:
+			(mode as FreeSwingMode).jobs.start_now(String(args["job"]))  # captures: on a contract now
 	else:
 		to_title()
 	if args.has("front"):
@@ -234,6 +238,10 @@ func _ready() -> void:
 				menus._splash_done = true
 				menus.show_title()
 			"stats": menus.show_stats()
+			"jobs":
+				get_tree().paused = true
+				state = State.PAUSED
+				menus.show_jobs(menus.show_pause.bind(true))
 			"homes": menus.show_homes.call_deferred(menus.show_title)
 			"results": menus.show_results({"mode": "trial", "time": 71.4, "course": "Canyon Sprint", "par": 84.4,
 				"best": 71.4, "new_best": true, "medal": Progress.Medal.SILVER, "swings": 24, "chain": 17,
@@ -334,6 +342,7 @@ func start_mode(kind: String, arg: String) -> void:
 				spawn_on_random_rooftop()
 	mode.finished.connect(_on_finished)
 	mode.start()
+	menus.jobs = (mode as FreeSwingMode).jobs if mode is FreeSwingMode else null
 	if kind != "benchmark":
 		coins.start_run()
 		near_miss.run_count = 0
@@ -403,6 +412,7 @@ func _end_mode() -> void:
 	if mode:
 		if mode is TimeTrialMode:
 			(mode as TimeTrialMode).abandon()
+		menus.jobs = null
 		mode.queue_free()
 		mode = null
 

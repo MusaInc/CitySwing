@@ -26,6 +26,13 @@ const DEFAULTS := {
 	"outfit": {},       # Shop slot -> item id (the suit stays in "suit")
 	"homes": [],        # bought homes (Homes; the starter is always owned)
 	"home": "starter",  # the home Free Swing starts in
+	# Contracts (Contracts / JobBoard). Flat keys: older saves load unchanged.
+	"rep": 0,           # reputation (rank ladder in Contracts.RANKS)
+	"jobs_done": 0,     # contracts completed (legal + underworld)
+	"jobs_crime": 0,    # of which underworld
+	"jobs_failed": 0,   # out of time / busted / abandoned
+	"jobs_busted": 0,
+	"jobs_earned": 0,   # coins paid by contracts (net of fines)
 }
 
 
@@ -118,6 +125,28 @@ func complete_tutorial() -> void:
 func add_coins(n: int) -> void:
 	data["coins"] = int(data["coins"]) + n
 	data["coins_earned"] = int(data["coins_earned"]) + n
+
+
+## Records a settled contract: coins (may be a fine), reputation, counters.
+## A fine never takes the balance below zero.
+func record_job(legal: bool, outcome: String, coins: int, rep: int) -> int:
+	if coins < 0:
+		coins = -mini(-coins, int(data["coins"]))
+		data["coins"] = int(data["coins"]) + coins
+	elif coins > 0:
+		add_coins(coins)
+	data["jobs_earned"] = int(data.get("jobs_earned", 0)) + coins
+	data["rep"] = int(data.get("rep", 0)) + rep
+	if outcome == "done":
+		data["jobs_done"] = int(data.get("jobs_done", 0)) + 1
+		if not legal:
+			data["jobs_crime"] = int(data.get("jobs_crime", 0)) + 1
+	else:
+		data["jobs_failed"] = int(data.get("jobs_failed", 0)) + 1
+		if outcome == "busted":
+			data["jobs_busted"] = int(data.get("jobs_busted", 0)) + 1
+	save()
+	return coins
 
 
 func set_suit(id: String) -> void:

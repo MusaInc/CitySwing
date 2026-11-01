@@ -95,6 +95,20 @@ class Icon:
 				draw_line(c + Vector2(-s * 0.16, -s * 0.08), c + Vector2(-s * 0.16, s * 0.02), color, w)
 				draw_line(c + Vector2(s * 0.16, -s * 0.08), c + Vector2(s * 0.16, s * 0.02), color, w)
 				draw_rect(Rect2(c + Vector2(-s * 0.25, 0), Vector2(s * 0.5, s * 0.34)), color)
+			"job":
+				# Briefcase: handle, body, clasp line.
+				draw_rect(Rect2(c + Vector2(-s * 0.12, -s * 0.3), Vector2(s * 0.24, s * 0.12)), color, false, w * 0.8)
+				draw_rect(Rect2(c + Vector2(-s * 0.36, -s * 0.18), Vector2(s * 0.72, s * 0.48)), color)
+				draw_line(c + Vector2(-s * 0.36, s * 0.0), c + Vector2(s * 0.36, s * 0.0), Color(0, 0, 0, 0.45), w * 0.7)
+			"crime":
+				# Domino mask.
+				var m := PackedVector2Array([c + Vector2(-s * 0.42, -s * 0.12), c + Vector2(-s * 0.1, -s * 0.16),
+					c + Vector2(0, -s * 0.06), c + Vector2(s * 0.1, -s * 0.16), c + Vector2(s * 0.42, -s * 0.12),
+					c + Vector2(s * 0.36, s * 0.14), c + Vector2(s * 0.08, s * 0.16), c + Vector2(0, s * 0.06),
+					c + Vector2(-s * 0.08, s * 0.16), c + Vector2(-s * 0.36, s * 0.14)])
+				draw_colored_polygon(m, color)
+				draw_circle(c + Vector2(-s * 0.2, 0), s * 0.07, Color(0, 0, 0, 0.6))
+				draw_circle(c + Vector2(s * 0.2, 0), s * 0.07, Color(0, 0, 0, 0.6))
 			"check":
 				draw_polyline(PackedVector2Array([c + Vector2(-s * 0.25, 0), c + Vector2(-s * 0.06, s * 0.2),
 					c + Vector2(s * 0.28, -s * 0.2)]), color, w * 1.4, true)
