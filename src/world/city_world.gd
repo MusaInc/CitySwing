@@ -1747,6 +1747,13 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 		var x1: float = t[2] - 0.5
 		var z1: float = t[3] - 0.5
 		var y1: float = t[5] - 0.5
+		if b.has("apt"):
+			# A home is cut into this tower: an occluder round the room would
+			# hide the whole city from inside it (the view is the point), so
+			# it stops below the room's floor.
+			y1 = minf(y1, float(b["apt"]["y0"]) - 0.5)
+			if y1 - t[4] < 20.0:
+				continue
 		var base := v.size()
 		var X := CityLayout.bxf(b)
 		for q: Vector3 in [Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1),
