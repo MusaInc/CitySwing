@@ -23,6 +23,7 @@ func _ready() -> void:
 	shaded = false
 	autowrap_mode = TextServer.AUTOWRAP_OFF
 	visibility_range_end = 40.0
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	refresh()
 
 

@@ -480,16 +480,28 @@ func _draw_pointer(cam: Camera3D) -> void:
 func _draw_jobs(cam: Camera3D, white: Color, shadow: Color) -> void:
 	var pp := player.global_position
 	if jobs.active.is_empty():
-		for o in jobs.offers:
+		# At most three labels (tracked first, then nearest), and they fade
+		# out at swing speed: the beacons themselves carry the city view.
+		var calm := 1.0 - smoothstep(16.0, 26.0, player.speed())
+		var list: Array = jobs.offers.duplicate()
+		list.sort_custom(func(a, b):
+			if (a["id"] == jobs.tracked) != (b["id"] == jobs.tracked):
+				return a["id"] == jobs.tracked
+			return pp.distance_squared_to(a["start"]) < pp.distance_squared_to(b["start"]))
+		var shown := 0
+		for o in list:
+			if shown >= 3 or calm <= 0.02:
+				break
 			var at: Vector3 = (o["start"] as Vector3) + Vector3.UP * 5.0
 			var d := pp.distance_to(at)
 			if d > 650.0 or d < 6.0 or cam.is_position_behind(at):
 				continue
+			shown += 1
 			var sp := cam.unproject_position(at)
 			if sp.x < 0.0 or sp.x > size.x or sp.y < 0.0 or sp.y > size.y:
 				continue
 			var col: Color = JobBoard.COL_LEGAL if o["legal"] else JobBoard.COL_CRIME
-			var a := clampf(1.4 - d / 650.0, 0.35, 1.0) * (1.0 if o["id"] == jobs.tracked or d < 300.0 else 0.75)
+			var a := clampf(1.4 - d / 650.0, 0.35, 1.0) * (1.0 if o["id"] == jobs.tracked or d < 300.0 else 0.75) * calm
 			var t1: String = o["title"].to_upper()
 			var t2 := "%s  ·  %d m" % [_fmt_int(o["pay"]), int(d)]
 			var fs := 15 if d < 250.0 else 13
@@ -523,7 +535,7 @@ func _draw_job_card(white: Color, shadow: Color) -> void:
 	var legal: bool = c["legal"]
 	var col: Color = JobBoard.COL_LEGAL if legal else JobBoard.COL_CRIME
 	var w := 272.0
-	var h := 96.0 if legal else 118.0
+	var h := 96.0 if legal else 126.0
 	var origin := Vector2(size.x - _safe_origin().x - 92.0 - w, _safe_origin().y + 18.0)
 	var r := Rect2(origin, Vector2(w, h))
 	UiStyle.pill(self, r, Color(UiStyle.INK, 0.6))
@@ -552,13 +564,18 @@ func _draw_job_card(white: Color, shadow: Color) -> void:
 	_text(origin + Vector2(w - pw - 18, 26), pay, 15, white, shadow)
 	if not legal:
 		# Heat: fills toward BUSTED; flashes while a drone has you.
-		var bar := Rect2(origin + Vector2(22, 96), Vector2(w - 44, 8))
+		var bar := Rect2(origin + Vector2(22, 98), Vector2(w - 44, 7))
 		draw_rect(bar, Color(1, 1, 1, 0.12))
 		var hc := Color(1.0, 0.75, 0.2).lerp(Color(1.0, 0.2, 0.15), jobs.heat)
 		if jobs.spotted and fmod(Time.get_ticks_msec() / 1000.0, 0.4) < 0.2:
 			hc = hc.lightened(0.35)
 		draw_rect(Rect2(bar.position, Vector2(bar.size.x * jobs.heat, bar.size.y)), hc)
-		_text(origin + Vector2(22, 92), "SPOTTED" if jobs.spotted else "HEAT", 11, Color(hc, 0.95), shadow)
+		var ht := "SPOTTED" if jobs.spotted else "HEAT"
+		var hw := _font.get_string_size(ht, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		_text(origin + Vector2(w - 22 - hw, 116), ht, 11, Color(hc, 0.95), shadow)
+		if jobs._drones.size() > 0:
+			_text(origin + Vector2(22, 116), "%d DRONE%s" % [jobs._drones.size(), "" if jobs._drones.size() == 1 else "S"],
+				11, Color(1, 1, 1, 0.6), shadow)
 	elif c["type"] == "express" and jobs.knockouts > 0:
 		_text(origin + Vector2(110, 82), "−%d%%" % int(minf(jobs.knockouts * Contracts.EXPRESS_KO_CUT,
 			1.0 - Contracts.EXPRESS_FLOOR) * 100.0), 15, Color(1.0, 0.45, 0.35), shadow)

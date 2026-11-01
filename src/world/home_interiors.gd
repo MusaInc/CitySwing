@@ -164,6 +164,7 @@ func _build(mat: Material) -> Node3D:
 	floor_node.material_override = floor_mat
 	floor_node.transform = xf * Transform3D(Basis(f[1], Vector3.UP, f[2]), P(W * 0.5, D * 0.5, 0.01))
 	floor_node.visibility_range_end = 420.0
+	floor_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(floor_node)
 	_place_assets(root)
 	_extras(root, xf)
@@ -181,7 +182,7 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		gi.mesh = gm
 		gi.material_override = _shared("glow")
 		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		gi.visibility_range_end = 420.0
+		gi.visibility_range_end = 300.0
 		root.add_child(gi)
 	if not glass.is_empty():
 		var am := ArrayMesh.new()
@@ -216,7 +217,8 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		wi.name = "Feature"
 		wi.mesh = st.commit()
 		wi.material_override = wm
-		wi.visibility_range_end = 420.0
+		wi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		wi.visibility_range_end = 260.0
 		root.add_child(wi)
 	for pl in pools:
 		var pm := PlaneMesh.new()
@@ -228,7 +230,8 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		var f := Apartments.face_of(h)
 		pi.transform = xf * Transform3D(Basis(f[1], Vector3.UP, f[2]),
 			P((float(pl[0]) + float(pl[1])) * 0.5, (float(pl[2]) + float(pl[3])) * 0.5, float(pl[4])))
-		pi.visibility_range_end = 300.0
+		pi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pi.visibility_range_end = 200.0
 		root.add_child(pi)
 	for bd in boards:
 		var lb := HomeBoard.new()
@@ -348,7 +351,10 @@ func _place_assets(root: Node3D) -> void:
 		node.transform = xf * Transform3D(basis, P(item[1], item[2], 0.02 + float(item[4]))) * Transform3D(Basis(Vector3.UP, item[3]), Vector3.ZERO)
 		root.add_child(node)
 		for child in node.find_children("*", "MeshInstance3D"):
-			child.visibility_range_end = 160.0
+			child.visibility_range_end = 120.0
+			# The shell shapes the sunlight through the window; furniture
+			# casting into the sun's cascades from 200 m away costs a pass each.
+			child.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 func _residence(tier: int, pal: Array) -> void:
 	match tier:

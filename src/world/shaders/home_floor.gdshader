@@ -44,11 +44,12 @@ void fragment() {
 		vec2 g = fract(p / s);
 		float joint = 1.0 - smoothstep(0.0, 0.006, min(min(g.x, 1.0 - g.x), min(g.y, 1.0 - g.y)));
 		vec2 q = p + vec2(h21(t) * 9.0, h21(t + 3.1) * 9.0);
-		float vein = abs(sin((q.x * 0.9 + q.y * 0.5) * 2.2 + fbm(q * 0.9) * 6.0));
-		vein = 1.0 - smoothstep(0.0, style == 2 ? 0.08 : 0.04, vein);
+		// Long, gently wandering veins (one or two per tile), not squiggles.
+		float vein = abs(sin((q.x * 0.9 + q.y * 0.5) * 0.8 + fbm(q * 0.25) * 1.3));
+		vein = 1.0 - smoothstep(0.0, style == 2 ? 0.05 : 0.025, vein);
 		float tone = (h21(t) - 0.5) * 0.06;
 		vec3 vein_c = style == 2 ? vec3(0.55, 0.55, 0.57) : vec3(0.85, 0.78, 0.62);
-		c = mix(timber * (1.0 + tone + fbm(q * 2.0) * 0.06), vein_c, vein * (style == 2 ? 0.45 : 0.35));
+		c = mix(timber * (1.0 + tone + fbm(q * 2.0) * 0.06), vein_c, vein * (style == 2 ? 0.3 : 0.12));
 		c *= 1.0 - joint * 0.3;
 		rough = style == 2 ? 0.16 : 0.22;
 		spec = 0.55;

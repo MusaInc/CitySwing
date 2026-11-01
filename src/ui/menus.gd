@@ -875,14 +875,12 @@ func show_jobs(back: Callable) -> void:
 		box.add_child(_reg("job_abandon", ab))
 		return
 	box.add_child(_section("Legal work"))
-	box.add_child(_label("Steady pay and reputation. Land on a teal beacon to take the job.", 14, DIM, "semibold",
-		HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_para("Steady pay and reputation. Land on a teal beacon to take the job.", 14))
 	for o in jobs.offers:
 		if o["legal"]:
 			box.add_child(_job_row(o, o["id"], back))
 	box.add_child(_section("Underworld"))
-	box.add_child(_label("About 2.4× the pay – and drones. Stay fast and high: heat builds while one can see you, and getting busted costs a fine.",
-		14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_para("About 2.4× the pay – and drones. Stay fast and high: heat builds while one can see you, and getting busted costs a fine.", 14))
 	for o in jobs.offers:
 		if not o["legal"]:
 			box.add_child(_job_row(o, o["id"], back))
@@ -943,8 +941,7 @@ var _home_confirm := ""
 func show_homes(back: Callable, in_game := false) -> void:
 	var box := _page("homes", "Homes", back, 640)
 	var cur := Homes.selected()
-	box.add_child(_label("Each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in. Coming home rests you: your coin multiplier starts higher the better the home.",
-		15, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_para("Each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in. Coming home rests you: your coin multiplier starts higher the better the home."))
 	var bal := _coin_chip(Shop.coins(), 18)
 	box.add_child(bal)
 	for i in homes_info.size():
@@ -1361,6 +1358,15 @@ func _section(text: String) -> Label:
 	var l := _label(text.to_upper(), 15, ACCENT, "black", HORIZONTAL_ALIGNMENT_LEFT)
 	l.custom_minimum_size.y = 34
 	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	return l
+
+
+## A wrapping paragraph for page intros (never widens the page).
+func _para(text: String, size := 15) -> Label:
+	var l := _label(text, size, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.custom_minimum_size.x = 200
 	return l
 
 
