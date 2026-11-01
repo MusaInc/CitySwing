@@ -64,6 +64,8 @@ var _turn_rate := 0.0
 var _lift := 0.0           # smoothed framing lift toward the line
 var _pick_bias := Vector3.ZERO
 var _crane := 0.0          # 0..1 lift over the shoulder when squeezed
+var _side := 0.0           # m the lens slides sideways away from a close facade
+var _side_t := 0.0
 var _shake := 0.0          # metres of positional shake (decays)
 var _shake_t := 0.0
 var _body: Node3D          # the character, hidden if the lens gets inside it
@@ -235,6 +237,7 @@ func _process(dt: float) -> void:
 		_tug_v = 0.0
 		_roll = 0.0
 		_crane = 0.0
+		_side = 0.0
 		_prev_heading = _heading
 		_turn_rate = 0.0
 		_focus = focus_goal
@@ -251,6 +254,8 @@ func _process(dt: float) -> void:
 		var side := rd.cross(Vector3.UP).normalized()
 		pos_goal = _focus + basis.z * (_dist + 1.0) + Vector3.UP * 1.2
 		pos_goal -= side * (pos_goal - (rail_at[0] as Vector3)).dot(side) * 0.75
+	if rail_at.is_empty():
+		pos_goal += basis.x * _side_offset(_focus, pos_goal, basis.x, dt)
 	_pos = _smooth_damp(1, _pos, pos_goal, follow_smooth * (1.3 if not rail_at.is_empty() else 1.0), dt)
 	var off := _pos - _focus
 	var max_off := _dist * 1.2 if rail_at.is_empty() else _dist + 3.0
@@ -294,6 +299,37 @@ func _process(dt: float) -> void:
 	var fov_goal := lerpf(base_fov, max_fov, t * t * (3.0 - 2.0 * t)) + _fov_kick
 	cam.fov = lerpf(cam.fov, fov_goal, 1.0 - exp(-(3.0 + 9.0 * _punch) * dt))
 	look.set_speed(clampf((spd - 22.0) / 30.0, 0.0, 1.0) + _punch * 0.5, dt)
+
+
+## Hugging a facade (wall runs, swings close to a tower) the lens used to sit
+## a metre off the wall, which then filled half the frame. Probe sideways from
+## the hero and from halfway back to the lens and slide away from the nearer
+## wall (centre between both in a narrow gap). Smoothed, so it never pops.
+func _side_offset(focus: Vector3, goal: Vector3, right: Vector3, dt: float) -> float:
+	right = Vector3(right.x, 0.0, right.z).normalized()
+	const REACH := 3.4
+	var mid := _ray_clear(focus, focus.lerp(goal, 0.6))
+	var dl := REACH
+	var dr := REACH
+	for o: Vector3 in [focus, mid]:
+		dr = minf(dr, _side_hit(o, right, REACH))
+		dl = minf(dl, _side_hit(o, -right, REACH))
+	# Each wall pushes by how far it is inside REACH: continuous, and in a
+	# gap the pushes cancel toward its middle.
+	var want := (dr - dl) * 0.6
+	want = clampf(want, -2.0, 2.0)
+	# Slide away fast-ish, drift back slowly (no see-saw past window ledges).
+	var rate := 2.5 if absf(want) > absf(_side_t) else 0.8
+	_side_t = lerpf(_side_t, want, 1.0 - exp(-rate * dt))
+	_side = _side_t
+	return _side
+
+
+func _side_hit(from: Vector3, dir: Vector3, reach: float) -> float:
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, 1 | (1 << 1))
+	q.exclude = [target.get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return reach if hit.is_empty() else from.distance_to(hit.position)
 
 
 func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:

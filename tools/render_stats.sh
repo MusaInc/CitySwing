@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Render cost at fixed views (draw calls, triangles, objects, memory) under
-# Xvfb, Mobile renderer. Device-independent numbers – compare before/after.
+# Xvfb, Mobile renderer. Views re-picked for the organic-road island (2026-11-01):
+# street = Diagonal boulevard at kerb height, cross = Spine roundabout.
+# Device-independent numbers – compare before/after.
 #   tools/render_stats.sh [quality 0-2] [extra user args...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 q=${1:-2}; shift || true
 mkdir -p screenshots/stats
 views=(
-  "street:386,1.7,-200,386,3,-120"
-  "cross:400,6,-210,375,0,-235"
+  "street:499.4,23.7,-173.9,565.2,25,-219.3"
+  "cross:600,28,-30,575,22,10"
   "swing:520,70,-40,560,40,-180"
   "aerial:200,260,200,560,0,-200"
 )
