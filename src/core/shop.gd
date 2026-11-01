@@ -33,7 +33,7 @@ const SUITS_FOR_SALE := [
 
 const OTHER_ITEMS := [
 	# Trousers
-	{"id": "pants_navy", "slot": "pants", "name": "Navy", "color": Color(0.118, 0.141, 0.2), "price": 0},
+	{"id": "pants_navy", "slot": "pants", "name": "Graphite", "color": Color(0.24, 0.26, 0.28), "price": 0},
 	{"id": "pants_black", "slot": "pants", "name": "Black", "color": Color(0.05, 0.05, 0.06), "price": 150},
 	{"id": "pants_grey", "slot": "pants", "name": "Charcoal", "color": Color(0.26, 0.27, 0.29), "price": 150},
 	{"id": "pants_khaki", "slot": "pants", "name": "Khaki", "color": Color(0.52, 0.45, 0.3), "price": 250},
@@ -42,7 +42,7 @@ const OTHER_ITEMS := [
 	{"id": "pants_white", "slot": "pants", "name": "White", "color": Color(0.85, 0.85, 0.83), "price": 400},
 	{"id": "pants_red", "slot": "pants", "name": "Red", "color": Color(0.6, 0.07, 0.07), "price": 400},
 	# Shoes: upper + sole (null = the sole matches the suit)
-	{"id": "shoes_classic", "slot": "shoes", "name": "Classic", "color": Color(0.929, 0.929, 0.894), "sole": null, "price": 0},
+	{"id": "shoes_classic", "slot": "shoes", "name": "Classic", "color": Color(0.929, 0.929, 0.894), "sole": Color(0.929, 0.929, 0.894), "price": 0},
 	{"id": "shoes_blackout", "slot": "shoes", "name": "Blackout", "color": Color(0.08, 0.08, 0.09), "sole": Color(0.14, 0.14, 0.15), "price": 200},
 	{"id": "shoes_gum", "slot": "shoes", "name": "Gum Sole", "color": Color(0.92, 0.9, 0.85), "sole": Color(0.55, 0.35, 0.18), "price": 250},
 	{"id": "shoes_royal", "slot": "shoes", "name": "Royal", "color": Color(0.15, 0.28, 0.8), "sole": Color(0.93, 0.93, 0.9), "price": 400},

@@ -15,7 +15,7 @@ const TOKEN_TOTAL := 40
 
 ## Suit colours. `req` is checked by unlocked(); `hint` explains it.
 const SUITS := [
-	{"id": "ember", "name": "Ember", "color": Color(0.8, 0.1, 0.09), "req": {}, "hint": "Default"},
+	{"id": "ember", "name": "Courier", "color": Color(0.22, 0.24, 0.26), "req": {}, "hint": "Default"},
 	{"id": "cobalt", "name": "Cobalt", "color": Color(0.1, 0.3, 0.85), "req": {"tutorial": true}, "hint": "Finish Training"},
 	{"id": "jade", "name": "Jade", "color": Color(0.05, 0.62, 0.38), "req": {"tokens": 10}, "hint": "Collect 10 tokens"},
 	{"id": "violet", "name": "Violet", "color": Color(0.5, 0.16, 0.8), "req": {"medals": 3}, "hint": "Earn 3 Time Trial medals"},

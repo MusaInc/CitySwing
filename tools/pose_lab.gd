@@ -437,3 +437,27 @@ func _sc_jumpclose() -> void:
 	_cam_off = Vector3(-1.0, 0.3, 3.2)
 	sc.move = Vector3.RIGHT
 	await _film("jumpclose", 2.4, [1.15, 1.45, 1.75, 2.05], {1.0: func(): sc.jump = true})
+
+
+## Fast, repeatable full-body inspection; no saved wardrobe influences QA.
+func _sc_review() -> void:
+	_reset(Vector3(0, 1.0, 20))
+	var outfit := Shop.look()
+	outfit.suit = Color(0.22, 0.24, 0.26)
+	outfit.pants = Color(0.24, 0.26, 0.28)
+	outfit.shoe = Color(0.929, 0.929, 0.894)
+	outfit.glove = Color(0.098, 0.098, 0.106)
+	outfit.head = "hood"
+	outfit.face = ""
+	outfit.gadget = {}
+	rig.apply_look(outfit)
+	for i in 30:
+		await process_frame
+	for view in [["front", Vector3(0, 0.1, -2.8)], ["rear", Vector3(0, 0.1, 2.8)],
+			["side", Vector3(2.8, 0.1, 0)], ["threequarter", Vector3(1.9, 0.2, -2.1)]]:
+		cam.position = player.position + view[1]
+		cam.look_at(player.position + Vector3(0, 0.05, 0))
+		await process_frame
+		await RenderingServer.frame_post_draw
+		get_root().get_texture().get_image().save_png("%s/%s.png" % [out_dir, view[0]])
+	print("REVIEW complete")

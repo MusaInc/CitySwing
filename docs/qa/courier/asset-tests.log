@@ -1,0 +1,7 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+
+        · 43128 triangles; 3 textured, 2 normal-mapped, 6 AO surfaces
+  ok    test_hero_asset.test_courier_skin_has_textures_uvs_normalized_weights_and_mobile_budget
+  ok    test_hero_asset.test_courier_tints_are_instance_local_and_grips_are_continuous
+
+2 passed, 0 failed  (2.3s)

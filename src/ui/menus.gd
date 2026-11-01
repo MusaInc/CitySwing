@@ -777,7 +777,17 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_gap(6))
 	box.add_child(_label("City Swing v%s  ·  Musa Studios  ·  Outfit font (SIL OFL)" %
 		ProjectSettings.get_setting("application/config/version", "1.0"), 14, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_menu_row("Character credits", "", func(): show_character_credits(back), 16))
 	q.grab_focus.call_deferred()
+
+
+func show_character_credits(back: Callable) -> void:
+	var box := _page("character_credits", "CHARACTER CREDITS", show_settings.bind(back), 700)
+	box.add_child(_label("Courier adaptations · Musa Studios", 20, Color.WHITE))
+	box.add_child(_label("Hooded sweat jacket · Elvaerwyn · CC BY\nRunning shoes 01 · punkduck · CC BY 3.0\nCargo pants · Cortu Johnstone · CC0\nGloves Hand · MRT / toigo · CC0\nAnatomy and weights · MakeHuman contributors · CC0", 16, FAINT))
+	box.add_child(_label("Adapted meshes, fit, skinning, textures and materials for CitySwing.", 15, FAINT))
+	box.add_child(_menu_row("MakeHuman asset library", "", func(): OS.shell_open("https://static.makehumancommunity.org/assets/assetpacks.html"), 16))
+	box.add_child(_menu_row("Creative Commons attribution licence", "", func(): OS.shell_open("https://creativecommons.org/licenses/by/3.0/"), 16))
 
 
 # =================================================================== pause

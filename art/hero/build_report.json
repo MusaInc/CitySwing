@@ -1,0 +1,19 @@
+{
+  "triangles": 43128,
+  "meshes": {
+    "Courier_Jacket": 10241,
+    "Courier_Cargo": 3327,
+    "Courier_Trainers": 3477,
+    "Courier_Gloves": 2294,
+    "Courier_Mask": 5648,
+    "Technical_underlayer": 1048,
+    "Opaque_smoked_lens": 27,
+    "Cargo_gusset_l": 162,
+    "Cargo_gusset_r": 162,
+    "Woven_zip_pull": 6,
+    "Rear_signature": 6,
+    "Rear_signature.001": 6
+  },
+  "bones": 17,
+  "max_influences": 4
+}

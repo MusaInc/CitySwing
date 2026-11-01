@@ -120,10 +120,12 @@ func _ready() -> void:
 	sun.light_angular_distance = 0.6
 	sun.shadow_enabled = preset.get("shadows", true)
 	sun.shadow_bias = 0.1
-	sun.shadow_normal_bias = 1.2
+	sun.shadow_normal_bias = 0.8
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 220.0
-	sun.directional_shadow_split_1 = 0.18
+	# Reserve the near cascade for the hero and immediate street furniture.
+	# Keep roughly 12 m near the camera in the more detailed cascade.
+	sun.directional_shadow_split_1 = 0.055
 	sun.directional_shadow_blend_splits = false
 	add_child(sun)
 

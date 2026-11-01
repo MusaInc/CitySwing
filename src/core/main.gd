@@ -649,10 +649,15 @@ func _selftest() -> void:
 	var props: int = world.prop_meshes.size() if world is CityWorld else -1
 	if world is CityWorld and props < 11:
 		problems.append("kit meshes %d/11" % props)
-	if (rig.bones["chest"] as Node3D).get_child_count() == 0 or not ResourceLoader.exists(CharacterRig.MODEL_PATH):
+	if rig.skeleton == null or rig._hero_materials.size() < 5 or not ResourceLoader.exists(CharacterRig.MODEL_PATH):
 		problems.append("character model")
-	if not ResourceLoader.exists(CharacterRig.GEAR_PATH) or (rig.bones["head"] as Node3D).get_child_count() < 8:
+	if not ResourceLoader.exists(CharacterRig.GEAR_PATH):
 		problems.append("shop gear")
+	for piece in ["cap", "beanie", "headphones", "crown", "shades", "mask", "visor"]:
+		if not rig._gear.has(piece):
+			problems.append("shop gear " + piece)
+	if not is_instance_valid(rig._glove_mesh):
+		problems.append("character grip morphs")
 	for sh in ["building", "ground", "water", "sky", "traffic"]:
 		if not ResourceLoader.exists("res://src/world/shaders/%s.gdshader" % sh):
 			problems.append("shader " + sh)

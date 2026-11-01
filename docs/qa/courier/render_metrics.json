@@ -1,0 +1,92 @@
+[
+	{
+		"draw_calls": 129,
+		"frame": "front",
+		"line_state": 0,
+		"on_floor": true,
+		"position": "(564.5957, 80.32889, 224.1315)",
+		"primitives": 393077,
+		"speed": 0.0,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 144,
+		"frame": "rear",
+		"line_state": 0,
+		"on_floor": true,
+		"position": "(564.5957, 80.32889, 224.1315)",
+		"primitives": 490886,
+		"speed": 0.0,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 116,
+		"frame": "side",
+		"line_state": 0,
+		"on_floor": true,
+		"position": "(564.5957, 80.32889, 224.1315)",
+		"primitives": 419204,
+		"speed": 0.0,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 124,
+		"frame": "running",
+		"line_state": 0,
+		"on_floor": true,
+		"position": "(567.5883, 80.32889, 224.1315)",
+		"primitives": 476411,
+		"speed": 14.1403226852417,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 122,
+		"frame": "landing",
+		"line_state": 0,
+		"on_floor": true,
+		"position": "(564.5957, 80.32851, 224.1315)",
+		"primitives": 351743,
+		"speed": 0.0,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 120,
+		"frame": "swing_0",
+		"line_state": 2,
+		"on_floor": false,
+		"position": "(575.8627, 168.2992, 7.106549)",
+		"primitives": 311755,
+		"speed": 18.4795227050781,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 126,
+		"frame": "swing_1",
+		"line_state": 2,
+		"on_floor": false,
+		"position": "(575.3156, 171.7615, 2.315735)",
+		"primitives": 310545,
+		"speed": 18.0653305053711,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 130,
+		"frame": "swing_2",
+		"line_state": 2,
+		"on_floor": false,
+		"position": "(573.6224, 175.0522, -3.095103)",
+		"primitives": 297418,
+		"speed": 20.3888454437256,
+		"texture_mb": 98.69970703125
+	},
+	{
+		"draw_calls": 96,
+		"frame": "window",
+		"line_state": 0,
+		"on_floor": true,
+		"position": "(355.1395, 58.19849, -110.1993)",
+		"primitives": 350716,
+		"speed": 0.0,
+		"texture_mb": 98.69970703125
+	}
+]

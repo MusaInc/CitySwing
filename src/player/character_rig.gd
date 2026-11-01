@@ -13,13 +13,12 @@ extends Node3D
 ##  * Free flight: release spin is conserved (visual), fast dives stretch out
 ##    head-first, JUMP in the air tucks into a flip.
 ##  * Hard crashes hand the body to a VerletRagdoll, then spring back up.
-## Model: assets/models/character.glb (tools/blender/build_character.py) –
-## one continuous skinned body on a Skeleton3D whose bones match BONES, plus
-## rigid parts (head, hands, fists, sneakers, spool, scarf) parented to the
-## pivots. The pivots stay the source of truth (springs, ragdoll, IK all pose
-## them); _sync_skeleton() maps them onto the skeleton each frame. The skin
-## was bound in an A-pose (ARM_A / LEG_A), so each bone carries a fixed
-## correction from "pivot in A-pose" to "skeleton bone at rest".
+## Model: assets/models/character.glb (tools/blender/build_character.py).
+## Authored garments and a full-cover textile mask share the gameplay skeleton.
+## Imported PBR textures and UVs are preserved; grip morphs curl the gloved hands.
+## Pivots remain the source of truth for springs, ragdoll and IK. The A-pose
+## correction maps those pivots to the imported skin without changing physics.
+
 
 ## Emitted at the end of every pose update – what gets drawn this frame.
 ## (Measure poses here: right after process_frame the capsule has already
@@ -70,6 +69,9 @@ var bones := {}
 var launcher: Node3D  # the web hand; RopeVisual starts here
 var ragdoll := VerletRagdoll.new()
 var ragdolling := false
+var _hero_materials: Array[Dictionary] = []
+var _glove_mesh: MeshInstance3D
+var _finger_curl := {"l": 0.0, "r": 0.0}
 var _mat: ShaderMaterial
 var skeleton: Skeleton3D
 var _skel_idx := {}       # bone name -> skeleton bone index
@@ -203,7 +205,7 @@ func _ready() -> void:
 	_mat = mat
 	if skeleton:
 		for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
-			(mi as MeshInstance3D).material_override = mat
+			_install_hero_materials(mi as MeshInstance3D)
 	for name in BONES:
 		var def: Array = BONES[name]
 		var pivot := Node3D.new()
@@ -219,7 +221,7 @@ func _ready() -> void:
 			part.transform = Transform3D.IDENTITY
 			part.material_override = mat
 			pivot.add_child(part)
-		elif parts.is_empty():
+		elif parts.is_empty() and skeleton == null:
 			_add_fallback_mesh(name, pivot, def[2])
 	for side in ["l", "r"]:
 		var grip: MeshInstance3D = parts.get("hand_%s_grip" % side)
@@ -265,8 +267,60 @@ func _ready() -> void:
 		_connect_player()
 
 
+## Keep the authored UV/PBR surfaces. Each actor owns its tint/cloth uniforms.
+func _install_hero_materials(mi: MeshInstance3D) -> void:
+	if mi.mesh.get_blend_shape_count() > 0 and mi.find_blend_shape_by_name("Grip_r") >= 0:
+		_glove_mesh = mi
+	for surface in mi.mesh.get_surface_count():
+		var source := mi.mesh.surface_get_material(surface) as StandardMaterial3D
+		if source == null:
+			continue
+		var material := ShaderMaterial.new()
+		material.shader = load("res://src/player/shaders/hero_pbr.gdshader")
+		material.set_shader_parameter("base_color", source.albedo_color)
+		material.set_shader_parameter("roughness", source.roughness)
+		if source.roughness_texture:
+			material.set_shader_parameter("roughness_map", source.roughness_texture)
+		if source.albedo_texture:
+			material.set_shader_parameter("albedo_map", source.albedo_texture)
+		if source.normal_enabled and source.normal_texture:
+			material.set_shader_parameter("normal_map", source.normal_texture)
+			material.set_shader_parameter("normal_strength", source.normal_scale)
+		if source.ao_enabled and source.ao_texture:
+			material.set_shader_parameter("ao_map", source.ao_texture)
+		mi.set_surface_override_material(surface, material)
+		var region := ""
+		var reference := Color.WHITE
+		match source.resource_name:
+			"hero_jacket":
+				region = "suit"
+				reference = Color(0.22, 0.24, 0.26)
+			"hero_cargo", "hero_cargo_pocket":
+				region = "pants"
+				reference = Color(0.24, 0.26, 0.28)
+			"hero_trainer":
+				region = "shoe"
+				material.set_shader_parameter("has_sole", true)
+				reference = Color(0.929, 0.929, 0.894)
+			"hero_glove":
+				region = "glove"
+				reference = Color(0.098, 0.098, 0.106)
+		_hero_materials.append({"material": material, "region": region, "reference": reference})
+
+
+func _tint_hero(region: String, color: Color) -> void:
+	for entry in _hero_materials:
+		if entry.region != region and not (region == "sole" and entry.region == "shoe"):
+			continue
+		var reference: Color = entry.reference.srgb_to_linear()
+		var linear := color.srgb_to_linear()
+		entry.material.set_shader_parameter("sole_tint" if region == "sole" else "tint", Vector3(linear.r / maxf(reference.r, 0.001),
+			linear.g / maxf(reference.g, 0.001), linear.b / maxf(reference.b, 0.001)))
+
+
 ## Recolours the jacket (see character.gdshader).
 func set_suit_color(c: Color) -> void:
+	_tint_hero("suit", c)
 	if _mat:
 		_mat.set_shader_parameter("suit_color", Vector3(c.r, c.g, c.b))
 
@@ -274,6 +328,8 @@ func set_suit_color(c: Color) -> void:
 ## Dresses the hero in a Shop.look(): region colours and the headwear.
 func apply_look(look: Dictionary) -> void:
 	look_state = look
+	for region in ["suit", "pants", "shoe", "sole", "glove"]:
+		_tint_hero(region, look[region])
 	if _mat:
 		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
 				["glove", "glove_color"], ["glow", "glow_color"]]:
@@ -843,6 +899,11 @@ func _no_pops(dt: float) -> void:
 
 
 func _set_grip(side: String, on: bool) -> void:
+	if is_instance_valid(_glove_mesh):
+		var index := _glove_mesh.find_blend_shape_by_name("Grip_" + side)
+		if index >= 0:
+			_finger_curl[side] = move_toward(_finger_curl[side], 1.0 if on else 0.0, get_process_delta_time() * 9.0)
+			_glove_mesh.set_blend_shape_value(index, _finger_curl[side])
 	if _grips.has(side) and _grips[side][0] and _grips[side][1]:
 		_grips[side][0].visible = not on
 		_grips[side][1].visible = on
@@ -2753,6 +2814,14 @@ func _update_cloth(dt: float) -> void:
 	_mat.set_shader_parameter("cloth_flutter", smoothstep(3.0, 32.0, a_len))
 	_mat.set_shader_parameter("cloth_time", _cloth_t)
 	_mat.set_shader_parameter("cloth_wind_dir", _cloth_air / maxf(a_len, 0.01))
+	for entry in _hero_materials:
+		if entry.region != "suit":
+			continue
+		var material: ShaderMaterial = entry.material
+		material.set_shader_parameter("cloth_drag", cloth)
+		material.set_shader_parameter("cloth_flutter", smoothstep(3.0, 32.0, a_len))
+		material.set_shader_parameter("cloth_time", _cloth_t)
+		material.set_shader_parameter("cloth_wind_dir", _cloth_air / maxf(a_len, 0.01))
 
 
 ## Landings and wall hits shake the fabric (the hem bounces and settles).

@@ -91,7 +91,11 @@ func test_rig_wears_the_look(t) -> void:
 	for c in head.get_children():
 		if c is MeshInstance3D and c.visible and c.name != "head":
 			shown.append(String(c.name).to_lower())
-	t.check(shown == ["hood"], "default look is the hood (%s)" % [shown])
+	# The courier's lowered hood is sewn into the skinned jacket. Returning
+	# to the default must hide purchased head/face gear and retain that garment.
+	t.check(shown.is_empty() and rig.look_state.head == "hood", "default clears crown and shades")
+	var jacket := rig.skeleton.find_child("Courier_Jacket", true, false) as MeshInstance3D
+	t.check(jacket != null and jacket.visible, "default keeps the authored hooded jacket")
 	rig.queue_free()
 
 
