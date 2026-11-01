@@ -1,3 +1,28 @@
+# Status: 2026-11-01 (quality & polish overhaul)
+
+## Polish pass (latest)
+
+Brief: game-wide quality overhaul. Baseline: 108/108 tests; render stats + bot filmstrip + camera probe captured first.
+
+- **Camera**: slides sideways away from a facade within 3.4 m (`SwingCamera._side_offset`, continuous push, smoothed). New `crowd` metric in `tools/camera_probe.gd` (% of frames where a wall within 2.5 m fills a side of the view): mean over seeds 2–9 went 4.9 % → 3.0 %. Jerk/pops are noisy run to run (runs aren't deterministic); a small rise in angular jerk is possible.
+- **Shopfronts**: `shop_room()` interior mapping in building.gdshader: lit shop interiors (shelves of goods, cafés with counter/menu board, boutiques with garment rails), glazed doors, dark plate glass with reflections. They used to read as flat brown boards. Shader only.
+- **Roofs**: `BuildingMesher.roof_top` packs roof half-extents in UV2.x (negative) and measures UV from the roof centre, so the shader draws parapet grime, flashing, drains and stains, and gravel only up close (fwidth-gated). Pale finishes are toned down. Glass-crown decks (the roof you land on) now get the roof finish instead of the trim colour.
+- **Shadow acne**: sun `shadow_bias` 0.04 → 0.1 removes the moiré bands on flat roofs at mid distance.
+- **Close calls** (`src/player/near_miss.gd`): skimming a facade within 3 m at ≥ 58 km/h while airborne, travelling along it (not into it), with no bump/stagger/KO pays coins × multiplier plus 25 m of multiplier progress (double for a "razor" pass < 1.3 m). Comes with a HUD callout, a whoosh + haptic, and a results tile. 2 rays per tick. About 1 per 40 s for the expert bot. Covered by test_swing_scene.test_close_call_past_a_facade.
+- **Footsteps** now fire on the gait's real touchdowns (`CharacterRig.footstep`), not on a distance timer. Sprint steps land harder.
+- **Bridge traffic**: 4 lanes over the suspension bridge + approach viaduct (heights from `approach_y`). Connectors keep the deck height. `_near` won't join an elevated lane to a ground lane. The island end runs into a new tunnel portal in the east anchorage (the deck used to dead-end at a blank wall); cars turn round out of sight inside it.
+- Traffic: cars parked short of the line after their leader turned off now creep up (was a frozen-car source).
+- CBD radio tower model: rings, glazed band, aviation lights (rebuilt beacon.glb only).
+- `tools/render_stats.sh` street/cross views re-picked (the old street view was underwater on the island map).
+
+Performance (render_stats q2, software Vulkan, so compare only): swing 150→141 draw calls, 436k→437k prims; aerial 171→180 dc, 250k→251k prims; street/cross (new views) unchanged before/after the shader work. Shader cost grows only on shop and roof pixels at close range.
+
+Remaining / not done:
+- **Traffic gridlock (pre-existing)**: after 4 simulated minutes about 290 of 952 cars have been still for > 30 s, mostly queues at roundabout entries (`tools/traffic_audit.gd -- 240`). A forced-merge breaker was tried and dropped (more overlaps). Needs a proper junction/roundabout yield model.
+- The bridge has no road down onto the island (the portal hides that).
+- Character animation was reviewed in pose_lab (run, swing, landing, knockout, get-up) and not changed.
+- No device testing still; touch feel and FPS on iPhone unverified.
+
 # Status: 2026-10-31 (organic road network)
 
 ## Road network (latest)
