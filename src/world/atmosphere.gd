@@ -145,21 +145,29 @@ func configure(args: Dictionary, world: Node) -> void:
 		set_weather(args["weather"], true)
 	elif live:
 		_from_settings(true)
-	if live:
-		Settings.changed.connect(func(): _from_settings(false))
+	if live and _settings():
+		_settings().changed.connect(func(): _from_settings(false))
 	_apply(0.0, true)
 
 
+## The Settings autoload (looked up, not named: tool scripts run without it).
+func _settings() -> Node:
+	return get_node_or_null("/root/Settings") if is_inside_tree() else null
+
+
 func _from_settings(instant: bool) -> void:
-	match Settings.time_of_day:
+	var st := _settings()
+	if st == null:
+		return
+	match st.time_of_day:
 		"day":
 			hour = 13.0
 		"sunset":
 			hour = 17.9
 		"night":
 			hour = 23.0
-	if Settings.weather in WEATHERS:
-		set_weather(Settings.weather, instant)
+	if st.weather in WEATHERS:
+		set_weather(st.weather, instant)
 	elif not weather in WEATHERS or instant:
 		set_weather("clear", instant)
 
@@ -173,10 +181,11 @@ func set_weather(name: String, instant := false) -> void:
 
 
 func _process(dt: float) -> void:
-	if live:
-		if Settings.time_of_day == "cycle":
+	var st := _settings() if live else null
+	if st:
+		if st.time_of_day == "cycle":
 			hour = fposmod(hour + dt * 24.0 / (DAY_MINUTES * 60.0), 24.0)
-		if Settings.weather == "changing":
+		if st.weather == "changing":
 			_weather_left -= dt
 			if _weather_left <= 0.0:
 				set_weather(_next_weather())

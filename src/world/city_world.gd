@@ -45,6 +45,7 @@ var grid_rect := Rect2()
 var view_distance := 900.0
 var prop_density := 1.0
 var traffic_density := 1.0
+var traffic: Traffic
 var max_builds_per_frame := 2
 
 var building_mat: ShaderMaterial
@@ -124,6 +125,13 @@ func _ready() -> void:
 		_build_water()
 	_build_landmarks()
 	_build_structures()
+	if traffic_density > 0.0 and not car_meshes.is_empty():
+		traffic = Traffic.new()
+		traffic.name = "Traffic"
+		traffic.near_range = CAR_NEAR
+		traffic.far_range = CAR_FAR
+		add_child(traffic)
+		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density)
 	trains = Trains.new()
 	trains.name = "Trains"
 	add_child(trains)
@@ -178,7 +186,8 @@ func spawn_point() -> Vector3:
 			best = b
 	if best.is_empty():
 		return Vector3(300, 120, 0)
-	return CityLayout.top_center(best) + Vector3.UP * 2.0
+	var tc := CityLayout.top_center(best)
+	return Vector3(tc.x, BuildingMesher.roof_y(best) + 2.0, tc.z)
 
 
 ## Clearance (m) to keep from each kind of rooftop prop when standing.
@@ -1476,25 +1485,9 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 	var rect := Rect2(Vector2(key) * CHUNK, Vector2(CHUNK, CHUNK))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(key)
+	# (Moving cars are the Traffic node's; chunks only hold the parked ones.)
 	var xf: Array = []
 	var custom: Array = []
-	for lane in layout.lanes:
-		var a: Vector3 = lane[0]
-		var b: Vector3 = lane[1]
-		var seg := _clip_segment(a, b, rect)
-		if seg.is_empty():
-			continue
-		var s0: Vector3 = seg[0]
-		var s1: Vector3 = seg[1]
-		var length := s0.distance_to(s1)
-		if length < 20.0:
-			continue
-		var dir := (s1 - s0) / length
-		var basis := Basis.looking_at(dir, Vector3.UP)
-		var n := int(length / 55.0 * traffic_density)
-		for c in n:
-			xf.append(Transform3D(basis, s0 + Vector3.UP * 0.02))
-			custom.append(Color(rng.randf_range(9.0, 15.0), rng.randf_range(0.0, length), length, 0.0))
 	var moving := xf.size()
 	var parked := parked_cars(key)
 	for pc in parked:

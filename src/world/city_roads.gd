@@ -363,18 +363,9 @@ func bake_field(cell := 1.5) -> void:
 		for i in pts.size() - 1:
 			var a := pts[i]
 			var b := pts[i + 1]
-			var idx := _segs.size()
-			_segs.append([a, b, hw, int(r["id"]), along, r["kind"] != "minor"])
+			_add_seg([a, b, hw, int(r["id"]), along, r["kind"] != "minor"])
 			along += a.distance_to(b)
-			var reach := hw + BAND
-			var lo := a.min(b) - Vector2(reach, reach)
-			var hi := a.max(b) + Vector2(reach, reach)
-			for gx in range(floori(lo.x / SEG_CELL), floori(hi.x / SEG_CELL) + 1):
-				for gz in range(floori(lo.y / SEG_CELL), floori(hi.y / SEG_CELL) + 1):
-					var k := Vector2i(gx, gz)
-					if not _seg_grid.has(k):
-						_seg_grid[k] = PackedInt32Array()
-					_seg_grid[k].append(idx)
+	_extend_ends()
 	var stripes := ceili(field_h / 16.0)
 	_stripe_out.clear()
 	_stripe_out.resize(stripes)
@@ -384,6 +375,81 @@ func bake_field(cell := 1.5) -> void:
 	for st in _stripe_out:
 		field.append_array(st)
 	_stripe_out.clear()
+
+
+func _add_seg(s: Array) -> void:
+	var idx := _segs.size()
+	_segs.append(s)
+	var a: Vector2 = s[0]
+	var b: Vector2 = s[1]
+	var reach := float(s[2]) + BAND
+	var lo := a.min(b) - Vector2(reach, reach)
+	var hi := a.max(b) + Vector2(reach, reach)
+	for gx in range(floori(lo.x / SEG_CELL), floori(hi.x / SEG_CELL) + 1):
+		for gz in range(floori(lo.y / SEG_CELL), floori(hi.y / SEG_CELL) + 1):
+			var k := Vector2i(gx, gz)
+			if not _seg_grid.has(k):
+				_seg_grid[k] = PackedInt32Array()
+			_seg_grid[k].append(idx)
+
+
+## Street ends stop at the kerb of the road they meet; carried on square
+## across that road's carriageway, the junction box is a rectangle (not a
+## round cap, which bent the crossings into half-circles). Returns
+## [end point, direction, length] per open road end, for traffic too.
+var road_ends: Array = []   # [road index, end (0 start / 1 end), point, outward dir, extension m]
+
+
+func _extend_ends() -> void:
+	road_ends.clear()
+	var base := _segs.size()
+	for ri in roads.size():
+		var r: Dictionary = roads[ri]
+		if r.get("loop", false):
+			continue
+		var pts: PackedVector2Array = r["pts"]
+		if pts.size() < 2:
+			continue
+		var hw: float = float(r["w"]) * 0.5
+		for e in 2:
+			var p := pts[0] if e == 0 else pts[-1]
+			var q := pts[1] if e == 0 else pts[-2]
+			var d := (p - q).normalized()
+			# Walk out until off every other road's carriageway (max 40 m).
+			var ext := 0.0
+			var x := 0.5
+			while x <= 40.0:
+				if not _on_other(p + d * x, int(r["id"]), base):
+					break
+				ext = x
+				x += 0.5
+			# Pulled back until both far corners are on the road too (meeting
+			# a curve or at an angle, a corner would poke onto the plot beyond).
+			var sd := Vector2(-d.y, d.x) * hw
+			while ext > 0.5 and not (_on_other(p + d * ext + sd, int(r["id"]), base)
+					and _on_other(p + d * ext - sd, int(r["id"]), base)):
+				ext -= 0.5
+			road_ends.append([ri, e, p, d, ext])
+			if ext > 0.5:
+				var along := -ext if e == 0 else length_of(pts)
+				var a := p + d * ext if e == 0 else p
+				var b := p if e == 0 else p + d * ext
+				# (Square at its far end too: open past the far kerb.)
+				_add_seg([a, b, hw, int(r["id"]), along, r["kind"] != "minor", -1 if e == 0 else 1])
+
+
+func _on_other(p: Vector2, rid: int, n: int) -> bool:
+	for idx in _seg_grid.get(Vector2i(floori(p.x / SEG_CELL), floori(p.y / SEG_CELL)), PackedInt32Array()):
+		if idx >= n:
+			continue
+		var s: Array = _segs[idx]
+		if int(s[3]) == rid:
+			continue
+		var a: Vector2 = s[0]
+		var b: Vector2 = s[1]
+		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) < float(s[2]):
+			return true
+	return false
 
 
 var _stripe_out: Array = []
@@ -423,7 +489,10 @@ func _sample(p: Vector2) -> Vector4:
 		var b: Vector2 = s[1]
 		var ab := b - a
 		var L2 := ab.length_squared()
-		var t := clampf((p - a).dot(ab) / L2, 0.0, 1.0) if L2 > 1e-6 else 0.0
+		var t_raw := (p - a).dot(ab) / L2 if L2 > 1e-6 else 0.0
+		if s.size() > 6 and (int(s[6]) == 1 and t_raw > 1.0 or int(s[6]) == -1 and t_raw < 0.0):
+			continue  # past a junction extension's square end
+		var t := clampf(t_raw, 0.0, 1.0)
 		var q := a + ab * t
 		var dist := p.distance_to(q)
 		var kd := dist - float(s[2])

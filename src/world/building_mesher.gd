@@ -448,8 +448,25 @@ static func _has_plinth(b: Dictionary, tier: int) -> bool:
 static func roof_y(b: Dictionary) -> float:
 	var top: float = b["tiers"][-1][5]
 	if _parapeted(b) or b["kind"] == "bridge":
-		return top + cornice_h(b) * 0.5
+		return top + cornice_h(b) * 0.5 + crown_h(b)
 	return top
+
+
+## Glass crowns: on some glass towers over 100 m the curtain wall carries on
+## 4–7 m past the roof, with a deck across its top – the walkable roof is up
+## there (an open-topped screen made every such roof a pit you couldn't run
+## or swing out of). 0 = no crown. Own random stream (cached on b).
+static func crown_h(b: Dictionary) -> float:
+	if b.has("_crown"):
+		return b["_crown"]
+	var h := 0.0
+	if b["kind"] == "normal" and _glassy(b) and float(b["tiers"][-1][5]) > 100.0:
+		var r := RandomNumberGenerator.new()
+		r.seed = int(float(b["seed"]) * 6151.0 * 1000.0) ^ 0xc20
+		if r.randf() < 0.7:
+			h = r.randf_range(4.0, 7.0)
+	b["_crown"] = h
+	return h
 
 
 ## The solid boxes of a building exactly as the detailed LOD draws it:
@@ -625,7 +642,7 @@ static func _features(b: Dictionary) -> Dictionary:
 					m += 1
 			out["col"].append(_aabb(t[0] - FIN_OUT, t[1] - FIN_OUT, t[2] + FIN_OUT, t[3] + FIN_OUT, y0, y1))
 	var tt: Array = b["tiers"][-1]
-	var ry := roof_y(b)
+	var ry := roof_y(b) - crown_h(b)  # (the tier's own roof)
 	var o := cornice_out(b)
 	# Chimney stacks near the corners of brick roofs.
 	if style in [CityLayout.Style.BRICK, CityLayout.Style.SANDSTONE] and float(tt[5]) < 60.0:
@@ -646,8 +663,8 @@ static func _features(b: Dictionary) -> Dictionary:
 	# Glass crowns: the curtain wall carries on past the roof as a screen with
 	# a light coping band, so each tower ends in its own cap (and the plant
 	# behind it is hidden).
-	if _glassy(b) and float(tt[5]) > 100.0 and rng.randf() < 0.7:
-		var ch2 := rng.randf_range(4.0, 7.0)
+	if crown_h(b) > 0.0:
+		var ch2 := crown_h(b)
 		var scr := trim.darkened(rng.randf_range(0.25, 0.55))
 		var x0: float = float(tt[0]) - o
 		var z0: float = float(tt[1]) - o
@@ -658,8 +675,12 @@ static func _features(b: Dictionary) -> Dictionary:
 		for r in rings:
 			out["draw"].append([r, scr, "far"])
 			out["col"].append(r)
+		# The deck across the top: the roof you land on.
+		var deck := _aabb(x0 + 0.3, z0 + 0.3, x1 - 0.3, z1 - 0.3, ry + ch2 - 0.3, ry + ch2)
+		out["draw"].append([deck, col.darkened(0.35).lerp(Color(0.5, 0.5, 0.5), 0.5), "far"])
+		out["col"].append(deck)
 		var caps: Array[AABB] = []
-		_ring(caps, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, ry + ch2, ry + ch2 + 0.35, 0.4)
+		_ring(caps, x0 - 0.05, z0 - 0.05, x1 + 0.05, z1 + 0.05, ry + ch2, ry + ch2 + PARAPET, 0.4)
 		for r in caps:
 			out["draw"].append([r, trim.lightened(0.25), "far"])
 			out["col"].append(r)

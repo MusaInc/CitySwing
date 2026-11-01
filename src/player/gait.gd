@@ -67,6 +67,7 @@ var phase := 0.0          # 0..1 gait clock (left touchdown at 0)
 var freq := 0.0           # cycles per second
 var duty := 0.6           # stance fraction of the cycle
 var run := 0.0            # 0 walk … 1 run (gait style)
+const FOLD_MIN := 0.36    # m: closest an ankle comes to its hip (calf against hamstring)
 var sprint := 0.0         # 0..1 above a jog
 var moving := false       # stepping (false = standing)
 var active := false
@@ -305,6 +306,12 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			# mid-swing and reaches ahead late; running it reaches a little
 			# past the landing spot and paws back onto it.
 			var e := f.w * f.w * (3.0 - 2.0 * f.w)
+			# (Sprinting the swing foot covers ~5 m of ground in a third of a
+			# second: a rest-to-rest ease left it half a metre behind the hips
+			# early and flung it half a metre ahead late – a straight-legged
+			# kick out front, with the hips sinking to reach it. Near-steady
+			# instead: the leg swings through under the body.)
+			e = lerpf(e, f.w, 0.85 * sprint)
 			var paw := 0.08 * run * smoothstep(0.55, 0.82, f.w) * (1.0 - smoothstep(0.82, 1.0, f.w))
 			var p := f.from.lerp(f.target, e) + dir * paw
 			# Height: an early heel kick at a run (the foot folds up behind),
@@ -312,7 +319,9 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			var up := f.target.y - f.from.y
 			var ey := smoothstep(0.0, 0.55, f.w) if up > 0.0 else smoothstep(0.45, 1.0, f.w)
 			p.y = f.from.y + up * ey
-			var lift_h := lerpf(0.1, 0.3 + 0.16 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
+			# (A sprint's heel comes up behind, but not tucked against the seat
+			# for half the stride: that read as running sitting down.)
+			var lift_h := lerpf(0.1, 0.3 + 0.04 * sprint, run) * clampf(speed / 1.2, 0.35, 1.0)
 			# (Peak skewed early running – the heel kicks up behind – with zero
 			# vertical speed at lift and touchdown: no pops.)
 			var wk := f.w + 0.15 * f.w * (1.0 - f.w)
@@ -329,6 +338,13 @@ func _update(dt: float, vel: Vector3, facing: Vector3, centre: Vector3, hips: Di
 			var rel := p - hip
 			if rel.length() > LEG_LEN - 0.012:
 				p = hip + rel.normalized() * (LEG_LEN - 0.012)
+			# ...and never closer than a fully folded leg allows: at a sprint the
+			# heel kick carried the ankle right up through the hip joint, where
+			# the leg's direction is undefined and the thigh spun ~100° in a
+			# frame. Below the hip by at least FOLD_MIN (continuous: no pop).
+			var rh := Vector2(rel.x, rel.z).length()
+			if rh < FOLD_MIN:
+				p.y = minf(p.y, hip.y - sqrt(FOLD_MIN * FOLD_MIN - rh * rh))
 			var g := _sole_hit(ground, p, f.heading)
 			if not g.is_empty():
 				p.y = maxf(p.y, (g.position as Vector3).y + ANKLE_H + 0.01 * sin(PI * f.w))

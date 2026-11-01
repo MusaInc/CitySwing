@@ -1438,9 +1438,13 @@ func _two_bone(chest_basis: Basis, dir: Vector3, dist: float, pole: Vector3,
 	var elbow := u * a
 	var w := (d * c - elbow).normalized()                     # elbow → hand
 	# Upper-arm frame: bone along -Y, forearm bends toward its -Z (see _rx).
+	# The bend plane comes from the pole (p ⊥ d), not from the lower bone's
+	# offset: identical while the limb is bent, and still defined when it's
+	# straight (a planted leg at full stretch, a sprint's trailing leg),
+	# where the offset is numerical noise and the thigh twisted ~70° in a frame.
 	var y := -u
-	var z := -bend_dir * (w - u * w.dot(u))
-	z = z.normalized() if z.length_squared() > 1e-6 else Vector3.BACK
+	var z := bend_dir * (p - u * p.dot(u))
+	z = z.normalized() if z.length_squared() > 1e-8 else Vector3.BACK
 	var x := y.cross(z).normalized()
 	z = x.cross(y).normalized()
 	var upper := Basis(x, y, z).get_rotation_quaternion()

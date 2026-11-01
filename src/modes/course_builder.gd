@@ -146,7 +146,7 @@ static func start_roof(layout: CityLayout, first: Vector3, second: Vector3) -> V
 		var s: float = -absf(t[5] - BuildingMesher.base_of(b) - 70.0) * 0.7 - d
 		if s > best_s:
 			best_s = s
-			best = tc + Vector3.UP * 2.0
+			best = Vector3(tc.x, BuildingMesher.roof_y(b) + 2.0, tc.z)  # (on a crown's deck, not inside it)
 	return best
 
 
