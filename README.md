@@ -80,7 +80,7 @@ reticle sits on that pick; in the air a dotted line previews its path.
 - **Training**: seven guided steps (fire, release, catch, 4-chain, air jump,
   90 km/h, rooftop landing), each completed by doing it. Offered first on a
   fresh save.
-- **Free Swing**: explore and collect the 40 tokens hidden over the city
+- **Free Swing**: the hub – contracts, homes (below) and the 40 tokens hidden over the city
   (`src/world/token_field.gd`; deterministic spots, collection saved). The HUD
   points at the nearest one.
 - **Time Trial**: three courses (Canyon Sprint, Three Graces, Beacon Loop).
@@ -98,6 +98,38 @@ stats are saved to `user://save.json`. Time Trial medals (gold = par, silver
 from that save (`src/core/progress.gd`). `tools/feel_report.gd` prints
 swing-feel numbers (airborne speed, perfect releases, crashes) over several
 autopilot runs, to compare tuning changes.
+
+## Living in the city: contracts, homes, money
+
+Free Swing is the hub. Everything below happens in it, without menus.
+
+- **Contracts** (`src/core/contracts.gd` rules, `src/modes/job_board.gd` in
+  the world). Five offers stand as columns of light on rooftops – teal for
+  legal work, red for the Fence. Land on one (or fly through a rescue
+  gondola / survey point) to take it; the pause menu's **Job Board** lists
+  them, tracks one, and drops the current job.
+  - Legal: *Rooftop Delivery*, *Express Courier* (fragile: knockouts cut
+    the pay, time left adds up to +50%), *Gondola Rescue* (grab a stranded
+    window cleaner off a facade, land on the medic roof), *Skyline Survey*
+    (fly through 3–5 points over the roofs).
+  - Underworld (~2.4× the pay): *Hot Drop*, *Getaway*, *Rooftop Heist*
+    (hold still on the target roof to crack the case). Pursuit drones fly
+    over the roofs and round towers; heat builds while one can see you
+    (faster on the street) and cools out of sight. Full heat = busted, a
+    fine of 35% of the pay. Drones top out under 30 m/s – a good swing line
+    outruns them, so the escape is the movement.
+  - Reputation ranks (Rookie → Runner → Courier → Pro → Ace → Legend) open
+    contract tiers 1–5: longer routes, more pay.
+- **Homes** (`src/world/apartments.gd`, `home_interiors.gd`): five real
+  flats in real towers, each its own design (courier studio, Scandi
+  one-bed, industrial loft, marble-and-walnut sky apartment, penthouse with
+  a plunge pool and a climbable mezzanine). A board on the wall shows your
+  rank and records (the penthouse's is the Hall of Fame). Coming home rests
+  you: starting at home or climbing in through the window lifts the coin
+  multiplier to the home's level (×1 … ×3).
+- **Coins** come from swinging (× the multiplier), close calls, tokens and
+  contracts; they buy suits, gear, gadgets and homes. Old saves load
+  unchanged (new save keys default to zero).
 
 ## The city
 

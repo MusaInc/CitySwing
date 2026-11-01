@@ -1,3 +1,58 @@
+# Status: 2026-11-01 (transformation pass: contracts, homes, light)
+
+Branch `feature/cityswing-transformation`. QA report and images:
+`docs/qa/TRANSFORMATION.md`.
+
+## What changed
+
+- **Contracts** (new gameplay loop, `src/core/contracts.gd` rules +
+  `src/modes/job_board.gd` in Free Swing): legal (Rooftop Delivery,
+  Express Courier, Gondola Rescue, Skyline Survey) and underworld (Hot
+  Drop, Getaway, Rooftop Heist) jobs, found as beacons on rooftops and
+  taken by landing there. Underworld pays ~2.4x and brings pursuit drones
+  (heat while seen, busted = 35% fine). Reputation ranks open tiers 1-5.
+  Job Board in pause, HUD card (clock, heat), beacon labels (max 3, fade at
+  swing speed), minimap icons, toast, results chip, first-session hint.
+- **Homes**: five distinct interiors instead of one recoloured plan (see
+  `home_interiors.gd` header); progress board on the wall (Hall of Fame in
+  the penthouse); penthouse mezzanine is walkable; "rested" coin
+  multiplier for starting at / climbing into a home (x1 .. x3).
+- **Bug fix: homes had no view.** Occlusion culling used each tower's full
+  box as an occluder, so the camera inside a home was inside its own
+  occluder and the whole city was culled (you saw the sea plane with cars
+  floating on it). Home towers' occluders now stop below the room.
+- **Lighting**: less flat ambient, sky-tinted shade, stronger sun, haze
+  pushed back (day fog from 220 m at 0.46 density), firmer grade.
+
+## Measured (VPS, software Vulkan: counts only, no device timing)
+
+| view | main | branch |
+|---|---|---|
+| free swing seed 4, 3 frames, HUD | 167-274 dc, 306-400k prims | 180-298 dc, 310-395k prims |
+| same, HUD hidden (3D only) | 201 dc, 364k | 207 dc, 365k |
+| penthouse interior | 170 dc, 185k | 307 dc, 302k |
+| street view (q2) | 199 dc, 674k | 199 dc, 679k |
+| endurance seed 4 (homes, no jobs) | 208-226 dc | 212-226 dc |
+
+The beacons cost ~6 draw calls; the interiors cost nothing measurable
+away from a home and ~+135 draw calls inside the penthouse (the most
+furnished room: glow/glass/feature planes, furniture GLBs). Interior
+pieces don't cast sun shadows. Not measured on an iPhone/iPad.
+
+## Not done / next
+
+- Swinging, camera and character were not retuned: the model is covered
+  by ~60 tests and the Courier was being worked on by another agent; any
+  feel change needs a device.
+- City architecture (window-grid repetition, silhouettes, district
+  identity) was not reworked in this pass beyond lighting.
+- Drones fly through thin geometry when cutting corners close to you
+  (they route round towers using a 20 m roof-height grid).
+- Interiors are procedural boxes/tubes plus the existing Blender furniture;
+  no new Blender assets (no Blender in this container).
+- Pre-existing: test_course_uptown_flyable and
+  test_course_switchback_flyable fail in this container on main too.
+
 # Status: 2026-11-01 (premium redesign, v0.14.0)
 
 ## Redesign pass (latest)
