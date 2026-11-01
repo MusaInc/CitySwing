@@ -44,7 +44,10 @@ func test_buying_and_equipping(t) -> void:
 	t.check(Shop.buy("tangerine") and Shop.equip("tangerine"), "buy and wear a suit")
 	t.check(Progress.current_suit_color() == Shop.item("tangerine")["color"], "bought suit colours the hero")
 	t.check(Shop.look({"suit": "ember"})["suit"] == Shop.item("ember")["color"], "try-on overrides a slot")
-	t.check(Shop.look()["sole"] == Shop.item("tangerine")["color"], "classic soles match the suit")
+	t.check(Shop.look()["sole"] == Color(0.929, 0.929, 0.894),
+		"Courier's classic trainers stay white when the jacket changes")
+	t.check(Shop.look({"shoes": "shoes_gum"})["sole"] == Color(0.55, 0.35, 0.18),
+		"shoe try-on retains its own sole colour independently of the jacket")
 	_sd().data["outfit"]["face"] = "face_visor"  # tampered / unowned
 	t.check(Shop.equipped("face") == "face_none", "unowned saved item falls back to the default")
 	_sd().data = before

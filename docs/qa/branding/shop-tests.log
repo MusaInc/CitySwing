@@ -1,0 +1,9 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+
+  ok    test_shop.test_catalogue_is_consistent
+  ok    test_shop.test_buying_and_equipping
+  ok    test_shop.test_multiplier_climbs_and_knockout_resets
+  ok    test_shop.test_rig_wears_the_look
+  ok    test_shop.test_gadgets
+
+5 passed, 0 failed  (2.4s)

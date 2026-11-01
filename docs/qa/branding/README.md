@@ -24,6 +24,13 @@ is released. The exported Linux build launched through the new boot scene and
 passed its packaged self-test: 8 courses, 33 sounds, 15 kit items, Mobile renderer.
 
 The source debug runs retain existing shutdown resource/ObjectDB warnings.
-No parse errors, transition failures or test assertion failures occurred.
+No parse errors or startup/navigation assertion failures occurred.
 Physical iPhone startup timing and touch/safe-area behaviour require device QA;
 the phone/tablet captures here check viewport proportions, not hardware notches.
+
+The complete regression run recorded 124 passes and one stale shop assertion:
+it expected the classic trainer sole to follow jacket colour, predating the
+Courier's deliberately white trainers. Updated that expectation and added a
+separate shoe-colour independence check; the entire shop suite then passed
+5/5. Both unmodified run logs are retained (`regression-tests.log` and
+`shop-tests.log`). No production behaviour was changed for this test correction.

@@ -1,5 +1,13 @@
 # Courier character implementation and visual review
 
+Released as **0.17.0 (27)**, App Store Connect **VALID** on 1 November 2026:
+[TestFlight workflow](https://github.com/MusaInc/CitySwing/actions/runs/41350418539),
+source `66e57d4697751960356ed61ee16b4866d9d901a8`.
+The subsequent branding regression run caught a remaining old shop expectation
+that classic soles followed jacket colour; this was corrected to require white
+trainers and independently coloured purchased soles. See the
+[branding verification](qa/branding/README.md) for the retained logs and rerun.
+
 The default hero now uses authored garment topology and UVs in place of the
 previous fused primitive body. The outfit is a black hooded zip jacket with
 an inner collar, graphite cargo trousers with fitted side pockets, white
