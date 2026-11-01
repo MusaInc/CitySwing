@@ -243,9 +243,9 @@ func _read_input(dt: float) -> Dictionary:
 	if not input_enabled:
 		return {"move": Vector3.ZERO, "aim": aim_dir, "grapple": false, "reel": 0.0, "jump": false}
 	var mv := Input.get_vector("move_left", "move_right", "move_back", "move_forward")
-	# Response curve: the first half of the stick is a walk-to-jog range, so
-	# walking is easy to hold; full deflection still sprints.
-	mv = mv.normalized() * pow(mv.length(), 2.0) if mv.length() > 0.001 else Vector2.ZERO
+	# Response curve: most of the stick's travel is a walk-to-jog range, so
+	# walking is easy to hold; only full deflection sprints.
+	mv = mv.normalized() * pow(mv.length(), 2.8) if mv.length() > 0.001 else Vector2.ZERO
 	var basis := view.global_transform.basis if view else global_transform.basis
 	var fwd := -basis.z
 	fwd.y = 0.0

@@ -18,7 +18,7 @@ signal pause_pressed
 ## Feedback for the HUD: where the finger went, whether it fired, and why not.
 signal web_feedback(screen_pos: Vector2, ok: bool, reason: String)
 
-const STICK_RADIUS := 96.0  # finger travel for full speed (longer = finer walking control)
+const STICK_RADIUS := 128.0  # finger travel for full speed (longer = finer walking control)
 
 var camera: SwingCamera
 var player: Player

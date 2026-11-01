@@ -1269,7 +1269,7 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	# Forward bend (+ = forward; torso bones tilt back on +X): runners lean a
 	# little from the hips on top of the ankle lean; pulling away the weight
 	# goes forward, braking it sits back; landing folds.
-	var lean := (0.02 * walk + 0.07 * run + 0.05 * spr) * amp + push * 0.5 + _land_squash * 0.45 - brake * 0.4
+	var lean := (0.03 * walk + 0.24 * run + 0.12 * spr) * amp + push * 0.5 + _land_squash * 0.45 - brake * 0.4
 	var sh_yaw := (0.1 + 0.08 * run) * amp
 	q["spine"] = _rx(-lean * 0.55) * _ry(lf * hip_yaw * 0.6) * _rz(-list * 0.8)
 	q["chest"] = _rx(-lean * 0.45 + 0.03 * walk) * _ry(lf * (hip_yaw * 0.4 + sh_yaw)) \
@@ -1292,10 +1292,10 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 		var arm := a_base + fwd * a_amp
 		var fwd_n := maxf(fwd, 0.0)
 		var back_n := maxf(-fwd, 0.0)
-		var abd := (0.11 + 0.03 * run - 0.07 * run * fwd_n) * sdg
+		var abd := (0.2 + 0.08 * run - 0.06 * run * fwd_n) * sdg  # loose: arms swing clear of the body
 		q["upper_arm_" + sd] = _rx(arm) * _rz(abd) * _ry(-0.18 * sdg)
 		var elbow_w := 0.2 + 0.2 * fwd_n * amp
-		var elbow_r := 1.3 + 0.15 * spr + 0.25 * fwd_n - 0.3 * back_n
+		var elbow_r := 1.15 + 0.12 * spr + 0.25 * fwd_n - 0.3 * back_n
 		q["forearm_" + sd] = _rx(lerpf(elbow_w, elbow_r, run * amp) + 0.12 * amp * walk)
 		if brake > 0.05:
 			# Braking: arms come forward and out to balance the backward lean.
