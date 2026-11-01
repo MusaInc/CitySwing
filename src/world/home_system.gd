@@ -43,6 +43,9 @@ var _top := Vector3.ZERO
 var _in := Vector3.ZERO
 var _cool := 0.0
 var _jump_was := false
+var _vault_duration := VAULT_T
+var _vault_c0 := Vector3.ZERO
+var _vault_c1 := Vector3.ZERO
 
 
 func setup(p_player: Player, p_rig: CharacterRig, p_layout: CityLayout) -> void:
@@ -61,6 +64,13 @@ func home_by_id(id: String) -> Dictionary:
 
 ## Puts the hero in the home, on the floor, facing the window.
 func spawn_in(h: Dictionary, world: Node, camera: SwingCamera) -> void:
+	# A respawn must cancel any in-flight window animation before moving the player.
+	state = ""
+	home = {}
+	_t = 0.0
+	_jump_was = false
+	player.scripted = false
+	rig.ledge_mode = ""
 	var p := Apartments.spawn_point(h)
 	if world.has_method("build_all_near"):
 		# The view must be there when you look out: the higher the floor, the
@@ -158,6 +168,12 @@ func _try_enter(h: Dictionary) -> bool:
 	_t = 0.0
 	if spd >= VAULT_MIN and toward > 0.6 * spd and dy > -0.7:
 		state = "vault"
+		# Match arrival velocity at the start of a cubic, then decelerate into
+		# a running landing. The old fixed quadratic snapped fast arrivals.
+		_vault_duration = clampf(_from.distance_to(_in) / maxf(spd * 0.65, 1.0), 0.22, VAULT_T)
+		_vault_c0 = _from + v * (_vault_duration / 3.0)
+		_vault_c0.y = maxf(_vault_c0.y, float(h["y0"]) + 1.25)
+		_vault_c1 = _in + n * (4.0 * _vault_duration / 3.0)
 		_top = Apartments.face_point(h, a, 0.2, oy0) + Vector3.UP * 1.25
 	else:
 		state = "grab"
@@ -197,11 +213,8 @@ func _run(dt: float) -> void:
 				_finish(1.5)
 				return
 		"vault":
-			var u := clampf(_t / VAULT_T, 0.0, 1.0)
-			# Quadratic arc from where the swing left off, over the sill, in.
-			var a := _from.lerp(_top, u)
-			var b := _top.lerp(_in, u)
-			pos = a.lerp(b, u)
+			var u := clampf(_t / _vault_duration, 0.0, 1.0)
+			pos = _from.bezier_interpolate(_vault_c0, _vault_c1, _in, u)
 			if u >= 1.0:
 				_finish(4.0)
 				return
@@ -221,7 +234,7 @@ func _progress() -> float:
 		"climb":
 			return clampf(_t / CLIMB_T, 0.0, 1.0)
 		"vault":
-			return clampf(_t / VAULT_T, 0.0, 1.0)
+			return clampf(_t / _vault_duration, 0.0, 1.0)
 	return 0.0
 
 

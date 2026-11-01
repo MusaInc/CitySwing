@@ -1220,12 +1220,15 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 		budget = max_builds_per_frame
 	var here := Vector2(pos.x, pos.z)
 	var want := {}
+	# Elevated homes need distant skyline chunks after the initial spawn load.
+	var elevation := maxf(0.0, pos.y - layout.ground_y(pos.x, pos.z))
+	var vista_range := view_distance + minf(elevation * 1.5, 550.0)
 	for key in _all_keys:
 		var c := (Vector2(key) + Vector2(0.5, 0.5)) * CHUNK
 		var d := c.distance_to(here)
-		if d < view_distance + CHUNK * 0.75:
+		if d < vista_range + CHUNK * 0.75:
 			want[key] = d
-		elif _loaded.has(key) and d > view_distance + CHUNK * 1.25:
+		elif _loaded.has(key) and d > vista_range + CHUNK * 1.25:
 			_loaded[key].queue_free()
 			_loaded.erase(key)
 	_want = want

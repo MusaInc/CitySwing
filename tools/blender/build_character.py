@@ -97,63 +97,24 @@ def along(a, b, t):
 
 
 def hood(o, material, rim_mat):
-    """A real hoodie hood worn up over the masked head (rides the head bone):
-    roomy (4–6 cm off the skull, not a fitted cowl), thick jersey (1.6 cm)
-    with the lining showing round a soft, slightly rolled face opening; the
-    crown peaks and droops a little behind, the sides fall in loose vertical
-    folds, a centre-back seam runs over the top, and the lower edge spreads
-    into the neckline. The back and peak carry cloth weight (see cloth_uv)."""
+    """Fitted courier helmet: swept crown, recessed visor, tapered jaw guards.
+    Keeps the existing headwear attachment name for wardrobe compatibility.
+    """
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=44, v_segments=28, radius=1.0)
-    # Pole forward: the face opening is cut along one clean ring of latitude.
-    bmesh.ops.rotate(bm, verts=bm.verts, matrix=Matrix.Rotation(-math.pi / 2, 3, "X"))
-    c = o(0, -0.024, 0.138)
-    rad = Vector((0.142, 0.16, 0.146))
-    drop = []
+    bmesh.ops.create_uvsphere(bm, u_segments=36, v_segments=24, radius=1.0)
+    c=o(0,-.012,.128)
+    drop=[]
     for v in bm.verts:
-        d = v.co.normalized()
-        p = Vector((d.x * rad.x, d.y * rad.y, d.z * rad.z))
-        back = max(-d.y, 0.0)
-        front = max(d.y, 0.0)
-        # Fuller and longer behind (where the fabric hangs off the head).
-        p += Vector((d.x * 0.008, -0.026 * back, 0.004 * max(d.z, 0.0))) * (0.5 + back)
-        # Crown peak, drooping back and down a touch.
-        tip = max(0.0, -d.y - 0.45) * max(0.0, d.z + 0.2)
-        p += Vector((0, -0.045, -0.03)) * tip
-        # Lower half spreads into a wide neckline (over the shoulders' slope).
-        if d.z < 0.0:
-            lo = -d.z
-            p.z -= lo * (0.1 + 0.035 * back + 0.07 * front * lo)
-            p.x *= 1.0 + 0.4 * lo
-            p.y += 0.03 * front * lo - 0.022 * back * lo
-        # Opening: the brim stands a little off the brow and rolls forward.
-        if d.y > 0.15 and d.z > 0.3:
-            p.y += 0.016 * d.z
-            p.z += 0.006 * d.z
-        if front > 0.0:
-            p.z -= 0.03 * front
-            p.x *= 1.0 - 0.1 * front
-            p.y -= 0.012 * front
-        # Loose folds down the sides and back (deeper low down), uneven so
-        # left and right don't mirror.
-        ang = math.atan2(d.x, -d.y)
-        fold = math.sin(ang * 5.0 + d.z * 2.4 + 0.7) + 0.45 * math.sin(ang * 9.0 - d.z * 4.0)
-        p += d * 0.0065 * fold * (1.0 - front) * (0.5 + 0.5 * max(-d.z, 0.0) + 0.3 * (1.0 - abs(d.z)))
-        v.co = c + p
-        if d.y > 0.66 or d.z < -0.97:
-            drop.append(v)
-    bmesh.ops.delete(bm, geom=drop, context="VERTS")
-    bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.016)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    ob = K.new_obj("hood", bm)
-    ob.data.materials.append(material)
-    ob.data.materials.append(rim_mat)
-    # Lining round the face opening, and the centre-back seam over the top.
-    for pl in ob.data.polygons:
-        pl.use_smooth = True
-        dd = (pl.center - c)
-        dn = dd.normalized()
-        pl.material_index = 1 if dn.y > 0.56 else 0
+        d=v.co.copy()
+        v.co=c+Vector((d.x*.108,d.y*.119,d.z*.117))
+        v.co.y-=max(0,-d.y)*max(0,d.z)*.025
+        if d.y>.48 and -.58<d.z<.43: drop.append(v)
+        elif d.z<-.8: drop.append(v)
+    bmesh.ops.delete(bm,geom=drop,context='VERTS')
+    bmesh.ops.solidify(bm,geom=bm.faces[:],thickness=.008)
+    bmesh.ops.recalc_face_normals(bm,faces=bm.faces)
+    ob=K.new_obj('helmet_shell',bm,material)
+    for face in ob.data.polygons: face.use_smooth=True
     return ob
 
 
@@ -378,9 +339,9 @@ def build():
     # straight past the waist, filling out over chest and back and carried
     # past the shoulder joint (dropped shoulder).
     src.append(K.paint(tube("hoodie", [
-        ((0, 0, 0.8), 0.17, 0.115, -0.006), ((0, 0, 0.792), 0.215, 0.152, -0.004), ((0, 0, 0.84), 0.218, 0.156, -0.002),
-        ((0, 0, 0.9), 0.214, 0.158, 0.004), ((0, 0, 0.97), 0.206, 0.156, 0.006),
-        ((0, 0, 1.05), 0.2, 0.152, 0.008), ((0, 0, 1.12), 0.202, 0.152, 0.01), ((0, 0, 1.19), 0.21, 0.156, 0.012),
+        ((0, 0, 0.8), 0.17, 0.115, -0.006), ((0, 0, 0.81), 0.19, 0.14, -0.004), ((0, 0, 0.85), 0.198, 0.143, -0.002),
+        ((0, 0, 0.9), 0.198, 0.146, 0.004), ((0, 0, 0.97), 0.206, 0.156, 0.006),
+        ((0, 0, 1.05), 0.174, 0.135, 0.008), ((0, 0, 1.12), 0.18, 0.14, 0.01), ((0, 0, 1.19), 0.21, 0.156, 0.012),
         ((0, 0, 1.26), 0.226, 0.162, 0.014), ((0, 0, 1.33), 0.236, 0.166, 0.014), ((0, 0, 1.39), 0.232, 0.16, 0.01),
         ((0, 0, 1.44), 0.212, 0.144, 0.004), ((0, 0, 1.485), 0.17, 0.12), ((0, 0, 1.53), 0.12, 0.1)], segs=32), jacket))
     for sx in (-1, 1):
@@ -419,7 +380,7 @@ def build():
         src.append(K.paint(f, jacket))
     # Kangaroo pocket: a patch slightly proud of the front, narrower at the
     # top; its outline and side slits are stitched in paint_panels.
-    pocket = K.box("pocket", (0.28, 0.012, 0.16), (0, 0.146, 0.955), jacket, bevel=0.005, segs=2)
+    pocket = K.box("utility_hem", (0.14, 0.022, 0.2), (-0.1, 0.15, 0.94), jacket_dk, bevel=0.012, segs=3)
     for v in pocket.data.vertices:
         v.co.x *= 1.0 - 0.12 * max(0.0, (v.co.z - 0.955) / 0.085)
     src.append(pocket)
@@ -607,25 +568,17 @@ def build():
         pl.use_smooth = True
     head.append(K.smooth(K.paint(tube("face", [(o(0, 0.034, 0.03), 0.04, 0.042), (o(0, 0.03, 0.05), 0.068, 0.07),
                                                 (o(0, 0.02, 0.095), 0.082, 0.086), (o(0, 0.01, 0.14), 0.086, 0.09)], segs=22), mask), 1))
-    nose = K.paint(tube("nose", [(o(0, 0.09, 0.138), 0.009, 0.006), (o(0, 0.103, 0.108), 0.013, 0.009),
-                                 (o(0, 0.105, 0.098), 0.015, 0.008), (o(0, 0.096, 0.09), 0.013, 0.005)], segs=10), mask)
-    head.append(K.smooth(nose, 1))
-    for sx in (-1, 1):
-        # Lenses: big, matte white, set in heavy black rims – angled up and
-        # out so the mask reads as alert, a little mischievous. Not lit.
-        for nm, mat_, sc, dy in (("lens_rim", ink, (0.05, 0.014, 0.034), 0.09), ("eye_lens", lens_w, (0.04, 0.011, 0.025), 0.096)):
-            e = K.sphere(nm, 1.0, (0, 0, 0), mat_, 18, 10, sc)
-            for v in e.data.vertices:
-                u = v.co.x * sx / sc[0]
-                if u > 0:
-                    v.co.z += u * u * sc[2] * 0.9
-                    v.co.x *= 1.0 + 0.3 * u
-                if v.co.z < 0:
-                    v.co.z *= 0.55
-            e.rotation_euler = (0.18, -sx * 0.24, sx * -0.24)
-            e.location = o(sx * 0.04, dy, 0.126)
-            bpy.context.view_layer.update()
-            head.append(e)
+    # A continuous tapered visor; no facial anatomy or protruding goggles.
+    for scale,depth,mat_ in [(1.16,.108,ink),(1.0,.119,lens_w)]:
+        bm=bmesh.new()
+        outline=[(-.084,.012),(-.055,.025),(0,.019),(.055,.025),(.084,.012),(.071,-.012),(0,-.02),(-.071,-.012)]
+        vs=[bm.verts.new(o(x*scale,depth-abs(x)*.24,.128+z*scale)) for x,z in outline]
+        bm.faces.new(vs)
+        bmesh.ops.solidify(bm,geom=bm.faces[:],thickness=.006)
+        bmesh.ops.recalc_face_normals(bm,faces=bm.faces)
+        head.append(K.new_obj('visor',bm,mat_))
+    for sx in [-1,1]:
+        head.append(K.box('jaw_vent',(.022,.009,.007),o(sx*.047,.096,.069),metal,bevel=.002))
     part("head", head, hc)
     # The hood is its own part (same origin) so shop headwear can replace it.
     # Under the chin the hood's front edges wrap the throat and run into the
@@ -634,7 +587,7 @@ def build():
     cowl = K.smooth(K.paint(tube("cowl", [((0, -0.01, 1.51), 0.135, 0.118), ((0, 0.0, 1.545), 0.118, 0.104, 0.006),
                                           ((0, 0.012, 1.575), 0.098, 0.09, 0.012), ((0, 0.018, 1.59), 0.086, 0.08, 0.014)],
                                      segs=22), jacket), 1)
-    part("hood", [hood(o, jacket, jacket_dk), cowl], hc)
+    part("hood", [hood(o, jacket_dk, ink), cowl], hc)
 
     # ---- hood drawcords (ride the chest bone): two flat cords out of the
     # neckline eyelets, lying over the chest, metal aglets on the ends. The
@@ -642,16 +595,17 @@ def build():
     # swing and lift with the wind like the hem (see character.gdshader).
     cc = J["chest"]
     cords = []
-    for sx, drop in ((-1, 0.045), (1, 0.0)):
-        x = sx * 0.037
-        pts = [Vector((x, 0.128, 1.512)), Vector((x + sx * 0.004, 0.17, 1.47)), Vector((x + sx * 0.007, 0.19, 1.41)),
-               Vector((x + sx * 0.008, 0.197, 1.35 - drop * 0.6)), Vector((x + sx * 0.008, 0.199, 1.32 - drop))]
-        cords.append(K.smooth(K.paint(tube("cord", [(q, 0.0045, 0.003) for q in pts], segs=8), cord), 1))
-        cords.append(K.paint(tube("aglet", [(pts[-1] + Vector((0, 0.001, 0.004)), 0.0064, 0.0064),
-                                            (pts[-1] + Vector((0, 0.001, -0.022)), 0.0058, 0.0058)], segs=8), metal))
-        # Eyelet ring where the cord leaves the neckline.
-        cords.append(K.paint(tube("eyelet", [(pts[0] + Vector((0, -0.004, 0.0)), 0.0085, 0.0085),
-                                             (pts[0] + Vector((0, 0.003, 0.0)), 0.0085, 0.0085)], segs=10), metal))
+    # Layered courier vest, diagonal harness and twin skyline insignia.
+    cords.append(K.box("vest_back", (.32,.045,.29), (0,-.167,1.34), gear, bevel=.04,segs=4))
+    cords.append(K.box("vest_front", (.29,.035,.23), (0,.185,1.37), jacket_dk, bevel=.035,segs=4))
+    for front in [-1,1]:
+        pts=[Vector((-.14,front*.221,1.49)),Vector((.14,front*.221,1.22))]
+        cords.append(K.paint(tube("diagonal_webbing",[(q,.022,.008) for q in pts],segs=8),strap))
+        for sx in [-1,1]:
+            pts=[Vector((sx*.10,front*.236,1.43)),Vector((0,front*.236,1.35)),Vector((sx*.10,front*.236,1.27))]
+            cords.append(K.paint(tube("skyline_mark",[(q,.009,.004) for q in pts],segs=6),emblem))
+    cords.append(K.box("buckle",(.048,.018,.035),(.015,.214,1.34),metal,bevel=.006))
+    cords.append(K.box("utility_pouch",(.084,.055,.1),(-.1,.2,1.25),gear,bevel=.014))
     part("chest", cords, cc)
 
     # ---- web launcher gauntlet: rides the right forearm pivot (elbow origin,
@@ -782,10 +736,10 @@ def build():
     hc_ = J["head"] + Vector((0, -0.024, 0.11))
     for ob in parts:
         if ob.name == "hood":
-            cloth_uv(ob, lambda p, c: smoothstep(-0.02, -0.17, (p - hc_).y) * (0.55 + 0.45 * smoothstep(0.0, 0.12, (p - hc_).z)),
+            cloth_uv(ob, lambda p, c: 0.12 if p.z < 1.59 else 0.0,
                      Matrix.Translation(J["head"]))
         elif ob.name == "chest":
-            cloth_uv(ob, lambda p, c: smoothstep(1.5, 1.33, p.z), Matrix.Translation(J["chest"]))
+            cloth_uv(ob, lambda p, c: 0.0, Matrix.Translation(J["chest"]))
         else:
             cloth_uv(ob, lambda p, c: 0.0)
     # Repack for the shader (Godot reads two UV sets): UV = fabric coordinates

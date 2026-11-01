@@ -21,8 +21,8 @@ extends RefCounted
 
 const KERB := 0.15
 ## Design elevations (m).
-const RISE := 20.0          # waterfront → east
-const HEIGHTS := 28.0       # the north-east ridge on top of that
+const RISE := 24.0          # waterfront → east
+const HEIGHTS := 36.0       # the north-east ridge on top of that
 const PLATEAU := 22.0       # business district plateau
 const RAIL_Z := 369.0       # valley axis (the elevated railway)
 

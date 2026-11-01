@@ -63,8 +63,19 @@ func _go() -> void:
 	var d := _Drive.new()
 	player.bot = d
 	await _hold(1.2)
-	_place(player.global_position - n * 2.6 + al * 0.9 + Vector3.UP * 1.1, wc + n * 40.0 - Vector3.UP * 12.0)
+	_place(player.global_position - n * 2.6 + al * 0.9 + Vector3.UP * 1.1, wc + n * 55.0 - Vector3.UP * (45.0 if h["tier"] >= 3 else 12.0))
 	await _shot("at_window")
+	# Full room and rear suite views, using actual game geometry and lighting.
+	var width := float(h["a1"]) - float(h["a0"])
+	var dep := float(h["depth"])
+	var left := float(h["a0"])
+	_place(Apartments.face_point(h, left + width - 0.5, -dep * 0.59 + 0.7, float(h["y0"]) + 2.3), wc + n * 12.0 + Vector3.UP)
+	await _shot("interior")
+	_place(wc - n * 0.8 + Vector3.UP * 2.2, Apartments.face_point(h, left + width * 0.35, -dep, float(h["y0"]) + 1.2))
+	await _shot("floorplan")
+	if "--stills" in args:
+		quit()
+		return
 	# 2. Run out of the window: film from outside, beside the facade.
 	d.move = n
 	var side := wc + n * 7.0 + al * 7.5 + Vector3.UP * 0.5

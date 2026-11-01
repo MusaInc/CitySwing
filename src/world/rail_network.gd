@@ -77,8 +77,8 @@ func build_loop() -> void:
 	# Swing out round anything in the way (the cathedral's close to the ring
 	# on the east coast): push blocked points seaward, then re-ease.
 	sm = _clear_buildings(sm)
-	sm = _resample_closed(sm, 16.0)
-	for it in 2:
+	sm = _resample_closed(sm, 24.0)
+	for it in 3:
 		sm = _chaikin_closed(sm)
 	# (Chaikin keeps the long waterfront straight exactly on the viaduct's
 	# axis: collinear points stay collinear.)

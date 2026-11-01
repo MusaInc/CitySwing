@@ -34,13 +34,13 @@ void fragment() {
 	vec3 wpos = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float e = 0.6;
 	float h = waves(wpos.xz);
-	vec3 nw = normalize(vec3(h - waves(wpos.xz + vec2(e, 0.0)), 0.35, h - waves(wpos.xz + vec2(0.0, e))));
+	vec3 nw = normalize(vec3(h - waves(wpos.xz + vec2(e, 0.0)), 0.9, h - waves(wpos.xz + vec2(0.0, e))));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	vec3 view_w = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 	float fres = pow(1.0 - clamp(dot(view_w, nw), 0.0, 1.0), 4.0);
 	vec3 r = reflect(-view_w, nw);
 	vec3 refl = mix(sky_horizon, sky_top, clamp(r.y * 1.4, 0.0, 1.0));
 	ALBEDO = mix(mix(deep, shallow, h * 0.5), refl, 0.15 + 0.75 * fres);
-	ROUGHNESS = 0.06 + 0.1 * rain;
-	SPECULAR = 0.8;
+	ROUGHNESS = 0.28 + 0.12 * rain;
+	SPECULAR = 0.35;
 }

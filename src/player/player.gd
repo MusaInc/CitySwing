@@ -605,7 +605,7 @@ func _ground_launch() -> void:
 		# Leap up and forward along the view, so a launch off a roof clears the edge.
 		var fwd := Vector3(aim_dir.x, 0.0, aim_dir.z).normalized()
 		if fwd.length_squared() > 0.5 and Vector3(s.velocity.x, 0, s.velocity.z).length() < 6.0:
-			s.velocity += fwd * 6.0
+			s.velocity += fwd * 8.0
 		s.velocity.y = maxf(s.velocity.y, params.jump_speed)
 		s.grounded = false
 		_launch_pending = true
@@ -622,7 +622,7 @@ func _launch_state() -> SwingPhysics.State:
 	if is_on_floor() and not stunned:
 		var fwd := Vector3(aim_dir.x, 0.0, aim_dir.z).normalized()
 		if fwd.length_squared() > 0.5 and Vector3(st.velocity.x, 0, st.velocity.z).length() < 6.0:
-			st.velocity += fwd * 6.0
+			st.velocity += fwd * 8.0
 		st.velocity.y = maxf(st.velocity.y, params.jump_speed)
 	return st
 

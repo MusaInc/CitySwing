@@ -16,6 +16,9 @@ if [[ "$ARGS" == *" assets "* ]]; then
   step "Blender kit (procedural models -> assets/models/*.glb)"
   blender -b --factory-startup --python tools/blender/build_kit.py -- assets/models 2>&1 | grep -E "KIT|Error|Traceback"
   blender -b --factory-startup --python tools/blender/build_street.py -- assets/models 2>&1 | grep -E "KIT|Error|Traceback"
+  blender -b --factory-startup --python tools/blender/build_residences.py -- assets/models
+  # build_kit contains a legacy hero; always replace it with the skinned asset.
+  blender -b --factory-startup --python tools/blender/build_character.py -- assets/models
   step "Synthesised audio (-> assets/audio/*.wav)"
   python3 tools/audio/gen_audio.py assets/audio | grep -E "DONE|Error"
 fi

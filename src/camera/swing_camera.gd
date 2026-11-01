@@ -53,6 +53,7 @@ var _heading := 0.0       # filtered travel heading
 var _col_dist := -1.0
 var _fov_kick := 0.0
 var _punch := 0.0  # 1 → 0 after a perfect release; FOV snaps out fast, eases back
+var _last_subject := Vector3.ZERO
 var _snapped := false
 var _bump := 0.0           # landing / catch impulse (m, spring-damped)
 var _bump_v := 0.0
@@ -144,7 +145,7 @@ func view_yaw() -> float:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		add_look(event.relative * 0.0025 * Settings.look_sensitivity * Vector2(1, -1 if Settings.invert_y else 1))
+		add_look(event.relative * 0.0025 * get_node("/root/Settings").look_sensitivity * Vector2(1, -1 if get_node("/root/Settings").invert_y else 1))
 
 
 func _process(dt: float) -> void:
@@ -160,7 +161,7 @@ func _process(dt: float) -> void:
 		return
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	if stick.length() > 0.05:
-		add_look(stick * dt * 2.6 * Settings.look_sensitivity)
+		add_look(stick * dt * 2.6 * get_node("/root/Settings").look_sensitivity)
 	_since_look += dt
 
 	var v := target.s.velocity
@@ -246,6 +247,7 @@ func _process(dt: float) -> void:
 	_tug += _tug_v * dt
 	var focus_goal := target.global_position + Vector3.UP * (_height + _lift) + ahead + _pick_bias
 	var basis := Basis.from_euler(Vector3(clampf(pitch + look_pitch, deg_to_rad(-70.0), deg_to_rad(50.0)), yaw + look_yaw, 0.0))
+	var snapped_this_frame := _snapped
 	if _snapped:
 		_bump = 0.0
 		_bump_v = 0.0
@@ -298,6 +300,16 @@ func _process(dt: float) -> void:
 		placed += n * _shake
 		shaken += n * _shake * 0.35
 		_shake *= exp(-4.5 * rt)
+	# Limit collision recovery speed only when the intermediate lens position
+	# remains visible and outside geometry. Respawns still snap deliberately.
+	if not snapped_this_frame:
+		var step_limit := target.global_position.distance_to(_last_subject) + 42.0 * dt
+		var candidate := global_position.move_toward(placed, step_limit)
+		if candidate.distance_squared_to(placed) > 0.0001:
+			_point.position = candidate
+			if get_world_3d().direct_space_state.intersect_point(_point).is_empty() and _ray_clear(global_position, candidate).distance_to(candidate) < 0.05:
+				placed = candidate
+	_last_subject = target.global_position
 	global_position = placed
 	look_at(shaken + Vector3.DOWN * 0.4 * _crane, Vector3.UP)
 	# Never film the inside of the character.

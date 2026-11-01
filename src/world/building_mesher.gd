@@ -584,13 +584,16 @@ static func _clear_of_apt(b: Dictionary, out: Dictionary) -> Dictionary:
 	var f := Apartments.face_of(apt)
 	var keep := _fbox(f, float(apt["oa0"]) - 1.5, float(apt["oa1"]) + 1.5, -1.0, 4.0, float(apt["y0"]) - 3.0,
 		float(apt["y1"]) + 1.0)
-	var res := {"draw": [], "col": [], "beams": []}
+	var res := {"draw": [], "col": [], "col_human": [], "beams": []}
 	for d in out["draw"]:
 		if not (d[0] as AABB).intersects(keep):
 			res["draw"].append(d)
 	for c in out["col"]:
 		if not (c as AABB).intersects(keep):
 			res["col"].append(c)
+	for c in out.get("col_human", []):
+		if not (c as AABB).intersects(keep):
+			res["col_human"].append(c)
 	for bm in out["beams"]:
 		var bb := AABB(bm[0], Vector3.ZERO).expand(bm[1]).grow(0.3)
 		if not bb.intersects(keep):
@@ -764,6 +767,23 @@ static func _features(b: Dictionary) -> Dictionary:
 				var bx := _fbox(f, a, a + w, -w + o, o, ry, ry + (ph if a < 0.0 else ph * 0.7))
 				out["draw"].append([bx, pc])
 				out["col"].append(bx)
+	# Facade depth follows the architectural family: paired slender bronze
+	# blades on office towers; stone piers on tall masonry. Shared collision
+	# and opening filtering keep apartments and climbing geometry aligned.
+	if h0 > 85.0:
+		for tier: Array in b["tiers"]:
+			for k in 4:
+				var face := _face(tier, k)
+				var length: float = face[3]
+				var count := maxi(2, int(length / 7.0))
+				for i in range(1, count):
+					var a := length * float(i) / count
+					var depth := 0.34 if _glassy(b) else 0.22
+					var width := 0.18 if _glassy(b) else 0.42
+					var rib := _fbox(face, a - width, a + width, -0.08, depth,
+						float(tier[4]) + 1.2, float(tier[5]) - 0.8)
+					out["draw"].append([rib, Color(0.32, 0.29, 0.23) if _glassy(b) else trim])
+					out["col_human"].append(rib)
 	return out
 
 
@@ -1727,7 +1747,7 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var amt := x_taper * (1.0 - dock)
 	var r := smoothstep(4.0, 9.0, H)
 	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
-	var j := func(k: int) -> float: return (_snoise(s / 9.0 + k * 17.3) - 0.5) * r
+	var j := func(k: int) -> float: return (_snoise(s / 32.0 + k * 17.3) - 0.5) * r
 	var rock := [[0.0, H - 0.5], [w * 0.07 + 2.0 * j.call(1), H * 0.66 + H * 0.14 * j.call(2)],
 		[w * 0.3 + 6.0 * j.call(3), H * 0.32 + H * 0.2 * j.call(4)],
 		[w * 0.6 + 8.0 * j.call(5), 1.2 + 3.0 * absf(j.call(6)) * 2.0],

@@ -97,6 +97,9 @@ func _scan(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vector3, 
 			if rise < (0.5 if grounded else p.min_anchor_height):
 				continue
 			var dist := origin.distance_to(pt)
+			# A near rooftop lip produces a tiny pendulum that lands back on the roof.
+			if grounded and dist < 12.0:
+				continue
 			if dist < 6.0:
 				continue
 			var s := _score(dir, heading, travel_h, speed, rise, dist, el, aim_pitch, p)

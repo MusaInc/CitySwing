@@ -20,16 +20,16 @@ extends RefCounted
 
 const FLOOR := 3.6  # storey height (matches the facade shader's bands)
 const TIERS := [
-	{"id": "starter", "name": "Starter Bedsit", "floor": [14.0, 26.0], "w": 5.6, "d": 5.2, "h": 3.0,
+	{"id": "starter", "name": "Quay Studio", "floor": [14.0, 26.0], "w": 7.8, "d": 7.2, "h": 3.2,
 		"open_w": 2.6, "sill": 0.0, "open_h": 2.4, "price": 0, "view": 45.0},
-	{"id": "city", "name": "City Apartment", "floor": [28.0, 44.0], "w": 7.6, "d": 6.6, "h": 3.1,
+	{"id": "city", "name": "City Apartment", "floor": [28.0, 44.0], "w": 11.0, "d": 10.0, "h": 3.4,
 		"open_w": 4.0, "sill": 0.0, "open_h": 2.55, "price": 1500, "view": 80.0},
-	{"id": "loft", "name": "High-Rise Loft", "floor": [55.0, 85.0], "w": 10.0, "d": 8.0, "h": 4.4,
+	{"id": "loft", "name": "High-Rise Loft", "floor": [55.0, 85.0], "w": 14.0, "d": 12.0, "h": 4.4,
 		"open_w": 7.2, "sill": 0.0, "open_h": 3.7, "price": 4000, "view": 120.0},
-	{"id": "sky", "name": "Luxury Sky Apartment", "floor": [100.0, 150.0], "w": 12.0, "d": 9.0, "h": 3.9,
+	{"id": "sky", "name": "Luxury Sky Apartment", "floor": [100.0, 150.0], "w": 18.0, "d": 14.0, "h": 4.2,
 		"open_w": 9.6, "sill": 0.0, "open_h": 3.3, "price": 9000, "view": 160.0},
-	{"id": "penthouse", "name": "Ultimate Penthouse", "floor": [-1.0, -1.0], "w": 16.0, "d": 12.0, "h": 4.6,
-		"open_w": 13.0, "sill": 0.0, "open_h": 4.0, "price": 20000, "view": 50.0, "cbd": 900.0},
+	{"id": "penthouse", "name": "Ultimate Penthouse", "floor": [-1.0, -1.0], "w": 24.0, "d": 18.0, "h": 5.2,
+		"open_w": 20.0, "sill": 0.0, "open_h": 4.0, "price": 20000, "view": 50.0, "cbd": 900.0},
 ]
 
 ## Placed homes: [{id, tier, name, b (building dict), t (tier index), face,
@@ -61,8 +61,10 @@ static func place(layout: CityLayout) -> Apartments:
 		best["name"] = spec["name"]
 		best["price"] = spec["price"]
 		var b: Dictionary = best["b"]
-		used[b] = true
-		b["apt"] = best
+		# Facade geometry needs a building frame, not a circular building→home→building graph.
+		var facade_home := best.duplicate()
+		facade_home["b"] = b.duplicate()
+		b["apt"] = facade_home
 		b.erase("_features")  # (re-derived clear of the window)
 		A.homes.append(best)
 	return A
@@ -109,7 +111,7 @@ func _candidates(spec: Dictionary, used: Dictionary) -> Array:
 		order.sort_custom(func(a, b): return tall.call(a) > tall.call(b))
 		order = order.slice(0, 12)
 	for b in order:
-		if b["kind"] != "normal" or used.has(b) or b.has("apt"):
+		if b["kind"] != "normal" or b.has("apt"):
 			continue
 		var base := BuildingMesher.base_of(b)
 		var tiers: Array = b["tiers"]
@@ -172,7 +174,7 @@ func _view(c: Dictionary, spec: Dictionary) -> float:
 	var r := _clear(p + n * 1.0, n.rotated(Vector3.UP, -0.49), reach, skip)
 	var clear := straight + 0.6 * (l + r)
 	if float(spec["view"]) < 120.0 and not spec.has("cbd"):
-		return clear
+		return clear * 0.08 + _city_below(p + Vector3.UP * 30.0, n, skip) * 28.0
 	# High up, an empty view (open sea) is dull: what makes it is city spread
 	# out below – rooftops under eye level across the cone in front.
 	var to_cbd := Vector3(CityLayout.CBD_CENTER.x - p.x, 0.0, CityLayout.CBD_CENTER.y - p.z).normalized()

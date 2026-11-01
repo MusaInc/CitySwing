@@ -48,8 +48,8 @@ func test_five_homes_in_real_buildings_with_views(t) -> void:
 	var tallest := 0.0
 	for b in world.layout.buildings:
 		var top: Array = b["tiers"][-1]
-		var fits := minf(float(top[2]) - float(top[0]), float(top[3]) - float(top[1])) >= 15.0 \
-			and maxf(float(top[2]) - float(top[0]), float(top[3]) - float(top[1])) >= 19.0
+		var fits := minf(float(top[2]) - float(top[0]), float(top[3]) - float(top[1])) >= float(Apartments.TIERS[4]["d"]) + 3.0 \
+			and maxf(float(top[2]) - float(top[0]), float(top[3]) - float(top[1])) >= float(Apartments.TIERS[4]["w"]) + 3.0
 		if b["kind"] == "normal" and fits:
 			tallest = maxf(tallest, float(top[5]) - BuildingMesher.base_of(b))
 	for h in homes:
@@ -154,3 +154,53 @@ func test_ownership_and_purchases(t) -> void:
 	t.check(not Homes.select("penthouse"), "can't live in a home you don't own")
 	sd.data = before
 	sd.save()
+
+
+func test_every_home_spawn_and_window_corridor(t) -> void:
+	for h in hs.homes:
+		hs.spawn_in(h, world, null)
+		for i in 30:
+			await get_tree().physics_frame
+		t.check(hs.inside() == h["id"] and player.is_on_floor(), "%s stable grounded spawn" % h["id"])
+		var n := Apartments.outward(h)
+		var a := Apartments.spawn_point(h)
+		var q := PhysicsRayQueryParameters3D.create(a, Apartments.window_center(h) + n * 3.0 + Vector3.UP * 0.95, player.collision_mask)
+		q.exclude = [player.get_rid()]
+		t.check(player.get_world_3d().direct_space_state.intersect_ray(q).is_empty(), "%s clear window exit" % h["id"])
+
+
+func test_respawn_cancels_window_transition(t) -> void:
+	var h := hs.home_by_id("city")
+	var a := (float(h["oa0"]) + float(h["oa1"])) * 0.5
+	player.respawn(Apartments.face_point(h, a, 1.6, float(h["oy0"]) + 0.3) + Vector3.UP * 0.9)
+	player.s.velocity = -Apartments.outward(h) * 13.0
+	t.check(hs._try_enter(h), "vault began")
+	hs.spawn_in(hs.home_by_id("starter"), world, null)
+	for i in 45:
+		await get_tree().physics_frame
+	t.check(hs.state == "" and not player.scripted and hs.inside() == "starter", "respawn cancels old window path")
+
+
+func test_vault_speeds_remain_inside_window_clearance(t) -> void:
+	for h in hs.homes:
+		world.build_all_near(Apartments.window_center(h), 80.0)
+		for speed: float in [9.0, 16.0, 23.0]:
+			var a := (float(h["oa0"]) + float(h["oa1"])) * 0.5
+			player.respawn(Apartments.face_point(h, a, 2.0, float(h["oy0"]) + 1.2))
+			player.s.velocity = -Apartments.outward(h) * speed
+			t.check(hs._try_enter(h), "%s %.0f m/s starts entry" % [h["id"], speed])
+			var shape := CapsuleShape3D.new()
+			shape.radius = 0.28
+			shape.height = 1.7
+			var q := PhysicsShapeQueryParameters3D.new()
+			q.shape = shape
+			q.collision_mask = 1 | CityWorld.HUMAN_LAYER
+			q.exclude = [player.get_rid()]
+			var clear := true
+			for i in 30:
+				await get_tree().physics_frame
+				q.transform = Transform3D(Basis.IDENTITY, player.global_position)
+				clear = clear and player.get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
+				if hs.state == "":
+					break
+			t.check(clear and hs.inside() == h["id"], "%s %.0f m/s capsule clears frame and lands inside" % [h["id"], speed])

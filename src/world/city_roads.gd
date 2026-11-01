@@ -106,7 +106,7 @@ func _coast() -> void:
 	# corner, down the east edge, round the SE corner, south edge east→west.
 	var b := bounds
 	var R := 150.0
-	var amp := 34.0
+	var amp := 8.0
 	var noise := func(s: float) -> float:
 		return (_vn(s / 160.0 + 3.0) - 0.5) * 2.0 * 0.7 + (_vn(s / 55.0 + 11.0) - 0.5) * 2.0 * 0.3
 	var path: Array = [Vector2(b.position.x, b.position.y)]
@@ -125,7 +125,15 @@ func _coast() -> void:
 		for j in k:
 			var p := a.lerp(c, float(j) / k)
 			var taper := smoothstep(b.position.x, b.position.x + 160.0, p.x)
-			pts.append(p + out * float(noise.call(s + L * j / k)) * amp * taper)
+			# Broad landforms, with small erosion detail instead of a noisy rectangle.
+			# Normalised coordinates also fit the smaller mirrored Westbank.
+			var u := (p.x - b.position.x) / b.size.x
+			var v := (p.y - b.position.y) / b.size.y
+			var north_bay := -64.0 * exp(-pow((u - 0.48) / 0.19, 2.0)) * pow(1.0 - v, 6.0)
+			var east_bay := -72.0 * exp(-pow((v - 0.66) / 0.16, 2.0)) * pow(u, 8.0)
+			var headland := 38.0 * exp(-pow((v - 0.26) / 0.19, 2.0)) * pow(u, 8.0)
+			var shore := north_bay + east_bay + headland
+			pts.append(p + out * (shore + float(noise.call(s + L * j / k)) * amp) * taper)
 		s += L
 	pts.append(path[-1])
 	coast = pts
