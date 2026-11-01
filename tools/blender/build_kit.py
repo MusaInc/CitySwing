@@ -262,7 +262,20 @@ def beacon():
     glass = mat("glass", (0.25, 0.35, 0.42), 0.1, 0.6)
     steel = mat("steel_light", (0.7, 0.7, 0.72), 0.4, 0.7)
     red = mat("lamp_red", (0.9, 0.1, 0.05), 0.4, 0.0, emit=(1.0, 0.1, 0.05))
+    dark = mat("concrete_dark", (0.6, 0.6, 0.6), 0.85)
     p = [cyl("shaft", 6.5, 118, (0, 0, 0), conc, 24, r2=5.0)]
+    # Slip-form rings every 13 m and a glazed lift band halfway up give the
+    # shaft scale; aviation lights at three heights read at night.
+    for i in range(1, 9):
+        z = i * 13.0
+        r = 6.5 - 1.5 * z / 118.0
+        p.append(cyl(f"ring_{i}", r + 0.22, 0.7, (0, 0, z - 0.35), dark, 24))
+    p.append(cyl("lobby_band", 6.25, 4.0, (0, 0, 53.0), glass, 24, r2=6.05))
+    for k, z in enumerate((40.0, 78.0)):
+        r = 6.5 - 1.5 * z / 118.0
+        for a in range(4):
+            ang = a * math.pi / 2 + k * math.pi / 4
+            p.append(sphere(f"avlight_{k}_{a}", 0.35, (math.cos(ang) * (r + 0.3), math.sin(ang) * (r + 0.3), z), red, 6, 4))
     p.append(cyl("pod_base", 7.0, 3.0, (0, 0, 115), conc, 24, r2=10.5))
     p.append(cyl("pod_glass", 10.5, 7.0, (0, 0, 118), glass, 32, r2=11.0))
     p.append(cyl("pod_top", 11.4, 1.6, (0, 0, 125), conc, 32, r2=9.0))
