@@ -131,15 +131,16 @@ def hood(o, material, rim_mat):
             p.y += 0.016 * d.z
             p.z += 0.006 * d.z
         if front > 0.0:
-            p.z -= 0.018 * front
-            p.x *= 1.0 - 0.05 * front
+            p.z -= 0.03 * front
+            p.x *= 1.0 - 0.1 * front
+            p.y -= 0.012 * front
         # Loose folds down the sides and back (deeper low down), uneven so
         # left and right don't mirror.
         ang = math.atan2(d.x, -d.y)
         fold = math.sin(ang * 5.0 + d.z * 2.4 + 0.7) + 0.45 * math.sin(ang * 9.0 - d.z * 4.0)
         p += d * 0.0065 * fold * (1.0 - front) * (0.5 + 0.5 * max(-d.z, 0.0) + 0.3 * (1.0 - abs(d.z)))
         v.co = c + p
-        if d.y > 0.52 or d.z < -0.97:
+        if d.y > 0.66 or d.z < -0.97:
             drop.append(v)
     bmesh.ops.delete(bm, geom=drop, context="VERTS")
     bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.016)
@@ -152,8 +153,7 @@ def hood(o, material, rim_mat):
         pl.use_smooth = True
         dd = (pl.center - c)
         dn = dd.normalized()
-        seam = abs(dd.x) < 0.0045 and dn.y < -0.1 and dn.z > -0.4
-        pl.material_index = 1 if dn.y > 0.36 or seam else 0
+        pl.material_index = 1 if dn.y > 0.56 else 0
     return ob
 
 
@@ -186,7 +186,9 @@ def paint_panels(body, mats):
                     k_ = "pants"
                 c = key[k_]
                 col.data[li].color = (c[0], c[1], c[2], col.data[li].color[3])
-            if (near(c, key["jacket"]) or near(c, key["jacket_dk"])) and z < 0.785 and ax < 0.19:
+            if z > 1.565 and ax < 0.085 and "mask" in key:
+                want = "mask"  # the gaiter (the colour transfer bleeds the neckline onto it)
+            elif (near(c, key["jacket"]) or near(c, key["jacket_dk"])) and z < 0.785 and ax < 0.19:
                 want = "pants"  # under the hem: the joggers
             elif near(c, key["jacket"]):
                 torso = ax < 0.26 and 0.78 < z < 1.56
@@ -363,15 +365,20 @@ def build():
                                          ((sx * 0.205, 0.0, 1.49), 0.062, 0.062)], segs=14), jacket))
         # Dropped shoulder: the seam sits down the arm; the fabric rounds
         # over the deltoid rather than hugging it.
-        src.append(K.paint(K.sphere("shoulder", 0.092, J["upper_arm_" + side] + Vector((sx * 0.03, 0.004, -0.06)),
-                                    None, 16, 10, (1.0, 1.08, 0.8)), jacket))
+        # Dropped shoulder: the fabric slopes from the neckline over the joint
+        # into the sleeve (a long, flattened ellipsoid along that slope).
+        sh = K.sphere("shoulder", 1.0, (0, 0, 0), None, 16, 10, (0.13, 0.085, 0.075))
+        sh.rotation_euler = (0, sx * 0.42, 0)
+        sh.location = J["upper_arm_" + side] + Vector((-sx * 0.05, 0.0, -0.015))
+        bpy.context.view_layer.update()
+        src.append(K.paint(sh, jacket))
     # Fabric folds: blousing ridges over the hem band (front and back, offset
     # side to side), a diagonal drag fold from each armpit, and a soft roll
     # at the small of the back.
     for (x, y, z, sx_, sz_, rot) in ((0.05, 0.16, 0.86, 0.085, 0.011, 0.08), (-0.08, 0.158, 0.85, 0.07, 0.01, -0.12),
-                                      (0.02, -0.158, 0.86, 0.1, 0.012, -0.05), (-0.11, -0.14, 0.87, 0.06, 0.01, 0.2),
+                                      
                                       (0.16, 0.09, 0.9, 0.05, 0.009, 0.5), (-0.165, 0.075, 0.89, 0.045, 0.009, -0.4),
-                                      (0.0, -0.156, 1.0, 0.11, 0.01, 0.0)):
+                                      ):
         f = K.sphere("fold", 1.0, (0, 0, 0), None, 14, 8, (sx_, 0.016, sz_))
         f.rotation_euler = (0, rot, math.atan2(x, y) * 0.0)
         f.location = (x, y, z)
@@ -385,7 +392,7 @@ def build():
         src.append(K.paint(f, jacket))
     # Kangaroo pocket: a patch slightly proud of the front, narrower at the
     # top; its outline and side slits are stitched in paint_panels.
-    pocket = K.box("pocket", (0.29, 0.012, 0.17), (0, 0.153, 0.955), jacket, bevel=0.005, segs=2)
+    pocket = K.box("pocket", (0.28, 0.012, 0.16), (0, 0.146, 0.955), jacket, bevel=0.005, segs=2)
     for v in pocket.data.vertices:
         v.co.x *= 1.0 - 0.12 * max(0.0, (v.co.z - 0.955) / 0.085)
     src.append(pocket)
@@ -401,7 +408,8 @@ def build():
     for side, sx in (("l", -1), ("r", 1)):
         a, e, w = J["upper_arm_" + side], J["forearm_" + side], J["hand_" + side]
         src.append(K.paint(tube("upper_arm", [
-            (along(a, e, -0.08), 0.095, 0.095), (along(a, e, 0.15), 0.09, 0.094, 0.004), (along(a, e, 0.45), 0.084, 0.088, 0.006),
+            (along(a, e, -0.42), 0.05, 0.05), (along(a, e, -0.22), 0.082, 0.084), (along(a, e, 0.0), 0.093, 0.094),
+            (along(a, e, 0.15), 0.09, 0.094, 0.004), (along(a, e, 0.45), 0.084, 0.088, 0.006),
             (along(a, e, 0.72), 0.077, 0.08, 0.002), (along(a, e, 0.92), 0.071, 0.072), (along(a, e, 1.03), 0.07, 0.07)], segs=18), jacket))
         pushed = 0.06 if side == "l" else 0.0
         src.append(K.paint(tube("forearm", [
@@ -413,13 +421,6 @@ def build():
                                 segs=16), jacket_dk))
         if pushed > 0.0:  # the bare wrist between the pushed cuff and the glove
             src.append(K.paint(tube("wrist", [(along(e, w, 0.92), 0.033, 0.028), (along(e, w, 1.03), 0.033, 0.028)], segs=14), glove))
-        # Inner-elbow creases.
-        for k_, off in ((0, -0.012), (1, 0.014)):
-            f = K.sphere("crease", 1.0, (0, 0, 0), None, 10, 6, (0.04, 0.008, 0.008))
-            f.rotation_euler = (0, sx * (0.6 + 0.3 * k_), 0)
-            f.location = e + Vector((sx * 0.004, 0.048, off))
-            bpy.context.view_layer.update()
-            src.append(K.paint(f, jacket))
 
     # Joggers: fuller through the thigh, a little bag at the knee, creases
     # behind it, tapering into a gathered cuff that bunches over the ankle.
@@ -509,7 +510,7 @@ def build():
     dt.loop_mapping = "POLYINTERP_NEAREST"
     bpy.ops.object.modifier_apply(modifier="col")
     body.data.color_attributes.active_color = body.data.color_attributes["Col"]
-    paint_panels(body, {"jacket": jacket, "jacket_dk": jacket_dk, "pants": pants, "pants_dk": pants_dk, "glove": glove})
+    paint_panels(body, {"jacket": jacket, "jacket_dk": jacket_dk, "pants": pants, "pants_dk": pants_dk, "glove": glove, "mask": mask_m})
     for p in body.data.polygons:
         p.use_smooth = True
     body.data.materials.clear()
@@ -582,11 +583,6 @@ def build():
     nose = K.paint(tube("nose", [(o(0, 0.09, 0.138), 0.009, 0.006), (o(0, 0.103, 0.108), 0.013, 0.009),
                                  (o(0, 0.105, 0.098), 0.015, 0.008), (o(0, 0.096, 0.09), 0.013, 0.005)], segs=10), mask)
     head.append(K.smooth(nose, 1))
-    # A stitched seam down the middle of the mask (forehead to chin).
-    for i in range(7):
-        z = 0.2 - i * 0.028
-        y = 0.07 + 0.03 * math.sin(i / 6.0 * math.pi)
-        head.append(K.box("seam", (0.004, 0.006, 0.014), o(0, y + 0.024, z), ink))
     for sx in (-1, 1):
         # Lenses: big, matte white, set in heavy black rims – angled up and
         # out so the mask reads as alert, a little mischievous. Not lit.
@@ -608,8 +604,8 @@ def build():
     # Under the chin the hood's front edges wrap the throat and run into the
     # neckline: a soft cowl round the neck (part of the hood, so headwear
     # that replaces the hood takes it too).
-    cowl = K.smooth(K.paint(tube("cowl", [((0, -0.01, 1.52), 0.13, 0.112), ((0, 0.0, 1.55), 0.112, 0.098, 0.004),
-                                          ((0, 0.01, 1.58), 0.09, 0.082, 0.008), ((0, 0.014, 1.595), 0.078, 0.072, 0.01)],
+    cowl = K.smooth(K.paint(tube("cowl", [((0, -0.01, 1.51), 0.135, 0.118), ((0, 0.0, 1.545), 0.118, 0.104, 0.006),
+                                          ((0, 0.012, 1.575), 0.098, 0.09, 0.012), ((0, 0.018, 1.59), 0.086, 0.08, 0.014)],
                                      segs=22), jacket), 1)
     part("hood", [hood(o, jacket, jacket_dk), cowl], hc)
 

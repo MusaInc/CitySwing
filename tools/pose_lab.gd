@@ -8,7 +8,7 @@ extends SceneTree
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 ##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble", "hands"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble", "hands", "closeup"]
 
 var player: Player
 var rig: CharacterRig
@@ -135,6 +135,21 @@ func _sc_idlelife() -> void:
 	for i in 16:
 		t.append(1.0 + i * 1.5)
 	await _film("idlelife", 25.0, t)
+
+
+## Head and clothing up close: front, three-quarter, side, back.
+func _sc_closeup() -> void:
+	_reset(Vector3(0, 1.0, 20))
+	_look_y = 0.78
+	for v in [["head_front", Vector3(0, 0.0, -0.9)], ["head_34", Vector3(0.65, 0.05, -0.65)],
+			["head_side", Vector3(0.9, 0.0, 0.0)], ["head_back", Vector3(0.3, 0.1, 0.9)]]:
+		_cam_off = v[1]
+		await _film(v[0], 0.6 if v[0] == "head_front" else 0.2, [0.5 if v[0] == "head_front" else 0.1])
+	_look_y = 0.35
+	for v in [["torso_front", Vector3(0, 0.0, -1.7)], ["torso_34", Vector3(1.2, 0.1, -1.2)], ["torso_back", Vector3(0.4, 0.1, 1.7)]]:
+		_cam_off = v[1]
+		await _film(v[0], 0.2, [0.1])
+	_look_y = 0.1
 
 
 ## Hands up close: standing (open), running (fists), on the web (grip).
