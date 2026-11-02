@@ -63,6 +63,13 @@ const ARM_A := deg_to_rad(42.0)
 const LEG_A := deg_to_rad(5.0)
 ## The model's feet sit at y = 0; the rig's origin is the capsule centre.
 const MODEL_OFFSET := Vector3(0, -0.9, 0)
+## gear.glb was fitted to the old masked head; the real head (faces) sits
+## further forward and a little lower, and its eyes further forward still.
+const GEAR_FIT := {
+	"cap": Vector3(0, -0.032, -0.068), "beanie": Vector3(0, -0.032, -0.068),
+	"headphones": Vector3(0, -0.032, -0.068), "crown": Vector3(0, -0.032, -0.068),
+	"shades": Vector3(0, -0.021, -0.036), "visor": Vector3(0, -0.026, -0.062), "mask": Vector3(0, -0.012, -0.03),
+}
 
 var player: Player
 var bones := {}
@@ -231,11 +238,8 @@ func _ready() -> void:
 			bones["hand_" + side].add_child(grip)
 			grip.visible = false
 			_grips[side] = [parts.get("hand_" + side), grip]
-	# Headwear: the hood (part of the character model) and the shop gear
-	# (gear.glb) all ride the head; apply_look shows one hat and one face piece.
-	var hood: MeshInstance3D = parts.get("hood")
-	if hood:
-		_gear["hood"] = hood
+	# Headwear and eyewear from the shop (gear.glb) ride the head; apply_look
+	# shows one hat and one face piece.
 	if ResourceLoader.exists(GEAR_PATH):
 		var g: Node = (load(GEAR_PATH) as PackedScene).instantiate()
 		for mi in g.find_children("*", "MeshInstance3D", true, false):
@@ -245,7 +249,7 @@ func _ready() -> void:
 		g.free()
 	for key in _gear:
 		var gm: MeshInstance3D = _gear[key]
-		gm.transform = Transform3D.IDENTITY
+		gm.transform = Transform3D(Basis.IDENTITY, GEAR_FIT.get(key, Vector3.ZERO))
 		gm.material_override = mat
 		gm.visible = false
 		bones[GEAR_BONES.get(key, "head")].add_child(gm)
@@ -295,6 +299,26 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			"hero_jacket":
 				region = "suit"
 				reference = Color(0.22, 0.24, 0.26)
+			# Skin-tight tops, the face and its parts: tints are relative to
+			# the authored colour (the shop colour replaces it exactly).
+			"hero_top", "hero_top_collar":
+				region = "suit"
+				reference = source.albedo_color
+			"hero_top_panel":
+				region = "suit_panel"
+				reference = source.albedo_color
+			"hero_skin", "hero_skin_body":
+				region = "skin"
+				reference = source.albedo_color
+			"hero_lips":
+				region = "lips"
+				reference = source.albedo_color
+			"hero_hair", "hero_brow":
+				region = "hair"
+				reference = source.albedo_color
+			"hero_iris":
+				region = "iris"
+				reference = source.albedo_color
 			"hero_cargo", "hero_cargo_pocket":
 				region = "pants"
 				reference = Color(0.24, 0.26, 0.28)
@@ -330,6 +354,16 @@ func apply_look(look: Dictionary) -> void:
 	look_state = look
 	for region in ["suit", "pants", "shoe", "sole", "glove"]:
 		_tint_hero(region, look[region])
+	var suit: Color = look["suit"]
+	# Contrast panels: darker on light colours, lighter on near-black ones.
+	_tint_hero("suit_panel", suit.lightened(0.28) if suit.get_luminance() < 0.12 else suit.darkened(0.5))
+	if look.has("skin"):
+		var skin: Color = look["skin"]
+		_tint_hero("skin", skin)
+		_tint_hero("lips", Color(skin.r * 0.82, skin.g * 0.62, skin.b * 0.6))
+		_tint_hero("hair", look["hair"])
+		_tint_hero("iris", look["eyes"])
+	_show_variants()
 	if _mat:
 		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
 				["glove", "glove_color"], ["glow", "glow_color"]]:
@@ -345,6 +379,31 @@ func set_gadget_active(on: bool) -> void:
 		_show_gear()
 
 
+## Which of the character model's variant meshes are drawn: the top's cut
+## (and bare forearms with short sleeves), the chosen face and its hair, the
+## mask. A full mask hides the face under it (and its draw calls); a hat or
+## the balaclava hides the hair.
+func _show_variants() -> void:
+	if skeleton == null:
+		return
+	var face: String = look_state.get("hero", "kai")
+	var cut: String = look_state.get("top", "long")
+	var mask: String = look_state.get("mask", "")
+	var hat: String = look_state.get("head", "")
+	for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
+		var n := String(mi.name)
+		if n.begins_with("Top_") and n != "Top_Collar":
+			mi.visible = n.to_lower() == "top_" + cut
+		elif n.begins_with("Skin_Arms_"):
+			mi.visible = n.to_lower() == "skin_arms_" + cut
+		elif n.begins_with("Face_"):
+			mi.visible = n == "Face_" + face and mask != "courier"
+		elif n.begins_with("Hair_"):
+			mi.visible = n == "Hair_" + face and not mask in ["courier", "balaclava"] and not hat in ["beanie", "crown"]
+		elif n.begins_with("Mask_"):
+			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
+
+
 func _show_gear() -> void:
 	var g: Dictionary = look_state.get("gadget", {})
 	var parts: Array = g.get("parts", [])
@@ -352,7 +411,7 @@ func _show_gear() -> void:
 	if _gadget_on and g.get("swap", false):
 		parts = []
 	for key in _gear:
-		(_gear[key] as MeshInstance3D).visible = key == look_state.get("head", "hood") \
+		(_gear[key] as MeshInstance3D).visible = key == look_state.get("head", "") \
 			or key == look_state.get("face", "") or key in parts or (_gadget_on and key in active)
 
 
@@ -1724,9 +1783,12 @@ func _plant_gait(dt: float) -> void:
 				_lead = sd  # the knee coming through leads if we jump now
 			# The hips settle ahead of a touchdown the leg could only just
 			# reach (stepping down a kerb, a long stride) – never after it.
+			# Vertical only (a kerb, a step down): the foot's horizontal
+			# position mid-swing is still behind on its way forward, and
+			# measuring to it pulled the hips down every running stride.
 			if f.w > 0.55 and not f.settle:
-				var down := Vector3(f.out.x, minf(f.out.y, f.target.y), f.out.z)
-				drop = maxf(drop, (down.distance_to(hip) - (LEG_LEN - 0.005)) * smoothstep(0.55, 0.9, f.w))
+				var below := hip.y - minf(f.out.y, f.target.y)
+				drop = maxf(drop, (below - (LEG_LEN - 0.02)) * smoothstep(0.55, 0.9, f.w))
 		_toe[sd] = f.toe
 		_heel[sd] = f.heel
 		_foot_mode[sd] = f.pos if f.planted else null

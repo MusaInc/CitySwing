@@ -11,13 +11,18 @@ func test_courier_skin_has_textures_uvs_normalized_weights_and_mobile_budget(t) 
 	var textured := 0
 	var normal_mapped := 0
 	var occluded := 0
+	var variants := 0
 	for mi in rig.skeleton.find_children("*", "MeshInstance3D", true, false):
 		var mesh: Mesh = mi.mesh
+		variants += int(not mi.visible)
 		for surface in mesh.get_surface_count():
 			var arrays := mesh.surface_get_arrays(surface)
 			var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 			var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-			triangles += (indices.size() if indices.size() > 0 else vertices.size()) / 3
+			# The budget is what one outfit draws: the faces, tops and masks
+			# not worn are hidden (and cost no draw calls).
+			if mi.visible:
+				triangles += (indices.size() if indices.size() > 0 else vertices.size()) / 3
 			var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
 			t.check(weights.size() == vertices.size() * 4, "four skin influences per vertex")
 			for i in range(0, weights.size(), 4):
@@ -41,7 +46,8 @@ func test_courier_skin_has_textures_uvs_normalized_weights_and_mobile_budget(t) 
 				normal_mapped += int(material.get_shader_parameter("normal_map") is Texture2D)
 				occluded += int(material.get_shader_parameter("ao_map") is Texture2D)
 	t.check(invalid_weights == 0, "all skin weights are finite and normalized")
-	t.check(triangles > 20000 and triangles < 50000, "hero triangle budget: %d" % triangles)
+	t.check(triangles > 20000 and triangles < 50000, "hero triangle budget (drawn): %d" % triangles)
+	t.check(variants >= 15, "faces, tops and masks ship as hidden variants (%d)" % variants)
 	t.check(textured >= 3 and normal_mapped >= 2 and occluded >= 5, "PBR textures and baked AO retained")
 	var fallback := 0
 	for pivot in rig.bones.values():

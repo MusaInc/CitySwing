@@ -23,13 +23,13 @@ func test_catalogue_is_consistent(t) -> void:
 		t.check(Shop.item(d).get("slot", "") == sl[0], "default for %s is in its slot" % sl[0])
 		t.check(Shop.in_slot(sl[0]).size() >= 4, "%s has a real choice" % sl[1])
 	for it in Shop.items():
-		if it.has("model") and it["model"] != "" and it["model"] != "hood":
+		if it.has("model") and it["model"] != "":
 			t.check(ResourceLoader.exists(CharacterRig.GEAR_PATH), "gear model file exists")
 
 
 func test_buying_and_equipping(t) -> void:
 	var before := _fresh()
-	t.check(Shop.owns("pants_navy") and Shop.owns("head_hood"), "free items are owned")
+	t.check(Shop.owns("pants_navy") and Shop.owns("head_bare") and Shop.owns("hero_ren"), "free items are owned")
 	t.check(not Shop.owns("head_cap"), "paid items start locked")
 	t.check(not Shop.buy("head_cap"), "can't buy without coins")
 	t.check(not Shop.equip("head_cap"), "can't wear what you don't own")
@@ -88,17 +88,35 @@ func test_rig_wears_the_look(t) -> void:
 		if c is MeshInstance3D and c.visible and c.name != "head":
 			shown.append(String(c.name).to_lower())
 	shown.sort()
-	t.check(shown == ["crown", "shades"], "crown + shades on, hood off (%s)" % [shown])
+	t.check(shown == ["crown", "shades"], "crown + shades on (%s)" % [shown])
 	rig.apply_look(Shop.look())
 	shown.clear()
 	for c in head.get_children():
 		if c is MeshInstance3D and c.visible and c.name != "head":
 			shown.append(String(c.name).to_lower())
-	# The courier's lowered hood is sewn into the skinned jacket. Returning
-	# to the default must hide purchased head/face gear and retain that garment.
-	t.check(shown.is_empty() and rig.look_state.head == "hood", "default clears crown and shades")
-	var jacket := rig.skeleton.find_child("Courier_Jacket", true, false) as MeshInstance3D
-	t.check(jacket != null and jacket.visible, "default keeps the authored hooded jacket")
+	t.check(shown.is_empty() and rig.look_state.head == "", "default clears crown and shades")
+	# Default: the long-sleeve top, Kai's face and hair, no mask.
+	var vis := func(n: String) -> bool:
+		var mi := rig.skeleton.find_child(n, true, false) as MeshInstance3D
+		return mi != null and mi.visible
+	t.check(vis.call("Top_Long") and not vis.call("Top_Short") and not vis.call("Skin_Arms_Short"), "default long-sleeve top")
+	t.check(vis.call("Face_kai") and vis.call("Hair_kai") and not vis.call("Face_ade"), "default face and hair, one at a time")
+	# Short sleeves bare the forearms; a full mask hides the face beneath it.
+	rig.apply_look(Shop.look({"top": "top_short", "hero": "hero_ade", "face": "mask_courier"}))
+	t.check(vis.call("Top_Short") and vis.call("Skin_Arms_Short") and not vis.call("Top_Long"), "short sleeves show the forearms")
+	t.check(vis.call("Mask_courier") and not vis.call("Face_ade") and not vis.call("Hair_ade"), "the Courier mask covers the face")
+	rig.apply_look(Shop.look({"hero": "hero_theo", "face": "mask_domino", "head": "head_beanie"}))
+	t.check(vis.call("Face_theo") and vis.call("Mask_domino") and not vis.call("Hair_theo"), "domino over the face, hair under the beanie")
+	var skin_tints := {}
+	for e in rig._hero_materials:
+		if e.region == "skin":
+			skin_tints[str(e.material.get_shader_parameter("tint"))] = true
+	rig.apply_look(Shop.look({"hero": "hero_ade"}))
+	var changed := false
+	for e in rig._hero_materials:
+		if e.region == "skin" and not skin_tints.has(str(e.material.get_shader_parameter("tint"))):
+			changed = true
+	t.check(changed, "each face brings its own skin tone")
 	rig.queue_free()
 
 

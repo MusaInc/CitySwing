@@ -6,13 +6,16 @@ extends RefCounted
 ## Free items (price 0, no req) are always owned. Suits with a `req` are the
 ## old progression suits: earned through play (Progress.unlocked), not sold.
 
+## "hero" is who you are (face, skin, hair, eyes); "top" the cut of the
+## skin-tight top ("suit" stays its colour, for old saves); "face" holds the
+## masks and eyewear (the slot id is kept for old saves).
 const SLOTS := [
-	["suit", "Suits"], ["pants", "Trousers"], ["shoes", "Shoes"], ["gloves", "Gloves"],
-	["head", "Hats"], ["face", "Face"], ["web", "Webs"], ["gadget", "Gadgets"],
+	["hero", "Faces"], ["top", "Tops"], ["suit", "Colours"], ["pants", "Trousers"], ["shoes", "Shoes"],
+	["gloves", "Gloves"], ["head", "Hats"], ["face", "Masks"], ["web", "Webs"], ["gadget", "Gadgets"],
 ]
-const DEFAULTS := {"suit": "ember", "pants": "pants_navy", "shoes": "shoes_classic", "gloves": "gloves_black",
-	"head": "head_hood", "face": "face_none", "web": "web_classic",
-	"gadget": "gadget_none"}
+const DEFAULTS := {"hero": "hero_kai", "top": "top_long", "suit": "ember", "pants": "pants_navy",
+	"shoes": "shoes_classic", "gloves": "gloves_black", "head": "head_bare", "face": "face_none",
+	"web": "web_classic", "gadget": "gadget_none"}
 ## The classic web glow (gauntlet LEDs, spool rings, visor) is teal under a
 ## white line.
 const CLASSIC_GLOW := Color(0.2, 0.945, 0.945)
@@ -32,6 +35,23 @@ const SUITS_FOR_SALE := [
 ]
 
 const OTHER_ITEMS := [
+	# Faces (character.glb Face_<face> / Hair_<face>): skin, hair and eye
+	# colours are tints. All free: who you are isn't for sale.
+	{"id": "hero_kai", "slot": "hero", "name": "Kai", "face": "kai", "skin": Color(0.6, 0.42, 0.3),
+		"hair": Color(0.06, 0.045, 0.035), "eyes": Color(0.28, 0.17, 0.08), "price": 0},
+	{"id": "hero_ade", "slot": "hero", "name": "Ade", "face": "ade", "skin": Color(0.32, 0.2, 0.14),
+		"hair": Color(0.03, 0.025, 0.02), "eyes": Color(0.16, 0.09, 0.05), "price": 0},
+	{"id": "hero_ren", "slot": "hero", "name": "Ren", "face": "ren", "skin": Color(0.84, 0.66, 0.52),
+		"hair": Color(0.04, 0.035, 0.035), "eyes": Color(0.2, 0.12, 0.06), "price": 0},
+	{"id": "hero_theo", "slot": "hero", "name": "Theo", "face": "theo", "skin": Color(0.9, 0.72, 0.62),
+		"hair": Color(0.36, 0.22, 0.12), "eyes": Color(0.26, 0.42, 0.55), "price": 0},
+	{"id": "hero_malik", "slot": "hero", "name": "Malik", "face": "malik", "skin": Color(0.46, 0.3, 0.2),
+		"hair": Color(0.05, 0.04, 0.03), "eyes": Color(0.22, 0.13, 0.06), "price": 0},
+	# Tops: skin-tight compression, the colour comes from the Colours slot.
+	{"id": "top_long", "slot": "top", "name": "Long Sleeve", "cut": "long", "price": 0},
+	{"id": "top_tq", "slot": "top", "name": "Three-Quarter", "cut": "tq", "price": 0},
+	{"id": "top_short", "slot": "top", "name": "Short Sleeve", "cut": "short", "price": 0},
+	{"id": "top_vest", "slot": "top", "name": "Sleeveless", "cut": "vest", "price": 150},
 	# Trousers
 	{"id": "pants_navy", "slot": "pants", "name": "Graphite", "color": Color(0.24, 0.26, 0.28), "price": 0},
 	{"id": "pants_black", "slot": "pants", "name": "Black", "color": Color(0.05, 0.05, 0.06), "price": 150},
@@ -55,14 +75,19 @@ const OTHER_ITEMS := [
 	{"id": "gloves_teal", "slot": "gloves", "name": "Teal", "color": Color(0.1, 0.6, 0.6), "price": 250},
 	{"id": "gloves_gold", "slot": "gloves", "name": "Gold", "color": Color(0.95, 0.7, 0.2), "price": 900},
 	# Headwear (models in assets/models/gear.glb; "" = none)
-	{"id": "head_hood", "slot": "head", "name": "Hood", "model": "hood", "price": 0},
 	{"id": "head_bare", "slot": "head", "name": "No Hat", "model": "", "price": 0},
 	{"id": "head_cap", "slot": "head", "name": "Cap", "model": "cap", "price": 600},
 	{"id": "head_beanie", "slot": "head", "name": "Beanie", "model": "beanie", "price": 700},
 	{"id": "head_phones", "slot": "head", "name": "Headphones", "model": "headphones", "price": 1000},
 	{"id": "head_crown", "slot": "head", "name": "Crown", "model": "crown", "price": 5000},
-	# Face
+	# Masks (character.glb Mask_<mask>, fitted to the face) and eyewear
+	# (gear.glb models). The Courier mask is the original signature look.
 	{"id": "face_none", "slot": "face", "name": "None", "model": "", "price": 0},
+	{"id": "mask_courier", "slot": "face", "name": "Courier", "model": "", "mask": "courier", "price": 0},
+	{"id": "mask_runner", "slot": "face", "name": "Runner", "model": "", "mask": "runner", "price": 300},
+	{"id": "mask_domino", "slot": "face", "name": "Domino", "model": "", "mask": "domino", "price": 400},
+	{"id": "mask_balaclava", "slot": "face", "name": "Balaclava", "model": "", "mask": "balaclava", "price": 500},
+	{"id": "mask_respirator", "slot": "face", "name": "Respirator", "model": "", "mask": "respirator", "price": 900},
 	{"id": "face_shades", "slot": "face", "name": "Shades", "model": "shades", "price": 500},
 	{"id": "face_mask", "slot": "face", "name": "Bandana", "model": "mask", "price": 700},
 	{"id": "face_visor", "slot": "face", "name": "Visor", "model": "visor", "price": 900},
@@ -191,7 +216,14 @@ static func look(preview := {}) -> Dictionary:
 	var suit: Color = pick["suit"]["color"]
 	var shoes: Dictionary = pick["shoes"]
 	var web: Dictionary = pick["web"]
+	var hero: Dictionary = pick["hero"]
 	return {
+		"hero": hero["face"],
+		"skin": hero["skin"],
+		"hair": hero["hair"],
+		"eyes": hero["eyes"],
+		"top": pick["top"]["cut"],
+		"mask": pick["face"].get("mask", ""),
 		"suit": suit,
 		"pants": pick["pants"]["color"],
 		"shoe": shoes["color"],

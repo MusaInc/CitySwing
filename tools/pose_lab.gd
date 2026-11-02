@@ -447,7 +447,7 @@ func _sc_review() -> void:
 	outfit.pants = Color(0.24, 0.26, 0.28)
 	outfit.shoe = Color(0.929, 0.929, 0.894)
 	outfit.glove = Color(0.098, 0.098, 0.106)
-	outfit.head = "hood"
+	outfit.head = ""
 	outfit.face = ""
 	outfit.gadget = {}
 	rig.apply_look(outfit)

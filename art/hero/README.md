@@ -1,5 +1,19 @@
 # CitySwing Courier
 
+The hero is built from the MakeHuman body itself: skin-tight compression
+tops (long, three-quarter, short, sleeveless) cut from the skin with clean
+plane-cut hems, a knitted mock neck, contrast side panels and bare skin
+where the sleeves end; five faces (Kai, Ade, Ren, Theo, Malik) shaped with
+MakeHuman's facial targets, each with eyes, lashes, brows and short hair cut
+from the scalp; five fitted masks (Courier, Runner, Domino, Balaclava,
+Respirator); cargo pants, trainers and gloves as before. Everything ships in
+one GLB; the game shows the chosen variants (CharacterRig._show_variants)
+and tints skin, hair, eyes and the top (Shop "hero", "top", "suit", "face").
+
+Where download.blender.org is unreachable, the PyPI `bpy==4.5.3` module
+(Python 3.11) runs the same scripts; any `blender` on PATH that accepts
+`-b --python script -- args` works.
+
 Rebuild with Blender 4.5:
 
 ```

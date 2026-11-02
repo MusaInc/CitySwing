@@ -3,7 +3,8 @@
 CitySwing's courier is an adaptation of authored MakeHuman Community assets.
 Original source files and attribution headers are retained in `sources/`.
 
-* **Hooded sweat jacket** (`elvs_hooded_sweat_jacket1`), **Elvaerwyn** — CC BY, as declared by its author and the community pack. [Source](http://www.makehumancommunity.org/node/1450), [official pack](https://static.makehumancommunity.org/assets/assetpacks/shirts02.html). Adapted for athletic male proportions, gameplay skeleton, black technical finish, edge thickness and secondary movement.
+* **Facial shape targets** (`sources/face_targets/`), **MakeHuman contributors** — CC0, fetched unmodified from the MakeHuman repository; they shape the five selectable faces. See `sources/face_targets/SOURCE.md`.
+* **Hooded sweat jacket** (`elvs_hooded_sweat_jacket1`), **Elvaerwyn** — CC BY, as declared by its author and the community pack. [Source](http://www.makehumancommunity.org/node/1450), [official pack](https://static.makehumancommunity.org/assets/assetpacks/shirts02.html). No longer used in the build (the hoodie was replaced by skin-tight tops cut from the body); the source is kept for reference.
 * **Running shoes 01**, **punkduck** — [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). [Official pack](https://static.makehumancommunity.org/assets/assetpacks/shoes02.html). Retargeted, resized and recoloured to white; original texture details adapted.
 * **Cargo pants**, **Cortu Johnstone** — [CC0](https://creativecommons.org/publicdomain/zero/1.0/). [Official pack](https://static.makehumancommunity.org/assets/assetpacks/pants01.html). Adapted topology, fit, materials and pockets.
 * **Gloves Hand**, distributed as `toigo_gloves_short`, source header credits **MRT** — CC0. [Official pack](https://static.makehumancommunity.org/assets/assetpacks/gloves01.html). Fitted and reskinned.

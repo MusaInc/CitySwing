@@ -1,3 +1,37 @@
+# Status: 2026-11-02 (character pass)
+
+- **No hoodie.** Skin-tight compression tops cut from the MakeHuman body
+  (so they fit and deform with the skin weights): Long Sleeve, Three-
+  Quarter, Short Sleeve, Sleeveless (shop "top"; colour still "suit").
+  Plane-cut hems (level waist, sleeves square to the arm), a knitted mock
+  neck, contrast side panels, a heathered knit albedo and fine knit normal.
+  Bare forearms/shoulders where the sleeves end. Cargo pants now end in a
+  clean level waistband.
+- **Faces** (shop "hero", free): Kai, Ade, Ren, Theo, Malik – MakeHuman
+  facial targets (`art/hero/sources/face_targets`, CC0), head-only and
+  normalised (shape, not size), each with eyes (iris tint), lashes, brows,
+  lips and a buzz/crop cut from the scalp with a clean hairline. Skin, hair
+  and eye colours are per face.
+- **Masks** (shop "face", now "Masks"): Courier (the original signature,
+  free), Runner gaiter, Domino, Balaclava, Respirator; shades, bandana and
+  visor kept and re-fitted to the real head (CharacterRig.GEAR_FIT).
+  Full masks hide the face (no draw calls under them); beanie/crown/
+  balaclava hide the hair.
+- **Running fixed**: the hips were dragged down every stride by a hip-drop
+  term that measured to the swinging foot's current position (still behind
+  on its way forward). Now vertical-only (kerbs, steps). Sprint: hip height
+  0.78 → 0.88 m, stance knee flexion 67° → 34–41° (`tools/gait_probe.gd`).
+- Drawn budget per outfit 41.8k triangles (was 43k); variants hidden.
+- Old saves: `head_hood` falls back to No Hat (the hood is gone); new slots
+  default (Kai, Long Sleeve).
+- Tests: test_shop (variants, masks, skin tints), test_hero_asset (drawn
+  budget, ≥15 hidden variants). 143/144: the failure is the known flaky
+  ledge_dive get-up joint check.
+
+Not done: `tools/blender/build_gear.py` no longer runs against the new
+character script (it imported removed helpers); gear is fitted in-game.
+No facial animation (blinks/expressions); hair is a short cut only.
+
 # Status: 2026-11-02 (world pass)
 
 - **Mountains round the bay** (`src/world/hinterland.gd`, `hinterland.gdshader`):

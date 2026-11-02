@@ -356,8 +356,8 @@ func show_suits() -> void:
 ## scroll to zoom; the camera frames the category being browsed. Picking an
 ## item only previews it; Wear / Buy (confirmed) commit, leaving restores the
 ## equipped look.
-const SHOP_FOCUS := {"suit": "suit", "pants": "pants", "shoes": "shoes", "gloves": "gloves", "head": "head",
-	"face": "face", "web": "web", "gadget": "gadget"}
+const SHOP_FOCUS := {"hero": "face", "top": "suit", "suit": "suit", "pants": "pants", "shoes": "shoes", "gloves": "gloves",
+	"head": "head", "face": "face", "web": "web", "gadget": "gadget"}
 var _thumbs: ThumbStudio
 var _thumb_rects := {}     # item id -> TextureRect on the current grid
 var _confirm_id := ""      # purchase awaiting its confirming tap
@@ -499,12 +499,16 @@ func _shop_cat(slot: String, name: String, on: bool) -> Button:
 	var ink := UiStyle.INK if on else ACCENT
 	var ic: Control
 	if slot in ["head", "face"]:
-		ic = MenuParts.Swatch.new({"slot": slot, "model": "cap" if slot == "head" else "shades"}, 30)
+		ic = MenuParts.Swatch.new({"slot": slot, "model": "cap" if slot == "head" else "", "mask": "" if slot == "head" else "domino"}, 30)
+	elif slot == "hero":
+		ic = MenuParts.Swatch.new({"slot": "hero", "skin": ink, "hair": Color(ink, 0.5)}, 30)
+	elif slot == "top":
+		ic = MenuParts.Swatch.new({"slot": "top", "cut": "short", "color": ink}, 30)
 	else:
 		ic = MenuParts.Swatch.new({"slot": slot, "color": ink, "glow": ink, "sole": ink}, 30)
 	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	v.add_child(ic)
-	v.add_child(_label("Hoodies" if slot == "suit" else name, 13, UiStyle.INK if on else Color.WHITE, "bold",
+	v.add_child(_label(name, 13, UiStyle.INK if on else Color.WHITE, "bold",
 		HORIZONTAL_ALIGNMENT_CENTER))
 	b.add_child(v)
 	b.pressed.connect(func():
