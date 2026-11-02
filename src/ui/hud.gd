@@ -16,6 +16,9 @@ var hint := ""
 var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
+## Something to use within reach at home ("" = none). On touch the controls
+## draw it as a button; otherwise the HUD shows it with the key.
+var prompt := ""
 var coins: CoinMeter
 ## Live map at the top centre (src/ui/minimap.gd).
 var minimap: Minimap
@@ -146,6 +149,10 @@ func _draw() -> void:
 	var shadow := Color(0, 0, 0, 0.35)
 	var gold := Color(1.0, 0.82, 0.4, 0.95)
 	_draw_speed_lines()
+	if prompt != "" and not touch_mode:
+		var sz := get_viewport_rect().size
+		TouchControls.draw_use_prompt(self, _font, Rect2(Vector2(sz.x * 0.5 - 140.0, sz.y - 120.0), Vector2(280.0, 60.0)),
+			prompt, true)
 	# Live anchor marker (where the web is actually stuck).
 	if player.line_state != Player.Line.IDLE:
 		var a := player.rope_anchor() if player.line_state == Player.Line.ATTACHED else player.line_target

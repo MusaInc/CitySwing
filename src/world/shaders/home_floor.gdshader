@@ -69,6 +69,10 @@ void fragment() {
 	// Fine joints alias at grazing angles: fade them to the mean tone.
 	float fw = max(fwidth(p.x), fwidth(p.y)) / 0.12;
 	c = mix(c, timber * 0.95, smoothstep(0.35, 0.9, fw) * (style == 0 || style == 3 ? 1.0 : 0.0));
+	// Contact shade where the floor meets the walls (no GI indoors: without
+	// it the floor reads as a sticker under the walls).
+	float edge = min(min(p.x, room_size.x - p.x), min(p.y, room_size.y - p.y));
+	c *= mix(0.68, 1.0, smoothstep(0.0, 0.7, edge));
 	ALBEDO = c;
 	ROUGHNESS = rough;
 	SPECULAR = spec;

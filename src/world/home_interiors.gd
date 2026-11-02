@@ -29,6 +29,7 @@ const CHALK := Color(0.93, 0.92, 0.89)
 const STONE := Color(0.82, 0.8, 0.74)
 const MEZZ := 3.4  # penthouse mezzanine deck (underside), m above the floor
 const DOOR_H := 2.9  # tall openings: the follow camera looks through them over the hero
+const WIN_Z := 0.3  # the window wall's inner face, m in from the facade
 const SW := 2.4  # penthouse stair width (from the wall at 0.35)
 ## Per tier: wall, floor tint, ceiling colours, floor style (home_floor.gdshader).
 const PALETTE := [
@@ -51,6 +52,10 @@ var glow := BuildingMesher.new()  # unshaded, vertex-coloured (lamps, screens, f
 var glass := BuildingMesher.new() # transparent panels
 var walls_fx: Array = []          # [side, a0, a1, y0, y1, style, tint] feature walls
 var boards: Array = []            # [room point, side, width] HomeBoard positions
+var trophy_spec: Array = []        # [x0, x1, z, y, inward]: the trophy shelf (room coords)
+var spot_list: Array = []          # [kind, x, z, y]: things to use (room coords)
+## Things to use in each built home, world positions: id -> [{kind, pos}].
+static var spots := {}
 var ramps: Array = []             # [Transform3D, size] (local frame): stair slopes to walk up
 var pools: Array = []             # [x0, x1, z0, z1, y]
 
@@ -124,7 +129,7 @@ func _build(mat: Material) -> Node3D:
 	m._end()
 	glow._end()
 	glass._end()
-	var root := Node3D.new()
+	var root: Node3D = _LIGHTS.new()
 	root.name = "Home_" + String(h["id"])
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, m.arrays())
@@ -162,6 +167,7 @@ func _build(mat: Material) -> Node3D:
 		o.distance_fade_enabled = true
 		o.distance_fade_begin = 120.0
 		o.distance_fade_length = 40.0
+		o.set_meta("base", o.light_energy)
 		root.add_child(o)
 	var floor_mesh := PlaneMesh.new()
 	floor_mesh.size = Vector2(W, D)
@@ -179,6 +185,11 @@ func _build(mat: Material) -> Node3D:
 	root.add_child(floor_node)
 	_place_assets(root)
 	_extras(root, xf)
+	_trophies(root, xf)
+	var list: Array = []
+	for sp in spot_list:
+		list.append({"kind": sp[0], "pos": xf * P(sp[1], sp[2], sp[3])})
+	spots[String(h["id"])] = list
 	return root
 
 
@@ -224,6 +235,8 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		wm.set_shader_parameter("tint", fx[7])
 		wm.set_shader_parameter("size", Vector2(float(fx[3]) - float(fx[2]), float(fx[5]) - float(fx[4])))
 		wm.set_shader_parameter("style", int(fx[6]))
+		wm.set_shader_parameter("seed", float(fx[8]) if fx.size() > 8 else 0.0)
+		wm.set_shader_parameter("corners", 0.0 if int(fx[6]) == 6 else 1.0)
 		var wi := MeshInstance3D.new()
 		wi.name = "Feature"
 		wi.mesh = st.commit()
@@ -255,6 +268,44 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		root.add_child(lb)
 
 
+func _trophies(root: Node3D, xf: Transform3D) -> void:
+	if trophy_spec.is_empty():
+		return
+	var x0: float = trophy_spec[0]
+	var x1: float = trophy_spec[1]
+	var z: float = trophy_spec[2]
+	var y: float = trophy_spec[3]
+	var inward: float = trophy_spec[4]
+	var t := HomeTrophies.new()
+	t.name = "Trophies"
+	var zi := z + inward * 0.13
+	t.upper = [xf * P(x0 + 0.1, zi, y + 0.53), xf * P(x1 - 0.1, zi, y + 0.53)]
+	t.lower = [xf * P(x0 + 0.1, zi, y + 0.03), xf * P(x1 - 0.1, zi, y + 0.03)]
+	t.out = (xf.basis * (P(0.0, z + inward, 0.0) - P(0.0, z, 0.0))).normalized()
+	root.add_child(t)
+	trophy_views[String(h["id"])] = {"centre": xf * P((x0 + x1) * 0.5, zi, y + 0.3), "out": t.out,
+		"width": x1 - x0}
+
+
+## Two shelves for the trophies, x0..x1 against a wall at depth z (`inward`
+## +1 on the window wall, −1 on the back wall), the lower at height y.
+func trophy_shelf(x0: float, x1: float, z: float, y: float, inward: float, wood: Color) -> void:
+	trophy_spec = [x0, x1, z, y, inward]
+	var z0 := minf(z, z + inward * 0.28)
+	var z1 := maxf(z, z + inward * 0.28)
+	for yy: float in [y, y + 0.5]:
+		box(x0, x1, z0, z1, yy - 0.035, yy, wood)
+		gbox(x0 + 0.05, x1 - 0.05, z0 + 0.02, z1 - 0.02, yy - 0.04, yy - 0.035, Color(1.0, 0.86, 0.62))
+	for x: float in [x0 + 0.08, x1 - 0.12]:
+		box(x, x + 0.04, minf(z, z + inward * 0.06), maxf(z, z + inward * 0.06), y - 0.2, y + 0.5, STEEL)
+	lights.append([Vector3((x0 + x1) * 0.5, y + 0.9, z + inward * 0.9), Color(1.0, 0.86, 0.66), 0.3, 2.4])
+
+
+## Something to use here (HomeSystem shows a prompt within reach).
+func spot(kind: String, x: float, z: float, y := 0.0) -> void:
+	spot_list.append([kind, x, z, y])
+
+
 ## Corners (building frame) of a wall patch and its inward normal:
 ## [bottom-left, bottom-right, top-right, top-left, normal].
 func _wall_corners(side: String, at: float, a0: float, a1: float, y0: float, y1: float) -> Array:
@@ -272,6 +323,9 @@ func _wall_corners(side: String, at: float, a0: float, a1: float, y0: float, y1:
 
 
 static var _mats := {}
+const _LIGHTS := preload("res://src/world/home_lights.gd")
+## The trophy shelf of each built home, for the close-up: id -> {centre, out}.
+static var trophy_views := {}
 
 
 static func _shared(kind: String) -> Material:
@@ -379,11 +433,87 @@ func _residence(tier: int, pal: Array) -> void:
 			_sky(pal)
 		_:
 			_penthouse(pal)
+	_plaster(pal)
+	_ceiling(tier)
+	_curtains(tier)
 	# Skirting all round (the window wall has its own reveals).
 	var sk: Color = WALNUT if tier != 1 else CHALK.darkened(0.08)
 	box(0.0, 0.1, 0.1, D, 0.0, 0.12, sk)
 	box(W - 0.1, W, 0.1, D, 0.0, 0.12, sk)
 	box(0.0, W, D - 0.1, D, 0.0, 0.12, sk)
+
+
+## Plaster (home_wall style 5, with corner shading) on every outer wall the
+## layout left plain.
+func _plaster(pal: Array) -> void:
+	var covered := {}
+	for fx in walls_fx:
+		var side: String = fx[0]
+		var at: float = fx[1]
+		var full: bool = float(fx[2]) <= 0.6 and float(fx[3]) >= (W if side == "back" else D) - 0.6
+		if not full:
+			continue
+		if (side == "back" and absf(at - D) < 0.05) or (side == "left" and absf(at) < 0.05) or (side == "right" and absf(at - W) < 0.05):
+			covered[side] = true
+	var tint: Color = pal[0]
+	if not covered.has("back"):
+		feature("back", D, 0.0, W, 0.0, H, 5, tint)
+	if not covered.has("left"):
+		feature("left", 0.0, 0.0, D, 0.0, H, 5, tint)
+	if not covered.has("right"):
+		feature("right", W, 0.0, D, 0.0, H, 5, tint)
+
+
+## Ceilings: recessed downlights over the open floor; a lit cove round the
+## edge in the apartment, the sky apartment and the penthouse.
+func _ceiling(tier: int) -> void:
+	if tier == 2:
+		return  # the loft's ceiling is its beams and ducts
+	var trim := Color(0.86, 0.85, 0.82) if tier != 4 else Color(0.2, 0.15, 0.1)
+	var warm := Color(1.0, 0.9, 0.74)
+	var step := 2.8 if tier < 3 else 3.2
+	var nx := maxi(int((W - 2.0) / step), 1)
+	var nz := maxi(int((D - 2.0) / step), 1)
+	for ix in nx + 1:
+		for iz in nz + 1:
+			var x := lerpf(1.4, W - 1.4, float(ix) / nx)
+			var z := lerpf(1.6, D - 1.4, float(iz) / nz)
+			box(x - 0.13, x + 0.13, z - 0.13, z + 0.13, H - 0.012, H - 0.004, trim)
+			gbox(x - 0.09, x + 0.09, z - 0.09, z + 0.09, H - 0.016, H - 0.01, warm)
+	if tier in [1, 3, 4]:
+		var bw := 0.55
+		var drop := 0.32
+		var col: Color = trim if tier != 4 else WALNUT
+		box(0.0, W, D - bw, D, H - drop, H, col)
+		box(0.0, bw, 0.4, D - bw, H - drop, H, col)
+		box(W - bw, W, 0.4, D - bw, H - drop, H, col)
+		var glowc := Color(1.0, 0.82, 0.55)
+		gbox(bw, W - bw, D - bw - 0.03, D - bw, H - drop + 0.02, H - drop + 0.06, glowc)
+		gbox(bw, bw + 0.03, 0.4, D - bw, H - drop + 0.02, H - drop + 0.06, glowc)
+		gbox(W - bw - 0.03, W - bw, 0.4, D - bw, H - drop + 0.02, H - drop + 0.06, glowc)
+
+
+## Full-height curtains gathered either side of the window, on a track.
+func _curtains(tier: int) -> void:
+	var cols := [Color(0.82, 0.76, 0.64), Color(0.95, 0.94, 0.91), Color(), Color(0.52, 0.45, 0.4), Color(0.2, 0.19, 0.19)]
+	if tier == 2:
+		return  # steel-framed industrial glazing: bare
+	var c: Color = cols[tier]
+	var top := H - 0.12
+	var x0 := ox0()
+	var x1 := ox1()
+	var span := 0.75 if tier < 3 else 0.95
+	tube(Vector3(maxf(x0 - span - 0.1, 0.05), top + 0.04, WIN_Z + 0.13), Vector3(minf(x1 + span + 0.1, W - 0.05), top + 0.04, WIN_Z + 0.13),
+		0.018, STEEL if tier != 4 else BRASS, 6)
+	for side: float in [-1.0, 1.0]:
+		var a: float = x0 - 0.04 if side < 0.0 else x1 + 0.04
+		var n := 9
+		for i in n:
+			var t0 := a + side * span * float(i) / n
+			var t1 := a + side * span * float(i + 1) / n
+			var dz := 0.06 * (1.0 if i % 2 == 0 else -1.0)
+			var shade := c.darkened(0.12 if i % 2 == 0 else 0.0)
+			box(minf(t0, t1), maxf(t0, t1), WIN_Z + 0.1 + dz, WIN_Z + 0.16 + dz, 0.03, top, shade)
 
 
 # ------------------------------------------------------------- primitives
@@ -477,8 +607,8 @@ func wall_z(x: float, z0: float, z1: float, d0: float, d1: float, c: Color) -> v
 
 ## Feature wall finish (home_wall.gdshader): side "back" (faces the window,
 ## at depth `at`), "left"/"right" (at x = `at`); a0..a1 along it.
-func feature(side: String, at: float, a0: float, a1: float, y0: float, y1: float, style: int, tint: Color) -> void:
-	walls_fx.append([side, at, a0, a1, y0, y1, style, tint])
+func feature(side: String, at: float, a0: float, a1: float, y0: float, y1: float, style: int, tint: Color, seed := 0.0) -> void:
+	walls_fx.append([side, at, a0, a1, y0, y1, style, tint, seed])
 
 
 ## Your progress on a board (HomeBoard): side/at as feature(); centre along, y.
@@ -555,26 +685,33 @@ func cabinet(x0: float, x1: float, z0: float, z1: float, hgt: float, body: Color
 	box(x0 - 0.02, x1 + 0.02, z0 - 0.02, z1 + 0.02, hgt - 0.04, hgt, top)
 
 
-## A framed picture on a wall (side as feature()).
+## A framed painting on a wall (side as feature()): a canvas in the
+## painting shader (home_wall style 6, coloured from cols[0]), a slim frame.
 func picture(side: String, at: float, a0: float, a1: float, y0: float, y1: float, cols: Array) -> void:
-	var n := cols.size()
-	for i in n:
-		var p0 := lerpf(a0 + 0.06, a1 - 0.06, float(i) / n)
-		var p1 := lerpf(a0 + 0.06, a1 - 0.06, float(i + 1) / n)
-		match side:
-			"back":
-				box(p0, p1, at - 0.05, at - 0.04, y0 + 0.06, y1 - 0.06, cols[i])
-			"left":
-				box(at + 0.04, at + 0.05, p0, p1, y0 + 0.06, y1 - 0.06, cols[i])
-			_:
-				box(at - 0.05, at - 0.04, p0, p1, y0 + 0.06, y1 - 0.06, cols[i])
+	var into := -1.0 if side != "left" else 1.0  # off the wall, into the room
+	var c0: Color = cols[0]
+	var seed := fposmod(a0 * 7.3 + y0 * 3.1 + at, 10.0)
+	walls_fx.append([side, at + into * 0.035, a0 + 0.05, a1 - 0.05, y0 + 0.05, y1 - 0.05, 6, c0, seed])
+	var fc := FRAME if c0.get_luminance() > 0.35 else BRASS
+	var d0 := at
+	var d1 := at + into * 0.06
+	var lo := minf(d0, d1)
+	var hi := maxf(d0, d1)
+	var back_lo := minf(at, at + into * 0.03)
+	var back_hi := maxf(at, at + into * 0.03)
 	match side:
 		"back":
-			box(a0, a1, at - 0.04, at, y0, y1, FRAME)
-		"left":
-			box(at, at + 0.04, a0, a1, y0, y1, FRAME)
+			box(a0, a1, back_lo, back_hi, y0, y1, Color(0.9, 0.88, 0.84))
+			box(a0, a1, lo, hi, y0, y0 + 0.05, fc)
+			box(a0, a1, lo, hi, y1 - 0.05, y1, fc)
+			box(a0, a0 + 0.05, lo, hi, y0, y1, fc)
+			box(a1 - 0.05, a1, lo, hi, y0, y1, fc)
 		_:
-			box(at - 0.04, at, a0, a1, y0, y1, FRAME)
+			box(back_lo, back_hi, a0, a1, y0, y1, Color(0.9, 0.88, 0.84))
+			box(lo, hi, a0, a1, y0, y0 + 0.05, fc)
+			box(lo, hi, a0, a1, y1 - 0.05, y1, fc)
+			box(lo, hi, a0, a0 + 0.05, y0, y1, fc)
+			box(lo, hi, a1 - 0.05, a1, y0, y1, fc)
 
 
 ## A run of kitchen base units along a side wall (x = wall side), z0..z1,
@@ -695,6 +832,11 @@ func _studio(pal: Array) -> void:
 	picture("back", D, door + 1.4, door + 2.7, 1.95, 2.65, [Color(0.95, 0.3, 0.2), Color(0.15, 0.6, 0.62), Color(0.95, 0.78, 0.2)])
 	board("back", D - 0.02, W - 2.2, 1.9, 1.2, Color(0.6, 0.45, 0.3))
 	plant_big(W - 0.8, 3.0, 0.9)
+	trophy_shelf(0.3, 3.0, WIN_Z, 1.35, 1.0, OAK)
+	spot("wardrobe", 1.0, D - 4.75)
+	spot("bed", 3.2, D - 2.0, 0.2)
+	spot("jobs", 1.0, 2.1)
+	spot("trophies", 2.6, 1.9)
 	hang(lx + 1.3, 5.6, 2.9, Color(0.95, 0.92, 0.85), 0.09)
 	lights.append([Vector3(lx, H - 1.2, 5.6), Color(1.0, 0.8, 0.58), 1.4, 8.0])
 	lights.append([Vector3(2.0, 1.6, D - 1.5), Color(1.0, 0.75, 0.5), 0.8, 4.5])
@@ -801,9 +943,16 @@ func _apartment(pal: Array) -> void:
 	hang(dx, dz, 1.75, Color(0.92, 0.9, 0.86), 0.2)
 	plant_big(0.8, split - 0.7)
 	plant_big(right - 0.6, split - 0.6, 0.8)
+	trophy_shelf(0.6, 3.7, WIN_Z, 1.3, 1.0, OAK)
+	box(bx0 + 0.3, bx0 + 0.75, 4.75, 5.05, 0.95, 0.965, Color(0.15, 0.15, 0.16))  # tablet on the bar
+	gbox(bx0 + 0.32, bx0 + 0.73, 4.77, 5.03, 0.965, 0.97, Color(0.45, 0.7, 1.0))
+	spot("wardrobe", 1.3, split + 2.8)
+	spot("bed", 5.3, D - 2.4)
+	spot("jobs", bx0 + 0.5, 6.1)
+	spot("trophies", 2.2, 1.3)
 	lights.append([Vector3(sx, H - 0.5, split * 0.55), Color(1.0, 0.9, 0.78), 1.3, 8.5])
 	lights.append([Vector3(W - 3.0, H - 1.2, 4.9), Color(1.0, 0.86, 0.66), 1.0, 6.0])
-	lights.append([Vector3(left * 0.5 + 0.4, H - 0.6, D - 2.4), Color(1.0, 0.85, 0.65), 1.0, 5.5])
+	lights.append([Vector3(left * 0.5 + 0.4, H - 0.6, D - 2.6), Color(1.0, 0.87, 0.7), 1.4, 7.0])
 	lights.append([Vector3(W - 2.4, H - 0.4, D - 2.4), Color(1.0, 0.95, 0.9), 0.7, 4.5])
 	lights.append([Vector3(hx, H - 0.5, D - 2.6), Color(1.0, 0.88, 0.7), 0.6, 4.5])
 
@@ -925,8 +1074,14 @@ func _loft(pal: Array) -> void:
 	tube(Vector3(lx + 2.0, 0.0, 9.3), Vector3(lx + 2.0, 1.8, 9.3), 0.02, black, 6)
 	gbox(lx + 1.85, lx + 2.15, 9.15, 9.45, 1.8, 2.05, Color(1.0, 0.82, 0.55))
 	plant_big(W - 1.2, 1.2, 1.2)
-	plant_big(1.0, 1.0, 1.0)
 	plant_big(px - 0.8, D - 0.8, 1.1)
+	trophy_shelf(1.4, 4.6, WIN_Z, 1.35, 1.0, STEEL.lightened(0.25))
+	box(3.3, 3.75, iz + 0.3, iz + 0.62, 0.97, 0.985, Color(0.15, 0.15, 0.16))  # laptop on the island
+	gbox(3.32, 3.73, iz + 0.32, iz + 0.6, 0.985, 0.99, Color(0.45, 0.7, 1.0))
+	spot("wardrobe", W - 1.4, bz + 1.5, 0.3)
+	spot("bed", W - 5.4, D - 2.6, 0.3)
+	spot("jobs", 3.5, iz - 0.9)
+	spot("trophies", 3.0, 1.3)
 	lights.append([Vector3(4.0, H - 2.6, iz + 0.5), Color(1.0, 0.78, 0.5), 1.5, 8.0])
 	lights.append([Vector3(lx, H - 1.6, 7.4), Color(1.0, 0.86, 0.68), 1.4, 10.0])
 	lights.append([Vector3(W - 3.4, 2.4, D - 2.6), Color(1.0, 0.8, 0.6), 1.0, 6.5])
@@ -992,6 +1147,8 @@ func _sky(pal: Array) -> void:
 	box(gx - 0.7, gx + 0.7, D - 0.06, D - 0.01, 0.0, 2.6, WALNUT.darkened(0.3))
 	box(gx + 0.5, gx + 0.56, D - 0.12, D - 0.06, 0.9, 1.4, BRASS)
 	board("right", sx, D - 3.3, 1.8, 1.7, BRASS)
+	picture("back", D, gx - 3.0, gx - 1.1, 1.3, 3.1, [Color(0.55, 0.3, 0.2)])
+	picture("back", D, gx + 1.1, gx + 2.6, 1.5, 2.9, [Color(0.2, 0.32, 0.45)])
 	box(sx - 0.45, sx, D - 5.4, D - 4.4, 0.0, 0.85, STONE, true)
 	tube(Vector3(sx - 0.22, 0.85, D - 4.9), Vector3(sx - 0.22, 1.35, D - 4.9), 0.1, Color(0.15, 0.25, 0.3), 10)
 	# Kitchen: marble run along the right wall (in front of the suite), island.
@@ -1030,12 +1187,20 @@ func _sky(pal: Array) -> void:
 	_rug(W - 5.4, W - 1.4, D - 3.6, D - 0.4, Color(0.6, 0.55, 0.5))
 	plant_big(4.0, 1.0, 1.1)
 	plant_big(0.9, D - 0.9, 1.2)
+	trophy_shelf(W - 3.8, W - 0.8, WIN_Z, 1.35, 1.0, WALNUT)
+	box(kx1 - 1.2, kx1 - 0.75, 6.7, 7.0, 0.96, 0.975, Color(0.15, 0.15, 0.16))  # tablet on the island
+	gbox(kx1 - 1.18, kx1 - 0.77, 6.72, 6.98, 0.975, 0.98, Color(0.45, 0.7, 1.0))
+	spot("wardrobe", sx + 1.4, sz + 1.8)
+	spot("bed", W - 5.6, D - 2.5)
+	spot("jobs", kx1 - 1.0, 8.9)
+	spot("trophies", W - 2.3, 2.0)
 	lights.append([Vector3(dcx, 3.0, dz), Color(1.0, 0.85, 0.65), 1.4, 8.0])
 	lights.append([Vector3(1.2, 1.1, fz), Color(1.0, 0.6, 0.3), 1.2, 6.5])
 	lights.append([Vector3(W - 3.8, H - 1.6, 7.2), Color(1.0, 0.88, 0.7), 1.2, 8.0])
 	lights.append([Vector3(W - 3.6, H - 0.6, D - 2.6), Color(1.0, 0.85, 0.68), 1.0, 7.0])
 	lights.append([Vector3(W - 1.0, 1.4, 2.2), Color(1.0, 0.65, 0.3), 0.7, 3.5])
 	lights.append([Vector3(gx, H - 0.6, D - 2.0), Color(1.0, 0.88, 0.7), 0.6, 5.0])
+	lights.append([Vector3(W * 0.5, H - 1.0, 4.0), Color(1.0, 0.88, 0.72), 0.9, 10.0])  # the front, by the glass
 
 
 ## Ultimate Penthouse: dark stone and brass under a 7 m ceiling; a plunge
@@ -1083,7 +1248,19 @@ func _penthouse(pal: Array) -> void:
 		box(x - 0.03, x + 0.03, D - 1.95, D - 1.25, my + 0.25, my + 0.95, STEEL)
 	gbox(W - 5.9, W - 5.3, D - 1.7, D - 1.5, my + 1.0, my + 1.03, Color(0.55, 0.75, 1.0))
 	asset("chair", W - 5.6, D - 2.5, 0.0, my + 0.25)
-	tube(Vector3(4.0, my + 0.25, D - 1.6), Vector3(4.0, my + 0.7, D - 1.6), 0.45, Color(0.45, 0.3, 0.2), 12)
+	tube(Vector3(3.6, my + 0.25, D - 2.6), Vector3(3.6, my + 0.7, D - 2.6), 0.45, Color(0.45, 0.3, 0.2), 12)
+	trophy_shelf(4.8, 8.4, D - 0.08, my + 1.0, -1.0, WALNUT)
+	box(W - 6.0, W - 5.55, D - 1.9, D - 1.6, my + 1.0, my + 1.015, Color(0.15, 0.15, 0.16))
+	# Walk-in wardrobe under the mezzanine (right wall).
+	box(W - 0.65, W - 0.05, mz + 0.3, mz + 2.6, 0.0, my - 0.1, WALNUT, true)
+	for k in 3:
+		var zz := mz + 0.35 + k * 0.76
+		box(W - 0.67, W - 0.65, zz, zz + 0.72, 0.1, my - 0.2, WALNUT.darkened(0.2))
+		box(W - 0.69, W - 0.67, zz + 0.33, zz + 0.39, 1.0, 1.6, BRASS)
+	spot("wardrobe", W - 1.4, mz + 1.4)
+	spot("bed", W - 5.4, D - 2.7)
+	spot("jobs", W - 5.6, D - 3.0, my + 0.25)
+	spot("trophies", 6.6, D - 1.4, my + 0.25)
 	# Under the mezzanine: a backlit bar (left), the master bed (right).
 	box(4.4, 11.6, D - 2.6, D - 1.9, 0.0, 1.08, Color(0.12, 0.12, 0.13), true)
 	box(4.35, 11.65, D - 2.65, D - 1.85, 1.08, 1.14, BRASS)
@@ -1160,6 +1337,7 @@ func _penthouse(pal: Array) -> void:
 	lights.append([Vector3(8.0, 2.0, D - 1.4), Color(1.0, 0.7, 0.4), 1.0, 6.0])
 	lights.append([Vector3(W * 0.5, my + 2.4, D - 2.0), Color(1.0, 0.86, 0.68), 1.1, 10.0])
 	lights.append([Vector3(W - 3.4, 2.0, D - 2.2), Color(1.0, 0.82, 0.6), 0.8, 5.5])
+	lights.append([Vector3(W * 0.5, H - 1.8, 4.5), Color(1.0, 0.86, 0.68), 1.1, 12.0])  # the front, by the glass
 
 
 ## A walkable slope across x0..x1, rising along z from the floor at z0 to

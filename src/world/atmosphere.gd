@@ -73,6 +73,7 @@ static func sun_angles(h: float) -> Vector2:
 
 
 func _ready() -> void:
+	add_to_group("atmosphere")  # (homes read `night` to warm their lights)
 	_rng.randomize()
 	var settings := get_node_or_null("/root/Settings")
 	var preset: Dictionary = settings.preset() if settings else {"shadows": true, "glow": true}

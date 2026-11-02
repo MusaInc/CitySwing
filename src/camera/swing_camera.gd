@@ -83,6 +83,8 @@ var cine: Callable
 ## is below the horizon (HomeSystem sets it while the hero is inside).
 var look_down := 0.0
 var _look_down := 0.0
+## Scripted shots (cine) that frame something other than the hero hide it.
+var hide_body := false
 ## Indoors (set by HomeSystem): the room's ceiling height (world y), else INF.
 ## A home is a box a few metres across: the lens comes in closer and lower,
 ## never cranes into the ceiling, and treats partitions and big furniture
@@ -164,7 +166,7 @@ func _process(dt: float) -> void:
 		global_transform = c[0]
 		cam.fov = c[1]
 		if _body:
-			_body.visible = true
+			_body.visible = not hide_body
 		return
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	if stick.length() > 0.05:

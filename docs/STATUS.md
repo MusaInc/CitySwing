@@ -1,3 +1,46 @@
+# Status: 2026-11-02 (homes: things to use, trophies, finishes)
+
+The homes are what you work towards, so they now hold your progress and
+give you things to do:
+
+- **Things to use** (`HomeSystem.near_spot`, HUD/touch prompt, F / pad B):
+  - **Wardrobe** – the Wardrobe screen in your flat: the hero turns to face
+    the room under a soft key light and an orbit camera frames what you're
+    browsing (`WardrobeStudio`, the rooftop studio's controls).
+  - **Sleep** – fade out, wake at the other end of the day (evening →
+    morning, day → evening), rested.
+  - **Job screen** (desk laptop / bar tablet / study) – the Job Board.
+  - **Trophies** – the shelf close up with your stats beside it.
+  Only in homes you own; a touch button appears bottom centre.
+- **Trophy shelf** in every home (`HomeTrophies`): a medal on a stand for
+  each Time Trial course (empty glass until earned), a cup that grows and
+  changes metal with your contract rank, a jar that fills with tokens, a
+  fold of each suit colour you've unlocked. Rebuilt when progress changes.
+  The penthouse's is on the mezzanine by the Hall of Fame.
+- **Visit before you buy** – Homes screen: "Visit" on homes you don't own
+  (Free Swing). You can look round; nothing to use, no window re-entry.
+- **Homes screen** shows a real render of each home and its floor size
+  (`assets/ui/homes/*.jpg`).
+- **Finishes**: plaster on plain walls and corner shading on walls and
+  floors (no GI indoors: they read as stickers before); paintings (a
+  painting shader, framed) instead of colour blocks; recessed downlights;
+  lit ceiling coves in the apartment, sky apartment and penthouse;
+  full-height curtains on a track. (A reflection probe per room was tried
+  and dropped: the probe atlas took texture memory from 54 to 215 MB.)
+- Cost, same views as before this pass (software Vulkan, counts only):
+  studio 237 → 252 draw calls, 411k → 422k primitives; penthouse 325 →
+  313 (the view moved with the bigger room); texture memory unchanged
+  (54 MB). The trophy shelf is four batched meshes.
+- **Night**: lamps come up at dusk (×2.6 at night, `home_lights.gd`) so the
+  flat glows warm against the city instead of dimming with the sky; the
+  sky apartment and penthouse gained a light by the glass (8 lights each,
+  the Mobile renderer's per-mesh limit).
+- Fix: the window wall's inner face is 0.3 m in (`WIN_Z`); things placed
+  on it now sit on it, not inside it.
+- Tests: `test_homes.test_things_to_use_at_home` (four spots per home,
+  standing at each offers it, visiting offers nothing),
+  `test_trophies_follow_progress`.
+
 # Status: 2026-11-02 (homes pass: bigger rooms, indoor camera)
 
 - **Bigger homes** (`Apartments.TIERS`, W×D×ceiling):

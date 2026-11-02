@@ -98,6 +98,33 @@ func _tilt(h: Dictionary) -> float:
 	return deg_to_rad(clampf(4.0 + (Apartments.floor_height(h) - 20.0) / 300.0 * 16.0, 4.0, 20.0))
 
 
+const SPOT_REACH := 1.5
+const SPOT_LABELS := {"wardrobe": "WARDROBE", "bed": "SLEEP", "jobs": "JOB BOARD", "trophies": "TROPHIES"}
+
+
+## The thing to use within reach in an owned home you're standing in:
+## {kind, label, pos, home} or {} (none, or busy: mid-vault, airborne, a bot).
+func near_spot() -> Dictionary:
+	if state != "" or player == null or player.bot != null or not player.is_on_floor():
+		return {}
+	var id := inside()
+	if id == "" or not owned.call(id):
+		return {}
+	var feet := player.global_position + Vector3.DOWN * 0.95
+	var best := {}
+	var bd := SPOT_REACH
+	for sp: Dictionary in HomeInteriors.spots.get(id, []):
+		var p: Vector3 = sp["pos"]
+		if absf(p.y - feet.y) > 1.2:
+			continue
+		var d := Vector2(p.x - feet.x, p.z - feet.z).length()
+		if d < bd:
+			bd = d
+			best = {"kind": sp["kind"], "label": SPOT_LABELS.get(sp["kind"], String(sp["kind"]).to_upper()), "pos": p,
+				"home": id}
+	return best
+
+
 ## Which home the hero is standing in (id) or "".
 func inside() -> String:
 	var p := player.global_position

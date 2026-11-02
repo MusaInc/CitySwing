@@ -271,3 +271,48 @@ func test_indoor_camera_keeps_the_hero_in_view(t) -> void:
 	probe.free()
 	hs.camera = null
 	cam.queue_free()
+
+
+func test_things_to_use_at_home(t) -> void:
+	# Every home has a wardrobe, a bed, a job screen and a trophy shelf; each
+	# spot is somewhere you can stand, and standing there offers it.
+	hs.owned = func(_id: String) -> bool: return true
+	for h in hs.homes:
+		hs.spawn_in(h, world, null)
+		await get_tree().physics_frame
+		var list: Array = HomeInteriors.spots.get(h["id"], [])
+		var kinds := {}
+		for sp: Dictionary in list:
+			kinds[sp["kind"]] = true
+		t.check(kinds.size() == 4, "%s: wardrobe, bed, jobs, trophies (%s)" % [h["id"], kinds.keys()])
+		for sp: Dictionary in list:
+			player.respawn(sp["pos"] + Vector3.UP * 0.95)
+			for i in 12:
+				await get_tree().physics_frame
+			var near := hs.near_spot()
+			t.check(near.get("kind", "") == sp["kind"] and hs.inside() == h["id"],
+				"%s: standing at the %s offers it (got %s)" % [h["id"], sp["kind"], near.get("kind", "nothing")])
+	hs.owned = func(id: String) -> bool: return Homes.owns(id)
+	# Not yours (visiting): nothing to use.
+	hs.owned = func(_id: String) -> bool: return false
+	var h0: Dictionary = hs.homes[0]
+	hs.spawn_in(h0, world, null)
+	player.respawn((HomeInteriors.spots[h0["id"]][0] as Dictionary)["pos"] + Vector3.UP * 0.95)
+	for i in 12:
+		await get_tree().physics_frame
+	t.check(hs.near_spot().is_empty(), "visiting: nothing to use")
+	hs.owned = func(id: String) -> bool: return Homes.owns(id)
+
+
+func test_trophies_follow_progress(t) -> void:
+	var snap := HomeTrophies.snapshot()
+	t.check((snap["medals"] as Array).size() == CourseBuilder.COURSES.size(), "a stand for every course")
+	var sd: Node = get_node("/root/SaveData")
+	var before: Dictionary = sd.data.duplicate(true)
+	sd.data["rep"] = 100000
+	sd.data["tokens"] = range(Progress.TOKEN_TOTAL)
+	var full := HomeTrophies.snapshot()
+	t.check(int(full["rank"]) > int(snap["rank"]) or int(snap["rank"]) == Contracts.RANKS.size() - 1, "rank cup grows with rep")
+	t.check(int(full["tokens"]) == Progress.TOKEN_TOTAL, "token jar counts tokens")
+	t.check((full["suits"] as Array).size() >= (snap["suits"] as Array).size(), "suit folds for unlocked suits")
+	sd.data = before

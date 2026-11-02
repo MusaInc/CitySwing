@@ -114,7 +114,7 @@ func _ready() -> void:
 	(func():
 		for h in homes.homes:
 			menus.homes_info.append({"id": h["id"], "name": h["name"], "height": Apartments.floor_height(h),
-				"price": h["price"]})).call_deferred()
+				"price": h["price"], "size": "%d×%d m" % [roundi(float(h["a1"]) - float(h["a0"])), roundi(float(h["depth"]))]})).call_deferred()
 	if world.has_method("set_viewer"):
 		world.set_viewer(camera)
 	audio = AudioDirector.new()
@@ -201,11 +201,25 @@ func _ready() -> void:
 		get_tree().paused = false
 		state = State.PLAYING
 		hud.visible = true
-		spawn_at_home(id, true))
-	menus.preview_focus.connect(func(slot: String): if is_instance_valid(director): director.shop_focus = slot)
-	menus.preview_orbit.connect(func(dx: float): if is_instance_valid(director): director.shop_yaw -= dx)
-	menus.preview_zoom.connect(func(f: float): if is_instance_valid(director): director.shop_zoom = clampf(director.shop_zoom * f, 0.55, 1.7))
-	menus.preview_reset.connect(func(): if is_instance_valid(director): director.reset_shop_view())
+		spawn_at_home(id, true)
+		if not Homes.owns(id):
+			hud.flash("VISITING  ·  %s" % String(homes.home_by_id(id).get("name", "")).to_upper(), 2.6))
+	menus.preview_focus.connect(func(slot: String):
+		var pv = _preview()
+		if pv: pv.shop_focus = slot)
+	menus.preview_orbit.connect(func(dx: float):
+		var pv = _preview()
+		if pv: pv.shop_yaw -= dx)
+	menus.preview_zoom.connect(func(f: float):
+		var pv = _preview()
+		if pv: pv.shop_zoom = clampf(pv.shop_zoom * f, 0.55, 1.7))
+	menus.preview_reset.connect(func():
+		var pv = _preview()
+		if pv: pv.reset_shop_view())
+	touch.use_pressed.connect(func():
+		var sp := homes.near_spot() if homes else {}
+		if state == State.PLAYING and not sp.is_empty():
+			_use(sp))
 	Settings.changed.connect(_apply_settings)
 
 	if args.has("cam"):
@@ -228,6 +242,20 @@ func _ready() -> void:
 		camera.pitch = camera.base_pitch
 	if args.has("bot"):
 		_attract(SwingBot.Style.NOVICE if args["bot"] == "novice" else SwingBot.Style.EXPERT)
+	if args.has("use") and args.has("home"):
+		# Captures: walk up to a thing at home (--home=<id> --use=<kind>) and use it.
+		(func():
+			await get_tree().create_timer(1.2).timeout
+			var kind := String(args["use"])
+			var just_go := kind.begins_with("near:")  # (stand there: the prompt)
+			kind = kind.trim_prefix("near:")
+			for sp: Dictionary in HomeInteriors.spots.get(String(args["home"]), []):
+				if sp["kind"] == kind:
+					player.respawn(sp["pos"] + Vector3.UP * 0.95)
+					await get_tree().create_timer(0.6).timeout
+					if not just_go:
+						_use({"kind": sp["kind"], "home": String(args["home"]), "pos": sp["pos"]})
+					break).call()
 	if args.has("menu"):
 		match args["menu"]:
 			"settings": menus.show_settings(menus.show_title)
@@ -239,6 +267,11 @@ func _ready() -> void:
 				menus._splash_done = true
 				menus.show_title()
 			"stats": menus.show_stats()
+			"homes":
+				get_tree().paused = true
+				(func():
+					await get_tree().process_frame
+					menus.show_homes(menus.show_title, true)).call()
 			"jobs":
 				get_tree().paused = true
 				state = State.PAUSED
@@ -386,6 +419,144 @@ func spawn_at_home(id: String, force := false) -> bool:
 	return true
 
 
+# ------------------------------------------------------------ home things
+class _Stand:
+	extends RefCounted
+	func drive(_p, _dt) -> Dictionary:
+		return {"move": Vector3.ZERO, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+
+
+var wardrobe: WardrobeStudio
+var _studio_light: OmniLight3D
+var _trophy_view := {}
+
+
+## The shop preview being driven: the title's rooftop studio or the wardrobe at home.
+func _preview() -> Variant:
+	if wardrobe != null:
+		return wardrobe
+	return director if is_instance_valid(director) else null
+
+
+func _use(sp: Dictionary) -> void:
+	match String(sp["kind"]):
+		"jobs":
+			if mode is FreeSwingMode and menus.jobs:
+				_menu_at_home(func(): menus.show_jobs(unpause))
+		"trophies":
+			_open_trophies(String(sp["home"]))
+		"bed":
+			_sleep(String(sp["home"]))
+		"wardrobe":
+			_open_wardrobe(sp)
+
+
+func _menu_at_home(show: Callable) -> void:
+	state = State.PAUSED
+	get_tree().paused = true
+	touch.visible = false
+	show.call()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Sleep: fade out, wake at the other end of the day (evening → morning,
+## daytime → evening), rested.
+func _sleep(id: String) -> void:
+	_dip(func():
+		var night := atmosphere.hour >= 18.0 or atmosphere.hour < 6.0
+		atmosphere.hour = 7.5 if night else 19.5
+		atmosphere._apply(0.0, true)
+		var h := homes.home_by_id(id)
+		if not h.is_empty():
+			coins.rested(int(h["tier"]))
+		hud.flash("GOOD MORNING" if night else "GOOD EVENING", 2.0), 0.45, 0.9)
+
+
+func _open_wardrobe(sp: Dictionary) -> void:
+	var h := homes.home_by_id(String(sp["home"]))
+	wardrobe = WardrobeStudio.new()
+	wardrobe.player = player
+	wardrobe.camera = camera
+	var mid := Apartments.face_point(h, (float(h["a0"]) + float(h["a1"])) * 0.5, -float(h["depth"]) * 0.5, float(h["y0"]))
+	var f := mid - player.global_position
+	f.y = 0.0
+	wardrobe.face = f.normalized() if f.length() > 0.1 else -Apartments.outward(h)
+	wardrobe.reset_shop_view()
+	player.bot = _Stand.new()
+	player.s.velocity = Vector3.ZERO
+	rig.set_facing(wardrobe.face)
+	rig.idle_actions = false
+	camera.cine = wardrobe.xf
+	_fill_light(true)
+	state = State.PAUSED
+	hud.visible = false
+	touch.visible = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	menus.shop_return = _close_wardrobe
+	menus.show_shop("top")
+
+
+## A soft key light on the hero (backlit by the window otherwise).
+func _fill_light(on: bool) -> void:
+	if on and _studio_light == null:
+		_studio_light = OmniLight3D.new()
+		_studio_light.light_color = Color(1.0, 0.93, 0.85)
+		_studio_light.light_energy = 1.6 if wardrobe != null else 0.7
+		_studio_light.omni_range = 6.0
+		_studio_light.shadow_enabled = false
+		camera.cam.add_child(_studio_light)
+		_studio_light.position = Vector3(0.6, 0.4, 0.0)
+	elif not on and _studio_light != null:
+		_studio_light.queue_free()
+		_studio_light = null
+
+
+## The trophy shelf, close up, with your stats beside it.
+func _open_trophies(id: String) -> void:
+	_trophy_view = HomeInteriors.trophy_views.get(id, {})
+	if _trophy_view.is_empty():
+		_menu_at_home(func(): menus.show_stats(unpause))
+		return
+	var c: Vector3 = _trophy_view["centre"]
+	var o: Vector3 = _trophy_view["out"]
+	# Far enough back that the shelf fills the free side of the screen (the
+	# stats panel covers the left ~45%), pulled in if a wall is closer.
+	var aspect := get_viewport().get_visible_rect().size.aspect()
+	var dist := clampf((float(_trophy_view["width"]) + 0.3) / (0.58 * 2.0 * tan(deg_to_rad(22.0)) * aspect), 1.8, 4.2)
+	var want := c + o * dist + Vector3.UP * 0.35
+	var q := PhysicsRayQueryParameters3D.create(c + o * 0.3, want, 1 | (1 << 1))
+	var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
+	var pos: Vector3 = want if hit.is_empty() else (hit.position as Vector3) - o * 0.3
+	var width := 2.0 * c.distance_to(pos) * tan(deg_to_rad(22.0)) * aspect
+	var xf := Transform3D(Basis.looking_at((c - pos).normalized(), Vector3.UP), pos)
+	camera.cine = func(_dt: float) -> Array: return [xf, 44.0]
+	camera.cam.h_offset = -width * 0.21
+	camera.hide_body = true
+	player.bot = _Stand.new()
+	_fill_light(true)
+	state = State.PAUSED
+	hud.visible = false
+	touch.visible = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	menus.show_stats(unpause)
+
+
+func _close_wardrobe() -> void:
+	wardrobe = null
+	_trophy_view = {}
+	camera.hide_body = false
+	_fill_light(false)
+	camera.cine = Callable()
+	camera.cam.h_offset = 0.0
+	player.bot = null
+	rig.idle_actions = true
+	camera.snap()
+	menus.hide_all()
+	state = State.PLAYING
+	hud.visible = true
+	touch.visible = DisplayServer.is_touchscreen_available() or args.has("touch")
+
+
 ## Home is where you rest: starting at home, or climbing back in through the
 ## window, lifts the coin multiplier to the home's level (tier 1: none,
 ## up to ×3 in the penthouse) – owning a better home pays.
@@ -442,6 +613,9 @@ func pause() -> void:
 
 
 func unpause() -> void:
+	if wardrobe != null or not _trophy_view.is_empty():
+		_close_wardrobe()
+		return
 	state = State.PLAYING
 	get_tree().paused = false
 	menus.hide_all()
@@ -625,6 +799,15 @@ func _publish_web_state(dt: float) -> void:
 func _process(dt: float) -> void:
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
+	# Things to use at home: a prompt within reach, F / B / the USE button.
+	var sp := homes.near_spot() if homes != null and state == State.PLAYING else {}
+	var lbl: String = sp.get("label", "")
+	if hud:
+		hud.prompt = lbl
+	if touch:
+		touch.use_label = lbl
+	if lbl != "" and Input.is_action_just_pressed("interact"):
+		_use(sp)
 	if state == State.TITLE and is_instance_valid(director):
 		# The shop is a quiet rooftop studio with an orbit camera; every other
 		# title screen plays the cinematics.

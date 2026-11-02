@@ -110,3 +110,15 @@ High-Rise Loft, Sky Apartment, Penthouse (on the mezzanine).
 Camera on the probe's routes at 60 fps, old camera → new: hero hidden
 behind walls 25 → 1 frames of 353 (apartment), 67 → 0 of 276 (sky),
 32 → 0 of 594 (penthouse); lens out of the apartment 6 → 0.
+
+## 7. Homes: things to use, trophies, finishes (2026-11-02)
+
+Top: Quay Studio by day, City Apartment at night (lamps come up at dusk).
+Then: waking up at night (curtains, the trophy shelf above the desk);
+Trophies – the shelf close up beside your stats (medals per course, rank
+cup, token jar, suit folds). Then: the Wardrobe in the sky apartment (the
+hero under a key light, an orbit camera); standing at the loft's clothes
+rack (touch: the WARDROBE button). Bottom: the Homes screen with real
+renders, floor sizes and Visit; the penthouse at night.
+
+![homes v3](transformation/homes_v3.jpg)

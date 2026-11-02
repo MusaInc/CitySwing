@@ -549,10 +549,19 @@ func _preview_input(ev: InputEvent) -> void:
 		_pinch[ev.index] = ev.position
 
 
+## Set while the Wardrobe is open from a home (main restores the game).
+var shop_return := Callable()
+
+
 func _leave_shop() -> void:
 	_confirm_id = ""
 	look_changed.emit(Shop.look())
-	show_title()
+	if shop_return.is_valid():
+		var r := shop_return
+		shop_return = Callable()
+		r.call()
+	else:
+		show_title()
 
 
 ## A thumbnail tile: the item rendered on the hero, its name, its state.
@@ -698,8 +707,8 @@ func _coin_chip(n: int, size := 17) -> PanelContainer:
 
 
 # =================================================================== stats
-func show_stats() -> void:
-	var box := _page("stats", "STATS", show_title, 640)
+func show_stats(back := Callable()) -> void:
+	var box := _page("stats", "STATS", back if back.is_valid() else show_title, 640)
 	var d: Dictionary = SaveData.data
 	var mc := Progress.medal_counts()
 	var grid := GridContainer.new()
@@ -945,7 +954,7 @@ var _home_confirm := ""
 func show_homes(back: Callable, in_game := false) -> void:
 	var box := _page("homes", "Homes", back, 640)
 	var cur := Homes.selected()
-	box.add_child(_para("Each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in. Coming home rests you: your coin multiplier starts higher the better the home."))
+	box.add_child(_para("Each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in. Coming home rests you: your coin multiplier starts higher the better the home. At home: change in the wardrobe, sleep the day away, take work from the job screen, and see your trophies on the shelf."))
 	var bal := _coin_chip(Shop.coins(), 18)
 	box.add_child(bal)
 	for i in homes_info.size():
@@ -958,13 +967,22 @@ func show_homes(back: Callable, in_game := false) -> void:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 14)
 		p.add_child(row)
+		var shot := "res://assets/ui/homes/%s.jpg" % id
+		if ResourceLoader.exists(shot):
+			var pic := TextureRect.new()
+			pic.texture = load(shot)
+			pic.custom_minimum_size = Vector2(176, 99)
+			pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+			pic.modulate = Color.WHITE if owned else Color(0.78, 0.78, 0.8)
+			row.add_child(pic)
 		var tx := VBoxContainer.new()
 		tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tx.add_theme_constant_override("separation", 0)
 		tx.add_child(_label(hi["name"], 22, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
 		var perk := "  ·  rested ×%s" % Hud._fmt_mult(1.0 + i * CoinMeter.STEP) if i > 0 else ""
-		tx.add_child(_label("%s  ·  %d m up%s" % [HOME_STYLE[i] if i < HOME_STYLE.size() else "Tier %d" % (i + 1),
-			int(hi["height"]), perk], 14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+		tx.add_child(_label("%s  ·  %s  ·  %d m up%s" % [HOME_STYLE[i] if i < HOME_STYLE.size() else "Tier %d" % (i + 1),
+			hi.get("size", ""), int(hi["height"]), perk], 14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 		row.add_child(tx)
 		if id == cur:
 			row.add_child(_chip("home", ACCENT, "HOME", 16))
@@ -999,6 +1017,11 @@ func show_homes(back: Callable, in_game := false) -> void:
 		if in_game and owned:
 			var go := _icon_button("play", "Go", func(): go_home.emit(id))
 			row.add_child(_reg("home_go_" + id, go))
+		elif in_game:
+			# Look round before you buy: you can't use it or come back in
+			# through its window until it's yours.
+			var vis := _icon_button("home", "Visit", func(): go_home.emit(id))
+			row.add_child(_reg("home_visit_" + id, vis))
 		box.add_child(p)
 
 

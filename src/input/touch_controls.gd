@@ -15,6 +15,8 @@ extends Control
 ## There is no manual camera control: the camera frames the action itself.
 
 signal pause_pressed
+## The home prompt's button was tapped (see use_label).
+signal use_pressed
 ## Feedback for the HUD: where the finger went, whether it fired, and why not.
 signal web_feedback(screen_pos: Vector2, ok: bool, reason: String)
 
@@ -33,6 +35,8 @@ var buttons := {
 
 ## touch index -> {"kind": stick|button|web, "start", "last", "action"}
 var touches := {}
+## Something to use within reach at home ("" = none): drawn as a button.
+var use_label := ""
 var _stick_origin := Vector2.ZERO
 var _stick_pos := Vector2.ZERO
 var _safe := Rect2()
@@ -60,6 +64,29 @@ func _update_safe() -> void:
 		_safe = Rect2(Vector2.ZERO, size)
 
 
+## The home prompt's button: bottom centre, between the thumbs.
+func use_rect() -> Rect2:
+	var w := 250.0
+	return Rect2(Vector2(_safe.get_center().x - w * 0.5, _safe.end.y - 96.0), Vector2(w, 64.0))
+
+
+## Shared look (the HUD draws the same pill, with a key hint, off touch).
+static func draw_use_prompt(ci: CanvasItem, font: Font, r: Rect2, label: String, key_hint: bool) -> void:
+	var rad := r.size.y * 0.5
+	var col := Color(UiStyle.INK, 0.72)
+	ci.draw_circle(r.position + Vector2(rad, rad), rad, col)
+	ci.draw_circle(r.end - Vector2(rad, rad), rad, col)
+	ci.draw_rect(Rect2(r.position + Vector2(rad, 0), r.size - Vector2(rad * 2.0, 0)), col)
+	ci.draw_arc(r.position + Vector2(rad, rad), rad, PI * 0.5, PI * 1.5, 16, Color(UiStyle.GOLD, 0.9), 2.5, true)
+	ci.draw_arc(r.end - Vector2(rad, rad), rad, -PI * 0.5, PI * 0.5, 16, Color(UiStyle.GOLD, 0.9), 2.5, true)
+	ci.draw_line(r.position + Vector2(rad, 0), Vector2(r.end.x - rad, r.position.y), Color(UiStyle.GOLD, 0.9), 2.5)
+	ci.draw_line(Vector2(r.position.x + rad, r.end.y), r.end - Vector2(rad, 0), Color(UiStyle.GOLD, 0.9), 2.5)
+	var text := ("F  ·  " + label) if key_hint else label
+	var fs := 22
+	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	ci.draw_string(font, r.get_center() + Vector2(-tw * 0.5, fs * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+
+
 func button_center(action: String) -> Vector2:
 	return _safe.end + buttons[action]["pos"]
 
@@ -83,6 +110,12 @@ func touch_down(idx: int, pos: Vector2) -> void:
 	var local := _to_local(pos)
 	if local.distance_to(Vector2(_safe.end.x - 44, _safe.position.y + 44)) < 40:
 		pause_pressed.emit()
+		return
+	if use_label != "" and use_rect().grow(14.0).has_point(local):
+		touches[idx] = {"kind": "use", "start": pos, "last": pos}
+		use_pressed.emit()
+		Settings.haptic(12, 0.4)
+		queue_redraw()
 		return
 	if _gadget_shown() and local.distance_to(_safe.end + GADGET_POS) <= GADGET_R * 1.2:
 		touches[idx] = {"kind": "gadget", "start": pos, "last": pos}
@@ -254,6 +287,8 @@ func _draw() -> void:
 		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, label_col)
 	if _gadget_shown():
 		_draw_gadget(_safe.end + GADGET_POS, white, shade)
+	if use_label != "":
+		draw_use_prompt(self, _font, use_rect(), use_label, false)
 	var pp := Vector2(_safe.end.x - 44, _safe.position.y + 44)
 	draw_circle(pp, 24, Color(UiStyle.INK, 0.38))
 	draw_arc(pp, 24, 0, TAU, 32, Color(UiStyle.WEB, 0.3), 1.5, true)

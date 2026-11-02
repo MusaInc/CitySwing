@@ -130,6 +130,11 @@ Free Swing is the hub. Everything below happens in it, without menus.
   to 26×20 m under a 7 m ceiling (penthouse); indoors the follow camera
   comes in closer, treats partitions and big furniture as walls and stays
   under the ceiling (`tools/home_cam_probe.gd` measures it).
+  At home: the **wardrobe** (change outfit in your flat), **sleep** (wake at
+  the other end of the day), the **job screen**, and a **trophy shelf**
+  that fills as you progress (course medals, a rank cup, a token jar, suit
+  colours). The Homes screen shows each home and lets you **visit** before
+  buying.
 - **Coins** come from swinging (× the multiplier), close calls, tokens and
   contracts; they buy suits, gear, gadgets and homes. Old saves load
   unchanged (new save keys default to zero).
