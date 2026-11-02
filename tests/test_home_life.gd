@@ -61,17 +61,22 @@ func test_penthouse_mezzanine_is_climbable(t) -> void:
 	for bx: AABB in I.col_boxes:
 		tops.append(snappedf(bx.end.y - floor_y, 0.01))
 	tops.sort()
-	var deck := tops.filter(func(y): return y > 2.8 and y < 3.1)
-	t.check(not deck.is_empty(), "a walkable mezzanine deck about 2.95 m up")
-	# Stairs: tops rising in steps no taller than the player can climb.
-	var rises: Array = tops.filter(func(y): return y > 0.2 and y <= 2.75)
-	var stairs := 0
-	var last := 0.0
-	for y in rises:
-		if y - last <= Player.STEP_MAX + 0.001 and y > last:
-			stairs += 1
-			last = y
-	t.check(last >= 2.69, "stair treads reach the deck in steps ≤ %.2f m (%d treads, top %.2f)" % [Player.STEP_MAX, stairs, last])
+	var mz := HomeInteriors.MEZZ
+	var deck := tops.filter(func(y): return y > mz + 0.1 and y < mz + 0.4)
+	t.check(not deck.is_empty(), "a walkable mezzanine deck about %.2f m up" % (mz + 0.25))
+	# Stairs: one walkable slope (the treads are visual) from the floor to the
+	# deck top, no steeper than the hero can walk.
+	t.check(I.ramps.size() == 1, "a stair slope")
+	if I.ramps.size() == 1:
+		var rp: Transform3D = I.ramps[0][0]
+		var size: Vector3 = I.ramps[0][1]
+		var nrm := rp.basis.y.normalized()
+		var tilt := rad_to_deg(acos(absf(nrm.y)))
+		t.check(tilt < 45.0, "stair slope %.1f° (walkable up to 50°)" % tilt)
+		var slope := rp.basis.z.normalized() * size.z * 0.5
+		var hi := maxf((rp.origin + slope + nrm * 0.15).y, (rp.origin - slope + nrm * 0.15).y) - floor_y
+		var lo := minf((rp.origin + slope + nrm * 0.15).y, (rp.origin - slope + nrm * 0.15).y) - floor_y
+		t.check(lo < 0.05 and absf(hi - (mz + 0.25)) < 0.12, "slope runs floor→deck (%.2f → %.2f m)" % [lo, hi])
 	t.check(I.pools.size() == 1, "a plunge pool")
 	root.free()
 

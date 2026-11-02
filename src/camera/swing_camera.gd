@@ -83,6 +83,13 @@ var cine: Callable
 ## is below the horizon (HomeSystem sets it while the hero is inside).
 var look_down := 0.0
 var _look_down := 0.0
+## Indoors (set by HomeSystem): the room's ceiling height (world y), else INF.
+## A home is a box a few metres across: the lens comes in closer and lower,
+## never cranes into the ceiling, and treats partitions and big furniture
+## (HUMAN_LAYER, ignored outdoors) as walls.
+var indoor_ceiling := INF
+var _indoor := 0.0         # 0 outdoors → 1 indoors (eased)
+var _mask := 1 | (1 << 1)
 
 
 func _ready() -> void:
@@ -220,6 +227,13 @@ func _process(dt: float) -> void:
 	# Tighter in flight than it used to be (8 m + 2.2 for long ropes left the
 	# hero ~10% of the screen): the hero is the show; the FOV sells the speed.
 	var want_dist := lerpf(5.0, 6.6, t) if not grounded else lerpf(4.8, 6.2, clampf(vh.length() / 11.0, 0.0, 1.0))
+	var indoors := indoor_ceiling < INF
+	_indoor = move_toward(_indoor, 1.0 if indoors else 0.0, dt * 1.5)
+	_mask = 1 | (1 << 1) | (CityWorld.HUMAN_LAYER if indoors else 0)
+	if _sweep:
+		_sweep.collision_mask = _mask
+		_point.collision_mask = _mask
+	want_dist = lerpf(want_dist, lerpf(3.5, 4.2, clampf(vh.length() / 9.0, 0.0, 1.0)), _indoor)
 	var lift_goal := 0.0
 	if target.s.attached and target.s.taut:
 		# Long lines swing big arcs: frame more of them.
@@ -231,6 +245,7 @@ func _process(dt: float) -> void:
 	# Running: the lens rises a little with pace so the hero sits lower in frame
 	# and more of the street ahead shows.
 	var run_h := 1.4 + 0.25 * clampf(vh.length() / 11.0, 0.0, 1.0)
+	run_h = lerpf(run_h, 1.3, _indoor)
 	_height = lerpf(_height, (run_h if grounded else 1.6) * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
 	var ahead := (vh * 0.12).limit_length(minf(3.5, _dist * 0.35))
 	# In flight, lean the framing a little toward the web you'd get next.
@@ -288,10 +303,21 @@ func _process(dt: float) -> void:
 	# A wall right behind would push the lens into the body: crane up and
 	# look over the shoulder instead (the crane is collision-checked too).
 	var squeeze := clampf((2.4 - placed.distance_to(shaken)) / 2.0, 0.0, 1.0)
+	if indoor_ceiling < INF:
+		# Rooms are close quarters by design: only crane when really pinned.
+		squeeze = clampf((1.5 - placed.distance_to(shaken)) / 1.3, 0.0, 1.0)
 	_crane = lerpf(_crane, squeeze, 1.0 - exp(-(10.0 if squeeze > _crane else 2.5) * dt))
 	if _crane > 0.01:
-		var up := _ray_clear(placed, placed + Vector3.UP * 2.2 * _crane)
+		var reach := 2.2
+		if indoor_ceiling < INF:
+			reach = clampf(indoor_ceiling - 0.6 - placed.y, 0.0, 0.7)
+		var up := _ray_clear(placed, placed + Vector3.UP * reach * _crane)
 		placed = up
+	if indoor_ceiling < INF:
+		placed.y = minf(placed.y, indoor_ceiling - 0.45)
+		# Round a door frame the focus can see the lens while the body can't:
+		# keep the chest in sight too (rooms are small; a cut-in reads fine).
+		placed = _ray_clear(target.global_position + Vector3.UP * 0.4, placed)
 	if _shake > 0.002:
 		# Real time, so the shake still reads while the game is in slow motion.
 		var rt := dt / maxf(Engine.time_scale, 0.05)
@@ -311,7 +337,15 @@ func _process(dt: float) -> void:
 				placed = candidate
 	_last_subject = target.global_position
 	global_position = placed
-	look_at(shaken + Vector3.DOWN * 0.4 * _crane, Vector3.UP)
+	var aim := shaken + Vector3.DOWN * 0.4 * _crane * (1.0 - 0.6 * _indoor)
+	if _indoor > 0.0:
+		# Pinned close behind the hero in a room: look past them into the room
+		# (over the head) rather than down at the top of it.
+		var close := clampf((2.4 - global_position.distance_to(shaken)) / 1.8, 0.0, 1.0) * _indoor
+		var ahead_dir := -Basis(Vector3.UP, yaw + look_yaw).z
+		aim += (ahead_dir * 1.5 + Vector3.DOWN * 1.0) * close
+	if aim.distance_squared_to(global_position) > 0.01:
+		look_at(aim, Vector3.UP)
 	# Never film the inside of the character.
 	if _body:
 		_body.visible = global_position.distance_to(target.global_position + Vector3.UP * 0.3) > 0.85
@@ -354,7 +388,7 @@ func _side_offset(focus: Vector3, goal: Vector3, right: Vector3, dt: float) -> f
 
 
 func _side_hit(from: Vector3, dir: Vector3, reach: float) -> float:
-	var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, 1 | (1 << 1))
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, _mask)
 	q.exclude = [target.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	return reach if hit.is_empty() else from.distance_to(hit.position)
@@ -368,9 +402,9 @@ func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 		shape.radius = collision_margin
 		_sweep = PhysicsShapeQueryParameters3D.new()
 		_sweep.shape = shape
-		_sweep.collision_mask = 1 | (1 << 1)
+		_sweep.collision_mask = _mask
 		_point = PhysicsPointQueryParameters3D.new()
-		_point.collision_mask = 1 | (1 << 1)
+		_point.collision_mask = _mask
 	_sweep.exclude = [target.get_rid()]
 	var q := _sweep
 	q.transform = Transform3D(Basis(), from)
@@ -439,7 +473,7 @@ func _push_out(space: PhysicsDirectSpaceState3D, p: Vector3, fallback_from: Vect
 
 ## The furthest point from `from` toward `to` that is clear of buildings.
 func _ray_clear(from: Vector3, to: Vector3) -> Vector3:
-	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | (1 << 1))
+	var q := PhysicsRayQueryParameters3D.create(from, to, _mask)
 	q.exclude = [target.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty():

@@ -126,7 +126,10 @@ Free Swing is the hub. Everything below happens in it, without menus.
   a plunge pool and a climbable mezzanine). A board on the wall shows your
   rank and records (the penthouse's is the Hall of Fame). Coming home rests
   you: starting at home or climbing in through the window lifts the coin
-  multiplier to the home's level (×1 … ×3).
+  multiplier to the home's level (×1 … ×3). Rooms run from 12×11 m (studio)
+  to 26×20 m under a 7 m ceiling (penthouse); indoors the follow camera
+  comes in closer, treats partitions and big furniture as walls and stays
+  under the ceiling (`tools/home_cam_probe.gd` measures it).
 - **Coins** come from swinging (× the multiplier), close calls, tokens and
   contracts; they buy suits, gear, gadgets and homes. Old saves load
   unchanged (new save keys default to zero).

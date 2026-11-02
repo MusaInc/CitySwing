@@ -20,16 +20,16 @@ extends RefCounted
 
 const FLOOR := 3.6  # storey height (matches the facade shader's bands)
 const TIERS := [
-	{"id": "starter", "name": "Quay Studio", "floor": [14.0, 26.0], "w": 7.8, "d": 7.2, "h": 3.2,
-		"open_w": 2.6, "sill": 0.0, "open_h": 2.4, "price": 0, "view": 45.0},
-	{"id": "city", "name": "City Apartment", "floor": [28.0, 44.0], "w": 11.0, "d": 10.0, "h": 3.4,
-		"open_w": 4.0, "sill": 0.0, "open_h": 2.55, "price": 1500, "view": 80.0},
-	{"id": "loft", "name": "High-Rise Loft", "floor": [55.0, 85.0], "w": 14.0, "d": 12.0, "h": 4.4,
-		"open_w": 7.2, "sill": 0.0, "open_h": 3.7, "price": 4000, "view": 120.0},
-	{"id": "sky", "name": "Luxury Sky Apartment", "floor": [100.0, 150.0], "w": 18.0, "d": 14.0, "h": 4.2,
-		"open_w": 9.6, "sill": 0.0, "open_h": 3.3, "price": 9000, "view": 160.0},
-	{"id": "penthouse", "name": "Ultimate Penthouse", "floor": [-1.0, -1.0], "w": 24.0, "d": 18.0, "h": 5.2,
-		"open_w": 20.0, "sill": 0.0, "open_h": 4.0, "price": 20000, "view": 50.0, "cbd": 900.0},
+	{"id": "starter", "name": "Quay Studio", "floor": [14.0, 30.0], "w": 12.0, "d": 11.0, "h": 4.0,
+		"open_w": 4.2, "sill": 0.0, "open_h": 3.0, "price": 0, "view": 45.0},
+	{"id": "city", "name": "City Apartment", "floor": [28.0, 48.0], "w": 16.0, "d": 14.0, "h": 4.2,
+		"open_w": 6.4, "sill": 0.0, "open_h": 3.2, "price": 1500, "view": 80.0},
+	{"id": "loft", "name": "High-Rise Loft", "floor": [55.0, 90.0], "w": 20.0, "d": 16.0, "h": 6.2,
+		"open_w": 10.0, "sill": 0.0, "open_h": 5.2, "price": 4000, "view": 120.0},
+	{"id": "sky", "name": "Luxury Sky Apartment", "floor": [95.0, 155.0], "w": 24.0, "d": 18.0, "h": 5.2,
+		"open_w": 14.0, "sill": 0.0, "open_h": 4.2, "price": 9000, "view": 160.0},
+	{"id": "penthouse", "name": "Ultimate Penthouse", "floor": [-1.0, -1.0], "w": 26.0, "d": 20.0, "h": 7.2,
+		"open_w": 22.0, "sill": 0.0, "open_h": 5.8, "price": 20000, "view": 50.0, "cbd": 900.0},
 ]
 
 ## Placed homes: [{id, tier, name, b (building dict), t (tier index), face,
@@ -109,7 +109,7 @@ func _candidates(spec: Dictionary, used: Dictionary) -> Array:
 		order = _layout.buildings.filter(func(b): return b["kind"] == "normal")
 		var tall := func(b: Dictionary) -> float: return float(b["tiers"][-1][5]) - BuildingMesher.base_of(b)
 		order.sort_custom(func(a, b): return tall.call(a) > tall.call(b))
-		order = order.slice(0, 12)
+		order = order.slice(0, 60)  # (a 26 m penthouse needs a broad top: the slimmest supertalls can't hold it)
 	for b in order:
 		if b["kind"] != "normal" or b.has("apt"):
 			continue
@@ -230,7 +230,7 @@ static func along_dir(c: Dictionary) -> Vector3:
 static func spawn_point(c: Dictionary) -> Vector3:
 	# Near the glass in the big high rooms (so the follow camera, a few metres
 	# behind, still looks out over the city), mid-room in the small flats.
-	var back := 1.7 if float(c["depth"]) >= 8.0 else minf(float(c["depth"]) * 0.45, 3.0)
+	var back := 2.2 if float(c["depth"]) >= 10.0 else minf(float(c["depth"]) * 0.45, 3.0)
 	var p := window_center(c) - outward(c) * back
 	return Vector3(p.x, float(c["y0"]) + 0.95, p.z)
 

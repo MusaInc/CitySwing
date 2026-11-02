@@ -204,3 +204,70 @@ func test_vault_speeds_remain_inside_window_clearance(t) -> void:
 				if hs.state == "":
 					break
 			t.check(clear and hs.inside() == h["id"], "%s %.0f m/s capsule clears frame and lands inside" % [h["id"], speed])
+
+
+## Steers like a player (turn assist on), as the review tools do.
+class _Walk:
+	extends RefCounted
+	var move := Vector3.ZERO
+	var human_steer := true
+	func drive(_p, _dt) -> Dictionary:
+		return {"move": move, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+
+
+func test_indoor_camera_keeps_the_hero_in_view(t) -> void:
+	# Walk each home's route (tools/home_cam_probe.gd: into the bedrooms and
+	# bathrooms, up the penthouse stairs and along the mezzanine) behind the
+	# real follow camera: the lens never leaves the room and the hero is
+	# hidden behind walls or furniture for at most ~2% of frames.
+	var routes: Dictionary = preload("res://tools/home_cam_probe.gd").ROUTES
+	var probe = preload("res://tools/home_cam_probe.gd").new()
+	var cam := SwingCamera.new()
+	add_child(cam)
+	cam.set_target(player)
+	hs.camera = cam
+	for h in hs.homes:
+		world.build_all_near(Apartments.window_center(h), 120.0)
+		hs.spawn_in(h, world, cam)
+		var d := _Walk.new()
+		player.bot = d
+		for i in 10:
+			await get_tree().process_frame
+		var frames := 0
+		var outside := 0
+		var hidden := 0
+		var reached := 0
+		var top := 0.0
+		for wp: Array in routes[h["id"]]:
+			var goal := Apartments.face_point(h, float(h["a0"]) + float(wp[0]), -float(wp[1]), float(h["y0"]))
+			for i in 420:
+				var to := goal - player.global_position
+				to.y = 0.0
+				if to.length() < 0.5:
+					reached += 1
+					break
+				d.move = to.normalized() * (0.55 if to.length() < 2.0 else 1.0)
+				await get_tree().process_frame
+				frames += 1
+				top = maxf(top, player.global_position.y - float(h["y0"]))
+				var f := Apartments.to_face(h, cam.global_position)
+				if not (f.x > float(h["a0"]) and f.x < float(h["a1"]) and f.y < 0.0 and f.y > -float(h["depth"])
+						and f.z > float(h["y0"]) and f.z < float(h["y1"])) and not probe.in_opening(h, f):
+					outside += 1
+				var q := PhysicsRayQueryParameters3D.create(cam.global_position, player.global_position + Vector3.UP * 0.4,
+					1 | CityWorld.HUMAN_LAYER)
+				q.exclude = [player.get_rid()]
+				var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
+				if not hit.is_empty() and not probe._thin(hit):
+					hidden += 1
+		d.move = Vector3.ZERO
+		player.bot = null
+		var n: int = routes[h["id"]].size()
+		t.check(reached == n, "%s: walked the whole route (%d/%d waypoints)" % [h["id"], reached, n])
+		t.check(outside == 0, "%s: lens stays in the room (%d of %d frames outside)" % [h["id"], outside, frames])
+		t.check(hidden <= frames / 50, "%s: hero in view (%d of %d frames hidden)" % [h["id"], hidden, frames])
+		if h["id"] == "penthouse":
+			t.check(top > HomeInteriors.MEZZ + 0.5, "penthouse: climbed the stairs to the mezzanine (%.2f m)" % top)
+	probe.free()
+	hs.camera = null
+	cam.queue_free()

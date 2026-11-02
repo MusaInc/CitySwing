@@ -84,7 +84,13 @@ func spawn_in(h: Dictionary, world: Node, camera: SwingCamera) -> void:
 		camera.face(atan2(-n.x, -n.z))
 		camera.look_down = _tilt(h)
 		camera.pitch = camera.base_pitch - camera.look_down
+		camera.indoor_ceiling = ceiling(h)
 	_cool = 0.8
+
+
+## World height of a home's ceiling.
+static func ceiling(h: Dictionary) -> float:
+	return Apartments.window_center(h).y + float(h["y1"]) - float(h["oy0"])
 
 
 ## Indoor look-down: the higher the floor, the further below the city.
@@ -110,7 +116,15 @@ func _physics_process(dt: float) -> void:
 	if camera:
 		# Indoors at a home: tilt the view down so the city fills the window.
 		var id := inside() if state == "" else ""
-		camera.look_down = _tilt(home_by_id(id)) if id != "" else 0.0
+		camera.look_down = 0.0
+		if id != "":
+			# Tilted down to the city only while looking out of the window; into
+			# the room the view stays level (no staring at the floor).
+			var hm := home_by_id(id)
+			var fwd := -camera.global_transform.basis.z
+			fwd = Vector3(fwd.x, 0.0, fwd.z).normalized()
+			camera.look_down = _tilt(hm) * smoothstep(0.2, 0.8, fwd.dot(Apartments.outward(hm)))
+		camera.indoor_ceiling = ceiling(home_by_id(id)) if id != "" else INF
 	if state != "":
 		_run(dt)
 		return
@@ -166,7 +180,7 @@ func _try_enter(h: Dictionary) -> bool:
 	player.scripted = true
 	rig.set_facing(-n)
 	_t = 0.0
-	if spd >= VAULT_MIN and toward > 0.6 * spd and dy > -0.7:
+	if spd >= VAULT_MIN - 0.05 and toward > 0.6 * spd and dy > -0.7:  # (float32 velocities: 9.0 can read 8.9999)
 		state = "vault"
 		# Match arrival velocity at the start of a cubic, then decelerate into
 		# a running landing. The old fixed quadratic snapped fast arrivals.

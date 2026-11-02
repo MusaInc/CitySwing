@@ -1,3 +1,58 @@
+# Status: 2026-11-02 (homes pass: bigger rooms, indoor camera)
+
+- **Bigger homes** (`Apartments.TIERS`, W×D×ceiling):
+  Quay Studio 7.8×7.2×3.2 → 12×11×4.0 m, City Apartment 11×10×3.4 →
+  16×14×4.2, High-Rise Loft 14×12×4.4 → 20×16×6.2, Sky Apartment
+  18×14×4.2 → 24×18×5.2, Penthouse 24×18×5.2 → 26×20×7.2 (it now lives a
+  storey under the roof of a 302 m tower; the city's towers are ≤ ~30 m
+  wide, so 26 m is the widest that fits). Windows grew with them (4.2 →
+  22 m wide). Spawn 1.7 → 2.2 m in from the glass.
+- **Five layouts redrawn for the new sizes** (`HomeInteriors`): furniture
+  to the walls and corners, the middle left open, door openings 2.9 m tall
+  (`DOOR_H`) so the camera sees through them. Studio: sleeping platform
+  behind a curtain, galley kitchen, desk at the window, bike, bistro table,
+  front door with parcels. Apartment: bedroom, bathroom with walk-in
+  shower, an entrance hall with the front door, a wall of books with a
+  ladder, open kitchen + breakfast bar. Loft: 6 m ceiling, kitchen along the
+  brick, glass-walled bedroom on a plinth (with a slope, not a snag), a
+  training corner under neon, a record wall. Sky: lounge round the fire,
+  piano, dining for eight, gallery entrance, master suite with tub.
+  Penthouse: mezzanine at 3.4 m with the Hall of Fame and a study, bar and
+  bed beneath, pool, lounge and dining. Sky finishes toned down (was
+  glaring white); pendants hang ≥ 2.7 m away from tables so the lens
+  never meets them at eye level.
+- **Penthouse stairs** were 0.30 m blocks a slow walk-up snagged on; the
+  treads are now visual over one walkable 36° slope (`HomeInteriors.ramp`).
+- **Indoor camera** (`SwingCamera.indoor_ceiling`, set by `HomeSystem`):
+  closer (3.5–4.2 m vs 4.8–6.2) and lower; collides with partitions and big
+  furniture (human layer, ignored outdoors); crane limited and capped under
+  the ceiling; keeps the hero's chest in sight round door frames; pinned
+  close it looks past the hero into the room instead of down at them; the
+  window look-down only applies while facing the window.
+  Measured by `tools/home_cam_probe.gd` at 60 fps (walks every room,
+  bedrooms, bathrooms, up the stairs and along the mezzanine), frames,
+  old camera on the new rooms → new camera:
+
+  | home | frames | lens outside the room | hero hidden |
+  |---|---|---|---|
+  | studio | 201 | 0 → 0 | 0 → 0 |
+  | apartment | 353 | 6 → 0 | 25 → 1 |
+  | loft | 268 | 0 → 0 | 0 → 0 |
+  | sky | 276 | 0 → 0 | 67 → 0 |
+  | penthouse | 594 | 0 → 0 | 32 → 0 |
+
+- Fix: a 9.0 m/s window vault read as 8.9999 in float32 and fell back to the
+  slow grab (`VAULT_MIN - 0.05`).
+- Courses canyon, waterfront and spires re-recorded (the home towers'
+  collision changed with the bigger rooms).
+- Tests: `test_homes.test_indoor_camera_keeps_the_hero_in_view` (the
+  probe's routes, real camera, ≤ 2% hidden frames, never outside, climbs
+  the mezzanine); the mezzanine test checks the stair slope. 145/145.
+
+Not done: the camera can still end up close behind the hero when you stop
+facing a corner of a small room (it looks over the hero's head then); no
+furniture you can sit on or use.
+
 # Status: 2026-11-02 (character pass)
 
 - **No hoodie.** Skin-tight compression tops cut from the MakeHuman body

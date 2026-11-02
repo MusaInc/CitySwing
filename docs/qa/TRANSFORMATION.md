@@ -95,3 +95,18 @@ The Cross-City viaduct down the CBD boulevard; the skyline with spires,
 masts and helipads on the supertall towers.
 
 ![rail and skyline](transformation/rail_and_skyline.jpg)
+
+## 6. Homes pass: bigger rooms, indoor camera (2026-11-02)
+
+Every home is bigger (Studio 12×11 m, Apartment 16×14, Loft 20×16 with a
+6 m ceiling, Sky 24×18, Penthouse 26×20 with a 7 m ceiling) and redrawn
+for its size. Left: the whole room; middle: waking up (real HUD and
+camera); right: the follow camera while walking the room
+(`tools/home_cam_probe.gd`). Top to bottom: Quay Studio, City Apartment,
+High-Rise Loft, Sky Apartment, Penthouse (on the mezzanine).
+
+![homes v2](transformation/homes_v2.jpg)
+
+Camera on the probe's routes at 60 fps, old camera → new: hero hidden
+behind walls 25 → 1 frames of 353 (apartment), 67 → 0 of 276 (sky),
+32 → 0 of 594 (penthouse); lens out of the apartment 6 → 0.
