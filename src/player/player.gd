@@ -50,6 +50,9 @@ const BUILDINGS_MASK := 1 | (1 << 1)
 const GRAPPLE_LAYER := 1 << 1
 const MAX_WRAPS := 4
 const STEP_MAX := 0.35  # kerbs, stairs and rooftop lips climbed while running
+## In the air, a ledge whose walkable top is at most this far above the feet
+## is mantled (roof edges, parapets, low roof plant) instead of stopping you.
+const MANTLE_MAX := 1.4
 ## Wall hit on foot: at least this fast into the wall (and mostly head-on)
 ## knocks the body back a step; one stagger per STAGGER_COOL.
 const STAGGER_SPEED := 4.5
@@ -359,6 +362,8 @@ func _physics_process(dt: float) -> void:
 	velocity = (s.position - start) / dt
 	if s.grounded and not s.attached and s.velocity.y < 0.5:
 		_try_step_up(velocity * dt)
+	elif not s.grounded and not s.attached and not stunned:
+		_try_mantle(velocity * dt)
 	move_and_slide()
 	_resolve_contacts(dt)
 	if s.attached and params.rope_wrapping:
@@ -401,6 +406,46 @@ func _try_step_up(motion: Vector3) -> void:
 		return
 	global_position = over.origin + hit.get_travel()
 	velocity = Vector3(0.0, minf(velocity.y, 0.0), 0.0)
+	stepped_up.emit(rise)
+
+
+## Airborne and moving into a ledge (a roof edge with its cornice and
+## parapet, a low roof hut) whose walkable top is within MANTLE_MAX of the
+## feet: lift onto it and keep the horizontal momentum, rather than hitting
+## the lip as a wall and sliding off or stalling just short of the roof.
+## Probes a little ahead of the motion so the lip is met before contact.
+## Facades (no top in reach) are walls as before.
+func _try_mantle(motion: Vector3) -> void:
+	var vh := Vector3(s.velocity.x, 0.0, s.velocity.z)
+	if vh.length() < 2.0 or s.velocity.y > 7.0:
+		return
+	var probe := vh.normalized() * maxf(Vector3(motion.x, 0.0, motion.z).length(), 0.3)
+	if not test_move(global_transform, probe):
+		return
+	var lift := 0.0
+	var clear := false
+	for i in range(1, 8):
+		lift = minf(i * 0.2, MANTLE_MAX)
+		if test_move(global_transform, Vector3.UP * lift):
+			return  # no headroom (under a cornice, a skybridge)
+		if not test_move(global_transform.translated(Vector3.UP * lift), probe):
+			clear = true
+			break
+		if lift >= MANTLE_MAX:
+			break
+	if not clear:
+		return
+	var over := global_transform.translated(Vector3.UP * lift).translated(probe)
+	var hit := KinematicCollision3D.new()
+	if not test_move(over, Vector3.DOWN * (lift + 0.1), hit) or hit.get_normal().y < 0.7:
+		return
+	var rise := over.origin.y + hit.get_travel().y - global_position.y
+	if rise < 0.05:
+		return
+	global_position = over.origin + hit.get_travel() + Vector3.UP * 0.01
+	s.position = global_position
+	s.velocity.y = maxf(s.velocity.y, 0.0)
+	velocity = Vector3(s.velocity.x, 0.0, s.velocity.z) * 0.0  # this tick's motion was the mantle
 	stepped_up.emit(rise)
 
 

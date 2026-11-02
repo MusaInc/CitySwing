@@ -182,6 +182,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	reserved.append(under)
 	roads = CityRoads.new()
 	roads.inner_radius = 0.0
+	roads.landform = "westbank"
 	var px := func(x: float) -> float: return MIRROR - x  # world x <-> plan x
 	var N := MAINLAND_PLAN.position.y - 60.0
 	var S := MAINLAND_PLAN.end.y + 60.0

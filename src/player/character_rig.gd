@@ -370,7 +370,7 @@ func _connect_player() -> void:
 	player.stun_started.connect(_on_stun)
 	player.stun_ended.connect(_on_stun_ended)
 	player.perfect_release.connect(_on_perfect)
-	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.STEP_MAX))
+	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.MANTLE_MAX))
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)

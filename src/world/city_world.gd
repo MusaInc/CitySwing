@@ -144,6 +144,9 @@ func _ready() -> void:
 		return
 	_bake_ground_height()
 	_build_birds()
+	var hinter := Hinterland.new()
+	hinter.name = "Hinterland"
+	add_child(hinter)
 	mainland = CityWorld.new()
 	mainland.name = "Mainland"
 	mainland.secondary = true

@@ -58,6 +58,9 @@ var custom_majors := {}
 var inner_radius := 245.0
 ## Set by mirror_x(): the straight quay is then the east edge.
 var mirrored := false
+## Coast landforms: "island" (the city) or "westbank" (the mainland: rounder,
+## deeper bays and capes, so it doesn't read as a rectangle).
+var landform := "island"
 
 
 func generate(p_seed: int, p_district: Callable, p_bounds: Rect2, p_reserved: Array = []) -> CityRoads:
@@ -105,8 +108,9 @@ func _coast() -> void:
 	# (the strait quay). The path runs north edge west→east, round the NE
 	# corner, down the east edge, round the SE corner, south edge east→west.
 	var b := bounds
-	var R := 150.0
-	var amp := 8.0
+	var wb := landform == "westbank"
+	var R := 150.0 if not wb else minf(b.size.x, b.size.y) * 0.44
+	var amp := 8.0 if not wb else 16.0
 	var noise := func(s: float) -> float:
 		return (_vn(s / 160.0 + 3.0) - 0.5) * 2.0 * 0.7 + (_vn(s / 55.0 + 11.0) - 0.5) * 2.0 * 0.3
 	var path: Array = [Vector2(b.position.x, b.position.y)]
@@ -133,6 +137,15 @@ func _coast() -> void:
 			var east_bay := -72.0 * exp(-pow((v - 0.66) / 0.16, 2.0)) * pow(u, 8.0)
 			var headland := 38.0 * exp(-pow((v - 0.26) / 0.19, 2.0)) * pow(u, 8.0)
 			var shore := north_bay + east_bay + headland
+			if wb:
+				# Westbank: a deep bay on the far coast, a cove and a cape on
+				# the north, a long inlet in the south and a southern point.
+				shore = -175.0 * exp(-pow((v - 0.36) / 0.12, 2.0)) * pow(u, 5.0) \
+					+ 70.0 * exp(-pow((v - 0.72) / 0.1, 2.0)) * pow(u, 5.0) \
+					- 95.0 * exp(-pow((u - 0.34) / 0.1, 2.0)) * pow(1.0 - v, 7.0) \
+					+ 45.0 * exp(-pow((u - 0.72) / 0.08, 2.0)) * pow(1.0 - v, 7.0) \
+					- 120.0 * exp(-pow((u - 0.58) / 0.07, 2.0)) * pow(v, 7.0) \
+					+ 40.0 * exp(-pow((u - 0.25) / 0.08, 2.0)) * pow(v, 7.0)
 			pts.append(p + out * (shore + float(noise.call(s + L * j / k)) * amp) * taper)
 		s += L
 	pts.append(path[-1])

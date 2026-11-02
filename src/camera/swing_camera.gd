@@ -90,7 +90,7 @@ func _ready() -> void:
 	cam.name = "Camera"
 	cam.fov = base_fov
 	cam.near = 0.15
-	cam.far = 2400.0
+	cam.far = 6500.0  # the mountains round the bay are 2-5 km out (reversed-Z: no precision cost)
 	add_child(cam)
 	cam.make_current()
 	look = LookFilter.new()

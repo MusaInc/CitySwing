@@ -701,7 +701,7 @@ func _overview_camera() -> void:
 	camera.global_position = Vector3(v[0], v[1], v[2])
 	camera.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
 	camera.cam.fov = float(args.get("fov", "60"))
-	camera.cam.far = 4000.0
+	camera.cam.far = 6500.0
 	player.input_enabled = false
 	if world.has_method("set_viewer"):
 		world.set_viewer(camera)  # stream detail around the lens, not the hero
