@@ -92,7 +92,7 @@ func test_trains_run_and_stop_at_stations(t) -> void:
 	add_child(trains)
 	var car := BoxMesh.new()
 	trains.setup(l.rail.lines, car, car)
-	t.check(trains._trains.size() == 3, "two loop trains and a valley shuttle")
+	t.check(trains._trains.size() == 5, "two loop trains, a valley shuttle and two Cross-City trains (%d)" % trains._trains.size())
 	var s0: Array = []
 	for tr in trains._trains:
 		s0.append(tr["cars"][0].global_position)
@@ -103,7 +103,7 @@ func test_trains_run_and_stop_at_stations(t) -> void:
 	for i in trains._trains.size():
 		if (trains._trains[i]["cars"][0] as Node3D).global_position.distance_to(s0[i]) > 5.0:
 			moved += 1
-	t.check(moved >= 2, "trains move (%d of 3 after 20 s)" % moved)
+	t.check(moved >= 3, "trains move (%d of %d after 20 s)" % [moved, trains._trains.size()])
 	# Cars stay coupled: neighbours ~CAR_PITCH apart.
 	var tr0: Dictionary = trains._trains[0]
 	var gap := (tr0["cars"][0] as Node3D).global_position.distance_to((tr0["cars"][1] as Node3D).global_position)
@@ -120,6 +120,24 @@ func test_trains_run_and_stop_at_stations(t) -> void:
 			break
 		s += 1.0
 	t.check(stopped, "trains stop at stations (cycle %.0f s)" % cyc)
+	# A Cross-City train calls at every station along the line, not just the ends.
+	for tr in trains._trains:
+		if tr["line"]["name"] != "cross":
+			continue
+		var called := {}
+		var c2: float = tr["cycle"]
+		var tt := 0.0
+		while tt < c2:
+			trains._clock = tt
+			trains._place_all()
+			if float(tr["v"]) == 0.0:
+				for st: float in tr["line"]["stations"]:
+					if absf(float(tr["s"]) - st) < 3.0:
+						called[st] = true
+			tt += 0.5
+		t.check(called.size() == (tr["line"]["stations"] as Array).size(),
+			"a Cross-City train calls at all %d stations (%d)" % [(tr["line"]["stations"] as Array).size(), called.size()])
+		break
 	trains.queue_free()
 
 

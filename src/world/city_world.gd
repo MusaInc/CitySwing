@@ -920,6 +920,19 @@ func _build_collision() -> void:
 		cs2.shape = cv
 		kit.add_child(cs2)
 	add_child(kit)
+	if not layout.kit_obbs_solid.is_empty():
+		var solid := StaticBody3D.new()
+		solid.name = "SetPieceSolid"
+		solid.collision_layer = 1  # (no web layer: see CityLayout.kit_solid_only)
+		solid.collision_mask = 0
+		for ob in layout.kit_obbs_solid:
+			var cs3 := CollisionShape3D.new()
+			var bs3 := BoxShape3D.new()
+			bs3.size = ob[1]
+			cs3.shape = bs3
+			cs3.transform = ob[0]
+			solid.add_child(cs3)
+		add_child(solid)
 
 
 ## Solid shapes for every drawn prop, in the prop's own frame:

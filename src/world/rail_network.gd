@@ -161,14 +161,15 @@ func _clear_buildings(p: PackedVector2Array) -> PackedVector2Array:
 
 ## The concrete viaduct and the rails (the waterfront leg already has its
 ## brick viaduct: rails only there). Kits of ~300 m so each culls on its own.
-func _loop_viaduct(pts: PackedVector3Array) -> void:
+func _loop_viaduct(pts: PackedVector3Array, loop := true, prefix := "loop") -> void:
 	var n := pts.size()
-	var k := L._kit("loop_0")
+	var k := L._kit(prefix + "_0")
 	var run := 0.0
 	var i := 0
 	var seg := 10  # samples per drawn segment (20 m on straights)
-	while i < n:
-		var j := mini(i + seg, n)  # (j == n closes the loop back to sample 0)
+	var last := n if loop else n - 1
+	while i < last:
+		var j := mini(i + seg, last)  # (j == n closes the loop back to sample 0)
 		# Shorter chords on curves, so the straight rail pieces stay on the
 		# path the wheels follow (within ~12 cm).
 		while j > i + 1 and _chord_dev(pts, i, j) > 0.12:
@@ -187,7 +188,12 @@ func _loop_viaduct(pts: PackedVector3Array) -> void:
 			for sgn: float in [-1.0, 1.0]:
 				var o := side * sgn * 4.6
 				L._kbeam(k, deck_a - ext + o + Vector3.UP * 0.5, deck_b + ext + o + Vector3.UP * 0.5, 0.4, 1.0, CONCRETE)
-				L._anchor(deck_a + side * sgn * 4.9 + Vector3.DOWN * 1.2, deck_b + side * sgn * 4.9 + Vector3.DOWN * 1.2)
+				if loop:
+					# (Anchor lines along the coastal Loop's deck edges. The
+					# Cross-City Line over the boulevard has none: right
+					# overhead they'd win every street launch with a short,
+					# weak swing; its deck still takes a web like any surface.)
+					L._anchor(deck_a + side * sgn * 4.9 + Vector3.DOWN * 1.2, deck_b + side * sgn * 4.9 + Vector3.DOWN * 1.2)
 		for t: float in [TRACK, -TRACK]:
 			for r: float in [-0.72, 0.72]:
 				var ro := side * (t + r) + Vector3.DOWN * 0.08
@@ -215,7 +221,7 @@ func _loop_viaduct(pts: PackedVector3Array) -> void:
 		run += d.length()
 		if run > 300.0:
 			run = 0.0
-			k = L._kit("loop_%d" % L.structures.size())
+			k = L._kit("%s_%d" % [prefix, L.structures.size()])
 		i = j
 
 
@@ -264,6 +270,92 @@ func _station(line: Dictionary, s0: float) -> void:
 	var gy := L.terrain.road_y(tw.x, tw.z)
 	L._kbeam(k, Vector3(tw.x, gy, tw.z), Vector3(tw.x, c.y + 5.0, tw.z), 4.0, 4.0, Color(0.36, 0.38, 0.4))
 	L._kbeam(k, Vector3(tw.x, c.y + 5.0, tw.z), Vector3(tw.x, c.y + 5.3, tw.z), 4.6, 4.6, CANOPY)
+
+
+# ------------------------------------------------------- the Cross-City Line
+## Straight through the middle: an elevated two-track metro down the Central
+## Spine, north coast to south coast through Old Town, the business district
+## and midtown, on median piers over the boulevard (traffic runs either side).
+## It climbs onto a flyover where it crosses the Valley Line. Stations at the
+## straightest stretches; trains shuttle end to end through every station.
+const CROSS_STATIONS := [0.08, 0.32, 0.58, 0.9]
+## Higher than the Loop Line's deck: over the boulevard it's a swing anchor
+## too, and from the street a longer rope swings you properly.
+const CROSS_DECK := 16.0
+
+
+func build_cross() -> void:
+	var road: Dictionary = L.roads.by_name.get("spine", {})
+	if road.is_empty():
+		return
+	var inner: PackedVector2Array = Geometry2D.offset_polygon(L.coast, -(CityRoads.ESPLANADE + CityRoads.RING_W + 34.0))[0]
+	var path := PackedVector2Array()
+	for q: Vector2 in road["pts"]:
+		if Geometry2D.is_point_in_polygon(q, inner):
+			path.append(q)
+	if path.size() < 4:
+		return
+	var flat := _resample_open(path, STEP)
+	# The Valley Line's viaduct (EL_DECK) is crossed on a flyover.
+	var valley := PackedVector2Array()
+	for ln in lines:
+		if ln["name"] == "valley":
+			for v: Vector3 in ln["pts"]:
+				valley.append(Vector2(v.x, v.z))
+	var ys := PackedFloat32Array()
+	ys.resize(flat.size())
+	for i in flat.size():
+		var q := flat[i]
+		var y := L.terrain.road_y(q.x, q.y) + CROSS_DECK
+		if not valley.is_empty():
+			var dv := INF
+			for k in range(0, valley.size(), 4):
+				dv = minf(dv, valley[k].distance_to(q))
+			if dv < 90.0:
+				y = maxf(y, SetPieces.EL_DECK + 10.0)
+		ys[i] = y
+	for pass_i in 3:
+		ys = _ease_open(ys, 30)
+	for i in flat.size():
+		ys[i] = maxf(ys[i], L.terrain.road_y(flat[i].x, flat[i].y) + CROSS_DECK - 1.5)
+	ys = _ease_open(ys, 8)
+	var pts := PackedVector3Array()
+	for i in flat.size():
+		pts.append(Vector3(flat[i].x, ys[i] + RAIL_H, flat[i].y))
+	var total := (pts.size() - 1) * STEP
+	var stations: Array = []
+	for f: float in CROSS_STATIONS:
+		stations.append(clampf(_straightest(pts, total * f, 90.0), STATION_LEN, total - STATION_LEN))
+	var line := {"name": "cross", "pts": pts, "loop": false, "tracks": [TRACK, -TRACK], "stations": stations,
+		"cars": 3}
+	lines.append(line)
+	L.kit_solid_only = true  # solid, but webs go to the towers either side
+	_loop_viaduct(pts, false, "cross")
+	# Buffer stops at both ends.
+	var k := L._kit("cross_end")
+	for e in 2:
+		var a := pts[0] if e == 0 else pts[-1]
+		var b := pts[1] if e == 0 else pts[-2]
+		var d := (a - b).normalized()
+		var side := Vector3(-d.z, 0.0, d.x)
+		L._kbeam(k, a - side * 4.8, a + side * 4.8, 0.8, 1.6, Color(0.75, 0.62, 0.15))
+	for s: float in stations:
+		_station(line, s)
+	L.kit_solid_only = false
+
+
+static func _ease_open(y: PackedFloat32Array, r: int) -> PackedFloat32Array:
+	var n := y.size()
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in n:
+		var acc := 0.0
+		var cnt := 0
+		for k in range(maxi(0, i - r), mini(n, i + r + 1)):
+			acc += y[k]
+			cnt += 1
+		out[i] = acc / cnt
+	return out
 
 
 # ------------------------------------------------------------ the Valley Line

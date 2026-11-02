@@ -58,6 +58,8 @@ func setup(lines: Array, car_mesh: Mesh, cab_mesh: Mesh) -> void:
 			_add_train(line, -1, -float(line["tracks"][0]), 0.5, stream)
 		else:
 			_add_train(line, 1, line["tracks"][0], 0.0, stream)
+			if (line["tracks"] as Array).size() > 1:
+				_add_train(line, 1, line["tracks"][1], 0.5, stream)  # the other track, half a cycle on
 	_place_all()
 
 
@@ -88,8 +90,11 @@ func _add_train(line: Dictionary, dir: int, offset: float, phase: float, stream:
 				var b: float = st[(n - i - 1 + n) % n]
 				legs.append([a, -fposmod(a - b, total)])
 	else:
-		legs.append([st[0], float(st[1]) - float(st[0])])
-		legs.append([st[1], float(st[0]) - float(st[1])])
+		# End to end through every station, then back.
+		for i in st.size() - 1:
+			legs.append([st[i], float(st[i + 1]) - float(st[i])])
+		for i in range(st.size() - 1, 0, -1):
+			legs.append([st[i], float(st[i - 1]) - float(st[i])])
 	var cycle := 0.0
 	for leg in legs:
 		leg.append(_leg_time(absf(leg[1])))

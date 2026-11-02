@@ -52,7 +52,7 @@ const MAX_WRAPS := 4
 const STEP_MAX := 0.35  # kerbs, stairs and rooftop lips climbed while running
 ## In the air, a ledge whose walkable top is at most this far above the feet
 ## is mantled (roof edges, parapets, low roof plant) instead of stopping you.
-const MANTLE_MAX := 1.4
+const MANTLE_MAX := 2.0
 ## Wall hit on foot: at least this fast into the wall (and mostly head-on)
 ## knocks the body back a step; one stagger per STAGGER_COOL.
 const STAGGER_SPEED := 4.5
@@ -424,7 +424,7 @@ func _try_mantle(motion: Vector3) -> void:
 		return
 	var lift := 0.0
 	var clear := false
-	for i in range(1, 8):
+	for i in range(1, 11):
 		lift = minf(i * 0.2, MANTLE_MAX)
 		if test_move(global_transform, Vector3.UP * lift):
 			return  # no headroom (under a cornice, a skybridge)

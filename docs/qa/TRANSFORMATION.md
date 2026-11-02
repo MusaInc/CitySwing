@@ -68,3 +68,30 @@ Title shots on the new grade (golden hour, canyon, momentum):
 - Still visible: the hero reads as a dark silhouette against bright sky
   (the Courier's charcoal outfit; character shaders belong to the other
   agent's work and were not touched); building window grids still repeat.
+
+## 5. World pass (2026-11-02)
+
+The bay: before, the island sat on an endless flat sea; now a horseshoe of
+hills and snow-capped western mountains rings the bay (open sea east).
+
+![bay before / after](transformation/world_bay_before_after.jpg)
+
+Map, before / after: Westbank (left) is no longer a rectangle (bays, a
+cape, an inlet), the Cross-City Line runs north–south through the middle
+of the island, and the stadium is a bigger bowl on its own plaza.
+
+![map before / after](transformation/world_map_before_after.jpg)
+
+The stadium, before / after (bowl, ring roof, cable-stayed masts, fins).
+
+![stadium](transformation/stadium_before_after.jpg)
+
+Westbank from the bridge with the mountains behind; pylons and conductors
+along the western foothills.
+
+![westbank and power lines](transformation/westbank_powerlines.jpg)
+
+The Cross-City viaduct down the CBD boulevard; the skyline with spires,
+masts and helipads on the supertall towers.
+
+![rail and skyline](transformation/rail_and_skyline.jpg)

@@ -1,3 +1,41 @@
+# Status: 2026-11-02 (world pass)
+
+- **Mountains round the bay** (`src/world/hinterland.gd`, `hinterland.gdshader`):
+  one heightfield mesh (~16k triangles, underwater cells skipped), shaded
+  by height/slope (sand, meadow, forest, rock, snow). Camera far plane
+  2400 → 6500 m (reversed-Z, no depth cost). Backdrop only: no collision.
+- **Power lines** (`power_lines.gd`): lattice pylons (MultiMesh) along the
+  foothills and up to a pass, catenary conductors in one mesh.
+- **Westbank** has its own coast landforms (`CityRoads.landform`): bays, a
+  cape, an inlet; 554 → 456 buildings.
+- **Cross-City Line** (`RailNetwork.build_cross`): elevated two-track
+  metro down the Spine boulevard, coast to coast through the CBD, deck 16 m
+  over the road, flyover over the Valley Line, four stations, two trains
+  calling at every station. The viaduct is solid but takes no web (world
+  layer only, `CityLayout.kit_solid_only`); grapple targeting now treats
+  such bodies as occluders (it used to pick anchors behind them).
+- **Stadium**: superellipse bowl (two tiers, concourse, back wall), ring
+  roof with a lamp band, four 80 m cable-stayed masts (anchors), fins, a
+  big screen, kiosks; site 96×82 → 150×130 m, moved 24 m west off the ring
+  road.
+- **Buildings**: new "tapered" (ziggurat) form; wider palettes (painted
+  terraces in Old Town, London stock / engineering brick, bronze and green
+  glass, terracotta / charcoal modern, jade / salmon deco); roof crowns on
+  supertall towers (spire, helipad, louvred plant crown + mast) and roof
+  gardens on some mid-rise blocks, kept to the edges.
+- **Roof edges**: airborne mantle onto ledges whose top is within 2 m of
+  the feet; deco/stone mid-edge roof piers lowered from ~2.6–4 m to 1.1 m
+  (they stood where you land).
+- Courses re-recorded on the new city (8/8 first try). Token spots are
+  derived from the buildings, so their positions moved; collected counts
+  are kept (ids), but a returning player's collected set maps to new spots.
+- Tests: `tests/test_world_pass.gd`; `test_trains` now expects five trains
+  and checks a Cross-City train calls at every station; the street-launch
+  test stands by the Spine's kerb (12 m out) instead of under the viaduct.
+
+Not done: facade window-grid repetition (shader work), mainland
+architecture beyond its outline, drones still don't avoid the new viaduct.
+
 # Status: 2026-11-01 (transformation pass: contracts, homes, light)
 
 Branch `feature/cityswing-transformation`. QA report and images:

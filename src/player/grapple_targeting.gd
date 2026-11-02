@@ -61,7 +61,10 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 	# Aim pitch nudges which elevation band is preferred (look up = steeper anchors).
 	var aim_pitch := rad_to_deg(asin(clampf(aim.normalized().y, -1.0, 1.0)))
 	var q := PhysicsRayQueryParameters3D.new()
-	q.collision_mask = GRAPPLE_MASK
+	# The web layer, plus solid-only bodies (world layer: e.g. the Cross-City
+	# viaduct) as occluders – a web can't pass through them, so nothing
+	# behind one is a candidate. Buildings are on both layers (unchanged).
+	q.collision_mask = GRAPPLE_MASK | 1
 	q.exclude = exclude
 	var candidates: Array = []
 	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, ELEVATIONS, YAWS, candidates)
@@ -90,7 +93,7 @@ func _scan(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vector3, 
 			q.from = origin
 			q.to = origin + dir * p.grapple_range
 			var hit := space.intersect_ray(q)
-			if hit.is_empty():
+			if hit.is_empty() or not _grabbable(hit):
 				continue
 			var pt: Vector3 = hit["position"]
 			var rise := pt.y - origin.y
@@ -159,6 +162,11 @@ func _scan_lines(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vec
 			if pt.y - dist < 2.0:
 				s -= (2.0 - (pt.y - dist)) * 0.04
 			candidates.append([s, pt, Vector3.DOWN])
+
+
+static func _grabbable(hit: Dictionary) -> bool:
+	var col = hit.get("collider")
+	return col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & GRAPPLE_MASK) != 0
 
 
 static func _closest_on_segment_to_ray(a: Vector3, b: Vector3, o: Vector3, d: Vector3) -> Vector3:

@@ -754,7 +754,8 @@ static func _features(b: Dictionary) -> Dictionary:
 		for r in caps:
 			out["draw"].append([r, trim.lightened(0.25), "far"])
 			out["col"].append(r)
-	# Crowns: corner and mid piers rising over the parapet of deco/stone towers.
+	# Crowns: tall corner piers and low mid-edge finials over the parapet of
+	# deco/stone towers.
 	if style in [CityLayout.Style.DECO, CityLayout.Style.STONE] and float(tt[5]) > 70.0 \
 			and float(tt[2]) - float(tt[0]) > 14.0 and float(tt[3]) - float(tt[1]) > 14.0:
 		var ph := rng.randf_range(3.5, 6.0)
@@ -764,9 +765,12 @@ static func _features(b: Dictionary) -> Dictionary:
 			var L: float = f[3]
 			for a in [-o + 0.0, L * 0.5 - 0.6]:
 				var w := 1.6 if a < 0.0 else 1.2
-				var bx := _fbox(f, a, a + w, -w + o, o, ry, ry + (ph if a < 0.0 else ph * 0.7))
+				# Mid-edge finials stay low (≤ 1.1 m): they stood where you land
+				# and blocked the roof; the mantle carries you over this height.
+				var bx := _fbox(f, a, a + w, -w + o, o, ry, ry + (ph if a < 0.0 else 1.1))
 				out["draw"].append([bx, pc])
 				out["col"].append(bx)
+	_roof_crowns(out, b, tt, ry, style, trim)
 	# Facade depth follows the architectural family: paired slender bronze
 	# blades on office towers; stone piers on tall masonry. Shared collision
 	# and opening filtering keep apartments and climbing geometry aligned.
@@ -785,6 +789,113 @@ static func _features(b: Dictionary) -> Dictionary:
 					out["draw"].append([rib, Color(0.32, 0.29, 0.23) if _glassy(b) else trim])
 					out["col_human"].append(rib)
 	return out
+
+
+## Roof tops with character (own random stream, so nothing else moves):
+## supertall towers (> 150 m – no tokens, spawns or jobs up there) get a
+## spire, a helipad or a louvred plant crown with a mast, drawn at every LOD
+## for the skyline; mid-rise masonry and modern blocks may get a roof garden
+## (low planters inside the parapet, trees, a pergola) – all kept to the
+## edges so the middle of the roof stays clear to land on.
+static func _roof_crowns(out: Dictionary, b: Dictionary, tt: Array, ry: float, style: int, trim: Color) -> void:
+	if crown_h(b) > 0.0 or b.has("apt"):
+		return
+	var crng := RandomNumberGenerator.new()
+	crng.seed = int(float(b["seed"]) * 2753.0 * 1000.0) ^ 0xc70
+	var x0: float = tt[0]
+	var z0: float = tt[1]
+	var x1: float = tt[2]
+	var z1: float = tt[3]
+	var w := x1 - x0
+	var d := z1 - z0
+	var cx := (x0 + x1) * 0.5
+	var cz := (z0 + z1) * 0.5
+	var hgt: float = float(tt[5]) - base_of(b)
+	var red := Color(0.95, 0.15, 0.12)
+	if hgt > 150.0 and w > 18.0 and d > 18.0:
+		match crng.randi() % 3:
+			0:
+				# Spire: a plinth, a shaft and a needle with an aviation light.
+				var pb := _aabb(cx - 2.2, cz - 2.2, cx + 2.2, cz + 2.2, ry, ry + 5.0)
+				var sh := _aabb(cx - 1.0, cz - 1.0, cx + 1.0, cz + 1.0, ry + 5.0, ry + 17.0)
+				var nd := _aabb(cx - 0.35, cz - 0.35, cx + 0.35, cz + 0.35, ry + 17.0, ry + 17.0 + crng.randf_range(16.0, 30.0))
+				for bx in [pb, sh, nd]:
+					out["draw"].append([bx, trim.lightened(0.15), "far"])
+				out["col"].append(pb)
+				out["col"].append(sh)
+				out["draw"].append([AABB(Vector3(cx - 0.45, nd.end.y, cz - 0.45), Vector3(0.9, 0.7, 0.9)), red, "far"])
+			1:
+				# Helipad: a raised deck with a square marking and an H.
+				var hw := minf(minf(w, d) * 0.32, 8.5)
+				var pad := _aabb(cx - hw, cz - hw, cx + hw, cz + hw, ry, ry + 0.6)
+				out["draw"].append([pad, Color(0.22, 0.23, 0.25), "far", "roof"])
+				out["col"].append(pad)
+				var mk: Array[AABB] = []
+				_ring(mk, cx - hw * 0.8, cz - hw * 0.8, cx + hw * 0.8, cz + hw * 0.8, ry + 0.6, ry + 0.63, 0.35)
+				for r in mk:
+					out["draw"].append([r, Color(0.95, 0.8, 0.15)])
+				var hs := hw * 0.42
+				out["draw"].append([_aabb(cx - hs, cz - hs, cx - hs + 0.6, cz + hs, ry + 0.6, ry + 0.63), Color.WHITE])
+				out["draw"].append([_aabb(cx + hs - 0.6, cz - hs, cx + hs, cz + hs, ry + 0.6, ry + 0.63), Color.WHITE])
+				out["draw"].append([_aabb(cx - hs, cz - 0.3, cx + hs, cz + 0.3, ry + 0.6, ry + 0.63), Color.WHITE])
+				for p in [Vector2(cx - hw, cz - hw), Vector2(cx + hw, cz - hw), Vector2(cx + hw, cz + hw), Vector2(cx - hw, cz + hw)]:
+					out["draw"].append([_aabb(p.x - 0.2, p.y - 0.2, p.x + 0.2, p.y + 0.2, ry + 0.6, ry + 0.9), Color(0.4, 1.0, 0.5)])
+			_:
+				# Plant crown: a louvred box set back from the edges, a mast.
+				var ix := w * 0.24
+				var iz := d * 0.24
+				var bx := _aabb(x0 + ix, z0 + iz, x1 - ix, z1 - iz, ry, ry + 6.0)
+				out["draw"].append([bx, trim.darkened(0.45), "far"])
+				out["col"].append(bx)
+				for k in 4:
+					var y := ry + 1.0 + k * 1.3
+					var lv := _aabb(x0 + ix - 0.08, z0 + iz - 0.08, x1 - ix + 0.08, z1 - iz + 0.08, y, y + 0.25)
+					out["draw"].append([lv, trim.lightened(0.1), "far"])
+				var mx := x1 - ix - 1.2
+				var mz := z1 - iz - 1.2
+				var mast := _aabb(mx - 0.3, mz - 0.3, mx + 0.3, mz + 0.3, ry + 6.0, ry + 6.0 + crng.randf_range(12.0, 22.0))
+				out["draw"].append([mast, Color(0.75, 0.75, 0.77), "far"])
+				out["draw"].append([AABB(Vector3(mx - 0.4, mast.end.y, mz - 0.4), Vector3(0.8, 0.6, 0.8)), red, "far"])
+		return
+	if hgt > 40.0 and hgt <= 150.0 and w > 16.0 and d > 16.0 and style in [CityLayout.Style.BRICK,
+			CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE, CityLayout.Style.STONE] and crng.randf() < 0.3:
+		# Roof garden along two opposite edges, inside the parapet.
+		var soil := Color(0.36, 0.27, 0.2)
+		var leaf := [Color(0.22, 0.42, 0.2), Color(0.3, 0.5, 0.24), Color(0.5, 0.6, 0.25)]
+		var along_x := w >= d
+		for e: float in [0.0, 1.0]:
+			var pl: AABB
+			if along_x:
+				var zz := z0 + 0.45 if e == 0.0 else z1 - 1.45
+				pl = _aabb(x0 + 1.5, zz, x1 - 1.5, zz + 1.0, ry, ry + 0.34)
+			else:
+				var xx := x0 + 0.45 if e == 0.0 else x1 - 1.45
+				pl = _aabb(xx, z0 + 1.5, xx + 1.0, z1 - 1.5, ry, ry + 0.34)
+			out["draw"].append([pl, trim])
+			out["col"].append(pl)
+			var top := pl
+			top.position.y = ry + 0.34
+			top.size.y = 0.3
+			out["draw"].append([top.grow(-0.08), leaf[crng.randi() % 3]])
+			# A few small trees along it.
+			var n := 2 + crng.randi() % 3
+			for i in n:
+				var t := (i + 0.5) / n
+				var p := Vector3(lerpf(pl.position.x, pl.end.x, t), ry, lerpf(pl.position.z, pl.end.z, t))
+				out["draw"].append([AABB(p + Vector3(-0.1, 0.34, -0.1), Vector3(0.2, 1.4, 0.2)), Color(0.35, 0.25, 0.18)])
+				var cs := crng.randf_range(1.1, 1.7)
+				out["draw"].append([AABB(p + Vector3(-cs * 0.5, 1.5, -cs * 0.5), Vector3(cs, cs * 0.9, cs)), leaf[crng.randi() % 3]])
+		# Pergola in a corner of the other edge.
+		var px := x0 + 1.0 if crng.randf() < 0.5 else x1 - 5.0
+		var pz := z0 + 1.0 if not along_x else (z0 + d * 0.5 - 2.0)
+		if along_x:
+			px = x0 + 1.0 if crng.randf() < 0.5 else x1 - 5.0
+		var wood := Color(0.48, 0.34, 0.22)
+		for q in [Vector2(px, pz), Vector2(px + 4.0, pz), Vector2(px, pz + 4.0), Vector2(px + 4.0, pz + 4.0)]:
+			out["draw"].append([_aabb(q.x, q.y, q.x + 0.18, q.y + 0.18, ry, ry + 2.5), wood])
+		for i in 6:
+			var sx := px + i * 0.8
+			out["draw"].append([_aabb(sx, pz - 0.2, sx + 0.12, pz + 4.4, ry + 2.5, ry + 2.65), wood])
 
 
 ## Appends `part`'s pieces to `out`, raised by dy (pieces built from 0).
