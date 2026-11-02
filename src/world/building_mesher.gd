@@ -108,20 +108,44 @@ func walls(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col
 		var a: Vector2 = corners[k]
 		var b: Vector2 = corners[(k + 1) % 4]
 		var w := a.distance_to(b)
-		if not hole.is_empty() and int(hole["face"]) == k:
-			# A home's window: the face drawn round the opening (left, right,
-			# below the sill, above the lintel), UVs continuous with the rest.
-			var A := [0.0, float(hole["oa0"]), float(hole["oa1"]), w]
-			var Y := [y0, float(hole["oy0"]), float(hole["oy1"]), y1]
-			for ia in 3:
-				for iy in 3:
-					if ia == 1 and iy == 1:
-						continue  # the opening
-					var p0: float = A[ia]
-					var p1: float = A[ia + 1]
-					var h0: float = Y[iy]
-					var h1: float = Y[iy + 1]
-					if p1 - p0 < 0.001 or h1 - h0 < 0.001:
+		var cuts: Array = []
+		if not hole.is_empty():
+			if int(hole["face"]) == k:
+				cuts.append([float(hole["oa0"]), float(hole["oa1"]), float(hole["oy0"]), float(hole["oy1"])])
+			for wn in hole.get("wins", []):
+				if int(wn[0]) == k:
+					cuts.append([float(wn[1]), float(wn[2]), float(wn[3]), float(wn[4])])
+		if not cuts.is_empty():
+			# A home's windows: the face drawn round its openings (columns
+			# between the openings' edges, each minus the openings it crosses),
+			# UVs continuous with the rest.
+			var xs := [0.0, w]
+			for c in cuts:
+				xs.append(clampf(c[0], 0.0, w))
+				xs.append(clampf(c[1], 0.0, w))
+			xs.sort()
+			for ci in xs.size() - 1:
+				var p0: float = xs[ci]
+				var p1: float = xs[ci + 1]
+				if p1 - p0 < 0.001:
+					continue
+				var ys := [[y0, y1]]
+				for c in cuts:
+					if c[0] <= p0 + 0.001 and c[1] >= p1 - 0.001:
+						var nys := []
+						for iv in ys:
+							if c[3] <= iv[0] or c[2] >= iv[1]:
+								nys.append(iv)
+								continue
+							if c[2] > iv[0]:
+								nys.append([iv[0], c[2]])
+							if c[3] < iv[1]:
+								nys.append([c[3], iv[1]])
+						ys = nys
+				for iv in ys:
+					var h0: float = iv[0]
+					var h1: float = iv[1]
+					if h1 - h0 < 0.001:
 						continue
 					var pa := a.lerp(b, p0 / w)
 					var pb := a.lerp(b, p1 / w)
@@ -581,9 +605,10 @@ static func _clear_of_apt(b: Dictionary, out: Dictionary) -> Dictionary:
 	var apt: Dictionary = b.get("apt", {})
 	if apt.is_empty():
 		return out
-	var f := Apartments.face_of(apt)
-	var keep := _fbox(f, float(apt["oa0"]) - 1.5, float(apt["oa1"]) + 1.5, -1.0, 4.0, float(apt["y0"]) - 3.0,
-		float(apt["y1"]) + 1.0)
+	# Glass all round: nothing stuck on any face of the home's storey.
+	var t: Array = (b["tiers"] as Array)[int(apt["t"])]
+	var keep := AABB(Vector3(float(t[0]) - 4.0, float(apt["y0"]) - 3.0, float(t[1]) - 4.0),
+		Vector3(float(t[2]) - float(t[0]) + 8.0, float(apt["y1"]) - float(apt["y0"]) + 4.0, float(t[3]) - float(t[1]) + 8.0))
 	var res := {"draw": [], "col": [], "col_human": [], "beams": []}
 	for d in out["draw"]:
 		if not (d[0] as AABB).intersects(keep):

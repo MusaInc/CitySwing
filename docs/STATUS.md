@@ -1,3 +1,31 @@
+# Status: 2026-11-02 (homes: 360° glass)
+
+- **Every home is a whole floor of its tower, glass on all four sides.**
+  The room is the storey's footprint inside 0.3 m outer walls; placement
+  picks towers whose floor plate is the home's size (up to +4.5 m, the
+  closest preferred): Studio 13×15 m, Apartment 16×16, Loft 22×17, Sky
+  25×18, Penthouse 30×23. The front window is still the open one you swing
+  through; the other three walls are glazed (`HomeInteriors.windows_for`):
+  reveals, sill, frame, mullions, a pane. Solid bays only where tall things
+  stand: the front door, a fireplace, the wine wall, the bar, wardrobes, the
+  stairs. The facade is cut to match (`BuildingMesher.walls` takes several
+  openings per face) and nothing is stuck on the home's storey outside.
+  Collision is unchanged in kind: the glass is the 0.3 m wall.
+- Furniture moved off the glass: the studio's kit rail is a free-standing
+  divider and the bike hangs by the front door; the apartment's book wall is
+  behind the sofa and the wardrobe on the hall wall; no wall cabinets over
+  kitchens (windows instead); the loft's neon and board on the brick bay, a
+  free-standing pull-up frame; the penthouse canvas above the stairs.
+- From beyond 380 m (the room isn't drawn) the openings show dark glass.
+- Placement also needs open air under the window (a neighbour's roof just
+  below the sill was where swing-ins landed): the City Apartment moved to a
+  113 m tower.
+- Courses waterfront, uptown and grand tour re-recorded (tower collision).
+  Camera probe routes take positions from the far walls (rooms vary in
+  size now). 147/147.
+
+![homes 360](qa/transformation/homes_360.jpg)
+
 # Status: 2026-11-02 (homes: things to use, trophies, finishes)
 
 The homes are what you work towards, so they now hold your progress and

@@ -121,7 +121,8 @@ Free Swing is the hub. Everything below happens in it, without menus.
   - Reputation ranks (Rookie → Runner → Courier → Pro → Ace → Legend) open
     contract tiers 1–5: longer routes, more pay.
 - **Homes** (`src/world/apartments.gd`, `home_interiors.gd`): five real
-  flats in real towers, each its own design (courier studio, Scandi
+  flats in real towers – each a whole floor with glass on all four sides –
+  each its own design (courier studio, Scandi
   one-bed, industrial loft, marble-and-walnut sky apartment, penthouse with
   a plunge pool and a climbable mezzanine). A board on the wall shows your
   rank and records (the penthouse's is the Hall of Fame). Coming home rests

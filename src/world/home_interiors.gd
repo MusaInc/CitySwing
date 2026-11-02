@@ -56,6 +56,8 @@ var trophy_spec: Array = []        # [x0, x1, z, y, inward]: the trophy shelf (r
 var spot_list: Array = []          # [kind, x, z, y]: things to use (room coords)
 ## Things to use in each built home, world positions: id -> [{kind, pos}].
 static var spots := {}
+var wins: Array = []               # windows_for(): [side, a0, a1, sill, head]
+var far_glass: Array = []          # [side, a0, a1, y0, y1]: dark glass seen from afar
 var ramps: Array = []             # [Transform3D, size] (local frame): stair slopes to walk up
 var pools: Array = []             # [x0, x1, z0, z1, y]
 
@@ -64,6 +66,50 @@ static func build(home: Dictionary, mat: Material) -> Node3D:
 	var I := HomeInteriors.new()
 	I.h = home
 	return I._build(mat)
+
+
+## The glass round each home (360°: every outer wall has windows), room
+## coords: [side, a0, a1, sill, head] with side "left" (x = 0, along z),
+## "right" (x = W, along z) or "back" (z = D, along x); heights from the
+## floor. The front is the open window you swing through. Solid bays are
+## left where the tall things stand (the front door, a fireplace, the wine
+## wall, a bar, wardrobes, stairs). Apartments cuts the facade to match.
+static func windows_for(tier: int, W: float, D: float, H: float) -> Array:
+	var head := H - 0.45
+	match tier:
+		0:
+			return [["left", 0.7, D - 0.7, 0.95, head], ["right", 0.7, D - 1.5, 1.0, head],
+				["back", 0.7, 3.4, 1.35, head], ["back", 8.8, W - 0.75, 1.0, head]]
+		1:
+			var split := D - 5.6
+			var left := 6.6
+			var right := W - 5.0
+			return [["left", 0.7, split - 0.6, 0.9, head], ["left", split + 0.6, D - 0.7, 0.9, head],
+				["back", 0.7, left - 0.6, 1.15, head], ["back", right + 0.6, W - 1.6, 1.45, head],
+				["right", 0.7, split - 1.4, 1.0, head], ["right", split + 0.4, D - 2.0, 1.45, head]]
+		2:
+			var bz := D - 5.6
+			var px := W - 7.2
+			return [["left", 0.7, D - 0.7, 1.0, H - 0.6], ["back", 0.5, 7.6, 1.05, H - 0.6],
+				["back", px + 0.4, W - 0.7, 1.5, H - 0.6], ["right", 0.7, bz - 0.3, 1.2, H - 0.6],
+				["right", bz + 2.8, D - 0.7, 1.5, H - 0.6]]
+		3:
+			var fz := 7.6
+			var sz := D - 6.5
+			var sx := W * 0.56
+			var gx := (4.4 + 2.4 + sx) * 0.5
+			return [["left", 0.7, fz - 2.6, 0.9, head], ["left", fz + 2.6, D - 0.7, 1.0, head],
+				["back", 0.7, gx - 3.2, 0.95, head], ["back", sx + 0.6, W - 0.7, 1.4, head],
+				["right", 4.4, sz - 0.3, 1.0, head], ["right", sz + 0.6, D - 0.7, 1.0, head]]
+		_:
+			var mz := D - 5.0
+			var up := MEZZ + 0.25
+			return [["left", 0.7, mz - 5.3, 0.4, H - 0.5], ["left", mz + 0.3, D - 0.7, 1.0, MEZZ - 0.2],
+				["left", mz + 0.3, D - 0.7, up + 0.9, H - 0.5],
+				["back", 0.7, 4.3, 1.0, MEZZ - 0.2], ["back", 11.8, W - 0.7, 1.2, MEZZ - 0.2],
+				["back", 0.7, 4.5, up + 0.9, H - 0.5], ["back", W * 0.5 + 4.4, W - 0.7, up + 0.9, H - 0.5],
+				["right", 0.7, mz - 0.3, 0.3, H - 0.5], ["right", mz + 2.8, D - 0.7, 1.0, MEZZ - 0.2],
+				["right", mz + 0.3, D - 0.7, up + 0.9, H - 0.5]]
 
 
 ## Room coords → the building's local frame.
@@ -88,6 +134,7 @@ func _build(mat: Material) -> Node3D:
 	D = float(h["depth"])
 	H = float(h["y1"]) - float(h["y0"])
 	var pal: Array = PALETTE[tier]
+	wins = windows_for(tier, W, D, H)
 	var f := Apartments.face_of(h)
 	m._begin(h["b"])
 	glow._begin(h["b"])
@@ -125,6 +172,7 @@ func _build(mat: Material) -> Node3D:
 		box(oa0 - float(h["a0"]) - 0.05, oa1 - float(h["a0"]) + 0.05, -0.08, 0.36, oy0 - float(h["y0"]) - 0.02,
 			oy0 - float(h["y0"]) + 0.03, Color(0.86, 0.84, 0.8))  # stone sill
 	_frame(tier)
+	_glaze(tier)
 	_residence(tier, pal)
 	m._end()
 	glow._end()
@@ -217,19 +265,31 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		ai.visibility_range_end = 160.0
 		root.add_child(ai)
 	for fx in walls_fx:
-		var c := _wall_corners(fx[0], fx[1], fx[2], fx[3], fx[4], fx[5])
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		var n: Vector3 = c[4]
-		var q: Array = [c[0], c[1], c[2], c[3]]
-		var uv := [Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)]
-		var order := [0, 1, 2, 0, 2, 3]
-		if (xf * (q[1] as Vector3) - xf * (q[0] as Vector3)).cross(xf * (q[2] as Vector3) - xf * (q[0] as Vector3)).dot(xf.basis * n) > 0.0:
-			order = [0, 2, 1, 0, 3, 2]
-		for i in order:
-			st.set_normal((xf.basis * n).normalized())
-			st.set_uv(uv[i])
-			st.add_vertex(xf * (q[i] as Vector3))
+		var fa0: float = fx[2]
+		var fa1: float = fx[3]
+		var fy0: float = fx[4]
+		var fy1: float = fx[5]
+		for rc: Rect2 in wall_rects(fx[0], fx[1], fa0, fa1, fy0, fy1):
+			var c := _wall_corners(fx[0], fx[1], rc.position.x, rc.end.x, rc.position.y, rc.end.y)
+			var n: Vector3 = c[4]
+			var q: Array = [c[0], c[1], c[2], c[3]]
+			# UVs over the whole patch, so the finish runs on behind the glass.
+			var u0 := (rc.position.x - fa0) / (fa1 - fa0)
+			var u1 := (rc.end.x - fa0) / (fa1 - fa0)
+			var v0 := 1.0 - (rc.position.y - fy0) / (fy1 - fy0)
+			var v1 := 1.0 - (rc.end.y - fy0) / (fy1 - fy0)
+			var uv := [Vector2(u0, v0), Vector2(u1, v0), Vector2(u1, v1), Vector2(u0, v1)]
+			if fx[0] == "left" or fx[0] == "front":
+				uv = [Vector2(1.0 - u1, v0), Vector2(1.0 - u0, v0), Vector2(1.0 - u0, v1), Vector2(1.0 - u1, v1)]
+			var order := [0, 1, 2, 0, 2, 3]
+			if (xf * (q[1] as Vector3) - xf * (q[0] as Vector3)).cross(xf * (q[2] as Vector3) - xf * (q[0] as Vector3)).dot(xf.basis * n) > 0.0:
+				order = [0, 2, 1, 0, 3, 2]
+			for i in order:
+				st.set_normal((xf.basis * n).normalized())
+				st.set_uv(uv[i])
+				st.add_vertex(xf * (q[i] as Vector3))
 		var wm := ShaderMaterial.new()
 		wm.shader = load("res://src/world/shaders/home_wall.gdshader")
 		wm.set_shader_parameter("tint", fx[7])
@@ -257,6 +317,24 @@ func _extras(root: Node3D, xf: Transform3D) -> void:
 		pi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		pi.visibility_range_end = 200.0
 		root.add_child(pi)
+	if not far_glass.is_empty():
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for g in far_glass:
+			var side: String = g[0]
+			var out_at: float = {"left": -0.3, "right": W + 0.3, "back": D + 0.3, "front": -0.01}[side]
+			var c := _wall_corners(side if side != "front" else "back", out_at, g[1], g[2], g[3], g[4], 0.0)
+			for i in [0, 1, 2, 0, 2, 3]:
+				st.add_vertex(xf * (c[i] as Vector3))
+		st.generate_normals()
+		var fg := MeshInstance3D.new()
+		fg.name = "FarGlass"
+		fg.mesh = st.commit()
+		fg.material_override = _shared("far_glass")
+		fg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		fg.visibility_range_begin = 380.0
+		fg.visibility_range_begin_margin = 30.0
+		root.add_child(fg)
 	for bd in boards:
 		var lb := HomeBoard.new()
 		lb.tier = int(h["tier"])
@@ -308,12 +386,14 @@ func spot(kind: String, x: float, z: float, y := 0.0) -> void:
 
 ## Corners (building frame) of a wall patch and its inward normal:
 ## [bottom-left, bottom-right, top-right, top-left, normal].
-func _wall_corners(side: String, at: float, a0: float, a1: float, y0: float, y1: float) -> Array:
-	var e := 0.012
+func _wall_corners(side: String, at: float, a0: float, a1: float, y0: float, y1: float, e := 0.012) -> Array:
 	match side:
 		"back":
 			var n := (P(0.0, at - 1.0, 0.0) - P(0.0, at, 0.0)).normalized()
 			return [P(a0, at - e, y0), P(a1, at - e, y0), P(a1, at - e, y1), P(a0, at - e, y1), n]
+		"front":
+			var n := (P(0.0, at + 1.0, 0.0) - P(0.0, at, 0.0)).normalized()
+			return [P(a1, at + e, y0), P(a0, at + e, y0), P(a0, at + e, y1), P(a1, at + e, y1), n]
 		"left":
 			var n := (P(at + 1.0, 0.0, 0.0) - P(at, 0.0, 0.0)).normalized()
 			return [P(at + e, a1, y0), P(at + e, a0, y0), P(at + e, a0, y1), P(at + e, a1, y1), n]
@@ -342,6 +422,11 @@ static func _shared(kind: String) -> Material:
 			mt.roughness = 0.05
 			mt.metallic_specular = 0.9
 			mt.cull_mode = BaseMaterial3D.CULL_DISABLED
+		"far_glass":
+			mt.albedo_color = Color(0.17, 0.21, 0.25)
+			mt.roughness = 0.12
+			mt.metallic = 0.4
+			mt.cull_mode = BaseMaterial3D.CULL_DISABLED
 		"pool":
 			mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			mt.albedo_color = Color(0.1, 0.52, 0.62, 0.82)
@@ -353,24 +438,112 @@ static func _shared(kind: String) -> Material:
 	return mt
 
 
-func _inner_three(r: AABB, f: Array, col: Color) -> void:
-	# Like BuildingMesher._inner_walls, minus the window wall.
-	var x0 := r.position.x
-	var z0 := r.position.z
-	var x1 := r.end.x
-	var z1 := r.end.z
-	var y0 := r.position.y
-	var y1 := r.end.y
-	var corners := [Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)]
-	var ns := [Vector3.BACK, Vector3.LEFT, Vector3.FORWARD, Vector3.RIGHT]
-	var skip: int = {0: 2, 1: 1, 2: 0, 3: 3}[int(h["face"])]
-	for k in 4:
-		if k == skip:
+func _inner_three(_r: AABB, _f: Array, col: Color) -> void:
+	# The side and back walls (facing in), round their windows.
+	for side in ["left", "right", "back"]:
+		var at: float = {"left": 0.0, "right": W, "back": D}[side]
+		var span: float = D if side != "back" else W
+		for rc: Rect2 in wall_rects(side, at, 0.0, span, 0.0, H):
+			var c := _wall_corners(side, at, rc.position.x, rc.end.x, rc.position.y, rc.end.y, 0.0)
+			_q(m, c[0], c[1], c[2], c[3], c[4], col)
+
+
+## The glass round the room: reveals through the wall, a stone sill, a frame
+## with mullions, the pane; and (for distance, when the room isn't drawn) a
+## dark glass face on the facade so the band never reads as a hole.
+func _glaze(tier: int) -> void:
+	var fc := FRAME if tier != 4 else Color(0.62, 0.6, 0.55)
+	if tier == 2:
+		fc = STEEL
+	var reveal: Color = (PALETTE[tier][0] as Color).darkened(0.12)
+	var sill := Color(0.84, 0.82, 0.78) if tier != 4 else Color(0.2, 0.19, 0.19)
+	var T := 0.3
+	for wd in wins:
+		var side: String = wd[0]
+		var a0: float = wd[1]
+		var a1: float = wd[2]
+		var y0: float = wd[3]
+		var y1: float = wd[4]
+		var at: float = {"left": 0.0, "right": W, "back": D}[side]
+		var sgn := -1.0 if side == "left" else 1.0  # outward from the room, in room coords
+		var o0 := at
+		var o1 := at + sgn * T
+		var lo := minf(o0, o1)
+		var hi := maxf(o0, o1)
+		var mid := (o0 + o1) * 0.5
+		# Boxes in (along, out, y) → room coords.
+		var bx := func(p0: float, p1: float, q0: float, q1: float, h0: float, h1: float, c: Color) -> void:
+			if side == "back":
+				box(p0, p1, q0, q1, h0, h1, c)
+			else:
+				box(q0, q1, p0, p1, h0, h1, c)
+		var gl := func(p0: float, p1: float, q0: float, q1: float, h0: float, h1: float) -> void:
+			if side == "back":
+				pane(p0, p1, q0, q1, h0, h1)
+			else:
+				pane(q0, q1, p0, p1, h0, h1)
+		bx.call(a0 - 0.02, a0, lo, hi, y0, y1, reveal)
+		bx.call(a1, a1 + 0.02, lo, hi, y0, y1, reveal)
+		bx.call(a0, a1, lo, hi, y1, y1 + 0.02, reveal)
+		bx.call(a0 - 0.04, a1 + 0.04, minf(at - sgn * 0.06, o1), maxf(at - sgn * 0.06, o1), y0 - 0.03, y0, sill)
+		gl.call(a0, a1, mid - 0.01, mid + 0.01, y0, y1)
+		var t := 0.05 if tier < 3 else 0.035
+		var f0 := mid - 0.04
+		var f1 := mid + 0.04
+		bx.call(a0, a0 + t, f0, f1, y0, y1, fc)
+		bx.call(a1 - t, a1, f0, f1, y0, y1, fc)
+		bx.call(a0, a1, f0, f1, y0, y0 + t, fc)
+		bx.call(a0, a1, f0, f1, y1 - t, y1, fc)
+		var n := maxi(int(ceil((a1 - a0) / (1.5 if tier == 2 else 2.2))), 1)
+		for k in range(1, n):
+			var x := lerpf(a0, a1, float(k) / n)
+			bx.call(x - t * 0.5, x + t * 0.5, f0, f1, y0, y1, fc)
+		if tier == 2 and y1 - y0 > 3.0:
+			bx.call(a0, a1, f0, f1, y0 + 2.2, y0 + 2.2 + t, fc)  # the loft's transom
+		far_glass.append([side, a0, a1, y0, y1])
+	far_glass.append(["front", ox0(), ox1(), float(h["oy0"]) - float(h["y0"]), float(h["oy1"]) - float(h["y0"])])
+
+
+## A wall patch (side/at as feature(), a0..a1 along it, y0..y1) minus the
+## windows in that wall, as rects in (along, y). Only patches on the outer
+## wall itself are cut (things hung in front of it, like paintings, aren't).
+func wall_rects(side: String, at: float, a0: float, a1: float, y0: float, y1: float) -> Array:
+	var wall_at: float = {"left": 0.0, "right": W, "back": D}.get(side, -1.0)
+	var cuts: Array = []
+	if absf(at - wall_at) < 0.03:
+		for wd in wins:
+			if wd[0] == side:
+				cuts.append(wd)
+	if cuts.is_empty():
+		return [Rect2(a0, y0, a1 - a0, y1 - y0)]
+	var xs := [a0, a1]
+	for c in cuts:
+		xs.append(clampf(c[1], a0, a1))
+		xs.append(clampf(c[2], a0, a1))
+	xs.sort()
+	var out: Array = []
+	for i in xs.size() - 1:
+		var p0: float = xs[i]
+		var p1: float = xs[i + 1]
+		if p1 - p0 < 0.001:
 			continue
-		var a: Vector2 = corners[k]
-		var b: Vector2 = corners[(k + 1) % 4]
-		m.quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
-			Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col, BuildingMesher.KIND_TRIM, 0, 0)
+		var ys := [[y0, y1]]
+		for c in cuts:
+			if float(c[1]) <= p0 + 0.001 and float(c[2]) >= p1 - 0.001:
+				var nys := []
+				for iv in ys:
+					if float(c[4]) <= iv[0] or float(c[3]) >= iv[1]:
+						nys.append(iv)
+						continue
+					if float(c[3]) > iv[0]:
+						nys.append([iv[0], float(c[3])])
+					if float(c[4]) < iv[1]:
+						nys.append([float(c[4]), iv[1]])
+				ys = nys
+		for iv in ys:
+			if iv[1] - iv[0] > 0.001:
+				out.append(Rect2(p0, iv[0], p1 - p0, iv[1] - iv[0]))
+	return out
 
 
 ## Window frames: slim dark frames on the small flats, a steel grid over head
@@ -618,6 +791,8 @@ func board(side: String, at: float, along: float, y: float, width: float, frame:
 	match side:
 		"back":
 			box(along - width * 0.5 - 0.06, along + width * 0.5 + 0.06, at - 0.04, at, y - hh * 0.5 - 0.06, y + hh * 0.5 + 0.06, frame)
+		"front":
+			box(along - width * 0.5 - 0.06, along + width * 0.5 + 0.06, at, at + 0.04, y - hh * 0.5 - 0.06, y + hh * 0.5 + 0.06, frame)
 		"left":
 			box(at, at + 0.04, along - width * 0.5 - 0.06, along + width * 0.5 + 0.06, y - hh * 0.5 - 0.06, y + hh * 0.5 + 0.06, frame)
 		_:
@@ -747,31 +922,33 @@ func _studio(pal: Array) -> void:
 	for i in 6:
 		var x := 0.15 + i * 0.13
 		box(x, x + 0.12, D - 3.46 + 0.04 * (i % 2), D - 3.38 + 0.04 * (i % 2), 0.3, H - 0.3, Color(0.78, 0.7, 0.55))
-	picture("back", D, 0.6, 3.2, 1.9, 2.9, [Color(0.15, 0.25, 0.4), Color(0.95, 0.78, 0.2)])
-	# Clothes rail on the left wall: the work kit.
-	for z: float in [D - 5.6, D - 3.9]:
-		tube(Vector3(0.4, 0.0, z), Vector3(0.4, 1.75, z), 0.018, STEEL, 5)
-	tube(Vector3(0.4, 1.75, D - 5.6), Vector3(0.4, 1.75, D - 3.9), 0.016, STEEL, 5)
+	# The work kit on a free-standing rail: the divider between bed and lounge.
+	var rz := D - 3.75
+	for x: float in [0.5, 2.4]:
+		tube(Vector3(x, 0.0, rz), Vector3(x, 1.75, rz), 0.018, STEEL, 5)
+		tube(Vector3(x, 0.02, rz - 0.25), Vector3(x, 0.02, rz + 0.25), 0.018, STEEL, 5)
+	tube(Vector3(0.5, 1.75, rz), Vector3(2.4, 1.75, rz), 0.016, STEEL, 5)
 	var kit := [Color(0.12, 0.12, 0.14), Color(0.2, 0.22, 0.26), Color(0.95, 0.75, 0.1), Color(0.7, 0.18, 0.14),
 		Color(0.3, 0.32, 0.36), Color(0.15, 0.45, 0.5)]
 	for i in 6:
-		var z := D - 5.45 + i * 0.25
-		box(0.22, 0.58, z, z + 0.2, 0.95, 1.67, kit[i])
-	box(0.15, 0.65, D - 5.6, D - 3.9, 0.0, 0.3, Color(0.3, 0.3, 0.32), true)  # shoe crate
-	# The bike on the left wall.
+		var x := 0.7 + i * 0.27
+		box(x, x + 0.2, rz - 0.18, rz + 0.18, 0.95, 1.67, kit[i])
+	box(0.55, 2.35, rz - 0.2, rz + 0.2, 0.0, 0.25, Color(0.3, 0.3, 0.32), true)  # shoe crate
+	# The bike on the wall by the front door (back wall).
 	var wy := 1.45
-	var bz := 3.3
-	ring(Vector3(0.2, wy, bz), Vector3.RIGHT, 0.34, 0.018, STEEL)
-	ring(Vector3(0.2, wy, bz + 1.1), Vector3.RIGHT, 0.34, 0.018, STEEL)
+	var bx := 6.4
+	var bwz := D - 0.2
+	ring(Vector3(bx, wy, bwz), Vector3.BACK, 0.34, 0.018, STEEL)
+	ring(Vector3(bx + 1.1, wy, bwz), Vector3.BACK, 0.34, 0.018, STEEL)
 	var orange := Color(0.92, 0.45, 0.12)
-	tube(Vector3(0.2, wy, bz), Vector3(0.2, wy + 0.38, bz + 0.5), 0.02, orange, 5)
-	tube(Vector3(0.2, wy + 0.38, bz + 0.5), Vector3(0.2, wy, bz + 1.1), 0.02, orange, 5)
-	tube(Vector3(0.2, wy + 0.38, bz + 0.5), Vector3(0.2, wy + 0.42, bz + 0.85), 0.02, orange, 5)
-	tube(Vector3(0.2, wy + 0.42, bz + 0.85), Vector3(0.2, wy, bz + 1.1), 0.02, orange, 5)
-	tube(Vector3(0.2, wy, bz), Vector3(0.2, wy + 0.5, bz + 0.1), 0.018, orange, 5)
-	tube(Vector3(0.08, wy + 0.5, bz + 0.1), Vector3(0.36, wy + 0.5, bz + 0.1), 0.014, STEEL, 5)
-	box(0.15, 0.25, bz + 0.75, bz + 0.95, wy + 0.48, wy + 0.52, STEEL)
-	box(0.02, 0.06, bz + 0.45, bz + 0.55, wy + 0.1, wy + 0.5, STEEL)
+	tube(Vector3(bx, wy, bwz), Vector3(bx + 0.5, wy + 0.38, bwz), 0.02, orange, 5)
+	tube(Vector3(bx + 0.5, wy + 0.38, bwz), Vector3(bx + 1.1, wy, bwz), 0.02, orange, 5)
+	tube(Vector3(bx + 0.5, wy + 0.38, bwz), Vector3(bx + 0.85, wy + 0.42, bwz), 0.02, orange, 5)
+	tube(Vector3(bx + 0.85, wy + 0.42, bwz), Vector3(bx + 1.1, wy, bwz), 0.02, orange, 5)
+	tube(Vector3(bx, wy, bwz), Vector3(bx + 0.1, wy + 0.5, bwz), 0.018, orange, 5)
+	tube(Vector3(bx + 0.1, wy + 0.5, bwz - 0.14), Vector3(bx + 0.1, wy + 0.5, bwz + 0.14), 0.014, STEEL, 5)
+	box(bx + 0.75, bx + 0.95, bwz - 0.05, bwz + 0.05, wy + 0.48, wy + 0.52, STEEL)
+	box(bx + 0.45, bx + 0.55, D - 0.06, D - 0.02, wy + 0.1, wy + 0.5, STEEL)
 	# Desk at the window (left of the opening): laptop, lamp, chair, pinboard.
 	box(0.3, 2.7, 0.45, 1.15, 0.72, 0.76, OAK, true)
 	for x: float in [0.36, 2.64]:
@@ -783,22 +960,17 @@ func _studio(pal: Array) -> void:
 	tube(Vector3(2.4, 0.76, 0.6), Vector3(2.4, 1.2, 0.6), 0.012, STEEL, 4)
 	gbox(2.3, 2.5, 0.55, 0.75, 1.14, 1.24, Color(1.0, 0.82, 0.55))
 	asset("chair", 1.4, 1.65)
-	box(0.02, 0.05, 1.4, 2.9, 1.3, 2.3, Color(0.6, 0.45, 0.3))  # pinboard + route maps
-	for i in 5:
-		var z := 1.55 + i * 0.27
-		box(0.05, 0.06, z, z + 0.2, 1.45 + 0.2 * (i % 3), 1.7 + 0.2 * (i % 3), [CHALK, Color(0.95, 0.85, 0.4), Color(0.6, 0.8, 0.9)][i % 3])
 	# Galley kitchen down the right wall: sage units, butcher block, fridge, shelf.
 	var sage := Color(0.4, 0.5, 0.43)
-	box(W - 0.66, W - 0.04, 3.2, 3.95, 0.0, 1.95, CHALK, true)  # fridge
-	box(W - 0.68, W - 0.66, 3.3, 3.35, 1.0, 1.6, STEEL)
-	kitchen_run(true, 4.0, D - 0.2, sage, Color(0.66, 0.47, 0.28), BRASS)
+	box(W - 0.66, W - 0.04, D - 1.42, D - 0.66, 0.0, 1.95, CHALK, true)  # fridge, in the corner bay
+	box(W - 0.68, W - 0.66, D - 1.3, D - 1.25, 1.0, 1.6, STEEL)
+	kitchen_run(true, 3.4, D - 1.5, sage, Color(0.66, 0.47, 0.28), BRASS)
 	box(W - 0.6, W - 0.2, 5.6, 6.15, 0.93, 0.945, FRAME)  # hob
 	tube(Vector3(W - 0.3, 0.93, 6.8), Vector3(W - 0.3, 1.13, 6.8), 0.07, Color(0.85, 0.2, 0.15), 8)
 	box(W - 0.6, W - 0.15, 7.6, 8.3, 0.93, 0.96, STEEL)  # sink
-	box(W - 0.32, W - 0.04, 4.2, D - 0.4, 1.6, 1.63, OAK)
-	for i in 9:
-		var z := 4.4 + i * 0.6
-		tube(Vector3(W - 0.18, 1.63, z), Vector3(W - 0.18, 1.79 + 0.04 * (i % 3), z), 0.06,
+	for i in 4:  # jars along the back of the worktop
+		var z := 3.7 + i * 0.22
+		tube(Vector3(W - 0.18, 0.93, z), Vector3(W - 0.18, 1.09 + 0.04 * (i % 3), z), 0.06,
 			[Color(0.9, 0.85, 0.7), Color(0.5, 0.3, 0.15), Color(0.85, 0.85, 0.85)][i % 3], 8)
 	# Bistro table for two (front right corner, out of the window band).
 	var tx := W - 2.0
@@ -818,8 +990,8 @@ func _studio(pal: Array) -> void:
 	tube(Vector3(lx + 2.0, 0.0, 5.2), Vector3(lx + 2.0, 0.42, 5.2), 0.42, Color(0.2, 0.34, 0.42), 12)
 	tube(Vector3(lx - 1.9, 0.0, 7.2), Vector3(lx - 1.9, 1.55, 7.2), 0.015, STEEL, 5)
 	gbox(lx - 2.05, lx - 1.75, 7.05, 7.35, 1.55, 1.8, Color(1.0, 0.82, 0.55))
-	# Front door (back wall, right of the platform), hooks, parcels.
-	var door := 6.4
+	# Front door (back wall, between the windows), hooks, parcels.
+	var door := 3.9
 	box(door, door + 1.1, D - 0.06, D - 0.01, 0.0, 2.2, Color(0.25, 0.32, 0.3))
 	box(door + 0.95, door + 1.0, D - 0.12, D - 0.06, 1.0, 1.1, BRASS)
 	for i in 4:
@@ -828,9 +1000,9 @@ func _studio(pal: Array) -> void:
 	var card := Color(0.66, 0.5, 0.32)
 	box(door + 1.4, door + 2.1, D - 0.85, D - 0.2, 0.0, 0.45, card, true)
 	box(door + 1.5, door + 2.0, D - 0.75, D - 0.3, 0.45, 0.72, card.lightened(0.1))
-	box(door + 2.2, door + 2.95, D - 0.9, D - 0.25, 0.0, 0.3, card.darkened(0.1), true)
-	picture("back", D, door + 1.4, door + 2.7, 1.95, 2.65, [Color(0.95, 0.3, 0.2), Color(0.15, 0.6, 0.62), Color(0.95, 0.78, 0.2)])
-	board("back", D - 0.02, W - 2.2, 1.9, 1.2, Color(0.6, 0.45, 0.3))
+	box(7.8, 8.6, D - 0.9, D - 0.25, 0.0, 0.3, card.darkened(0.1), true)
+	picture("back", D, 6.2, 7.8, 2.2, 3.0, [Color(0.95, 0.3, 0.2)])
+	board("front", WIN_Z + 0.02, (ox1() + W) * 0.5, 1.95, 1.1, Color(0.6, 0.45, 0.3))
 	plant_big(W - 0.8, 3.0, 0.9)
 	trophy_shelf(0.3, 3.0, WIN_Z, 1.35, 1.0, OAK)
 	spot("wardrobe", 1.0, D - 4.75)
@@ -857,19 +1029,20 @@ func _apartment(pal: Array) -> void:
 	box(left, left + 0.16, split, D, 0.0, H, wall, true)
 	wall_x(split, right, W, right + 0.4, right + 1.7, wall)
 	box(right, right + 0.16, split, D, 0.0, H, wall, true)
-	feature("back", split - 0.002, 0.0, left - 2.6, 0.0, H, 4, Color(0.55, 0.62, 0.58))
 	# Bedroom: bed, bedside lamps, wardrobe, a chair.
 	asset("bed", left * 0.5 + 0.4, D - 1.5)
 	proxy(left * 0.5 - 0.55, left * 0.5 + 1.35, D - 2.65, D - 0.35, 0.72)
 	for x: float in [left * 0.5 - 0.95, left * 0.5 + 1.75]:
 		box(x - 0.22, x + 0.22, D - 0.55, D - 0.15, 0.0, 0.5, OAK)
 		gbox(x - 0.1, x + 0.1, D - 0.45, D - 0.25, 0.5, 0.75, Color(1.0, 0.85, 0.62))
-	box(0.12, 0.75, split + 0.5, D - 0.5, 0.0, 2.4, CHALK, true)
+	# Wardrobe on the hall wall (the outer walls are glass).
+	var wz0 := split + 1.4
+	var wz1 := D - 0.9
+	box(left - 0.62, left, wz0, wz1, 0.0, 2.4, CHALK, true)
 	for z in range(3):
-		var zz := split + 0.55 + z * ((D - 1.05 - split) / 3.0)
-		box(0.75, 0.77, zz + 0.02, zz + (D - 1.05 - split) / 3.0 - 0.02, 0.05, 2.35, CHALK.darkened(0.05))
+		var zz := wz0 + 0.05 + z * ((wz1 - wz0 - 0.1) / 3.0)
+		box(left - 0.64, left - 0.62, zz + 0.02, zz + (wz1 - wz0 - 0.1) / 3.0 - 0.02, 0.05, 2.35, CHALK.darkened(0.05))
 	_rug(left * 0.5 - 1.3, left * 0.5 + 2.1, split + 0.6, D - 0.3, Color(0.7, 0.55, 0.45))
-	picture("back", D, left * 0.5 - 0.4, left * 0.5 + 1.2, 1.5, 2.2, [Color(0.85, 0.82, 0.7)])
 	# Bathroom: vanity, toilet, a walk-in shower, a towel rail.
 	asset("vanity", W - 0.72, D - 0.65)
 	asset("toilet", right + 0.8, D - 0.65)
@@ -901,24 +1074,23 @@ func _apartment(pal: Array) -> void:
 	tube(Vector3(sx + 1.9, 0.0, split - 1.3), Vector3(sx + 1.9, 2.1, split - 1.3), 0.02, BRASS, 6)
 	tube(Vector3(sx + 1.9, 2.1, split - 1.3), Vector3(sx + 0.8, 2.3, split - 2.6), 0.018, BRASS, 6)
 	gbox(sx + 0.65, sx + 0.95, split - 2.75, split - 2.45, 2.1, 2.25, Color(1.0, 0.87, 0.65))
-	# A wall of books on the left wall, floor to near the ceiling, with a ladder.
-	var bz0 := 0.5
-	var bz1 := split - 2.2 - 1.6
-	box(0.05, 0.4, bz0, bz1, 0.0, 3.3, CHALK, true)
+	# A wall of books on the bedroom wall behind the sofa, with a ladder.
+	var bx0w := 0.4
+	var bx1w := left - 2.8
+	box(bx0w, bx1w, split - 0.36, split, 0.0, 3.3, CHALK, true)
 	for i in 7:
 		var y := 0.1 + i * 0.46
-		box(0.05, 0.4, bz0, bz1, y, y + 0.03, CHALK.darkened(0.06))
-		books(0.08, 0.36, bz0 + 0.05, bz1 - 0.05, y + 0.03, 101 + i, true)
-	for z: float in [bz1 - 1.2, bz1 - 0.8]:
-		tube(Vector3(0.95, 0.0, z), Vector3(0.42, 3.3, z), 0.02, OAK, 5)
+		box(bx0w, bx1w, split - 0.36, split, y, y + 0.03, CHALK.darkened(0.06))
+		books(bx0w + 0.05, bx1w - 0.05, split - 0.33, split - 0.05, y + 0.03, 101 + i)
+	for x: float in [bx0w + 0.6, bx0w + 1.0]:
+		tube(Vector3(x, 0.0, split - 0.75), Vector3(x, 3.3, split - 0.38), 0.02, OAK, 5)
 	for k in 8:
 		var t := (k + 0.5) / 8.0
-		var x := lerpf(0.95, 0.42, t)
-		tube(Vector3(x, t * 3.3, bz1 - 1.2), Vector3(x, t * 3.3, bz1 - 0.8), 0.015, OAK, 4)
+		var z := lerpf(split - 0.75, split - 0.38, t)
+		tube(Vector3(bx0w + 0.6, t * 3.3, z), Vector3(bx0w + 1.0, t * 3.3, z), 0.015, OAK, 4)
 	# Kitchen along the right wall, wall units over; breakfast bar with stools.
 	var white := Color(0.95, 0.95, 0.93)
 	kitchen_run(true, 3.4, split - 1.2, white, OAK, STEEL)
-	box(W - 0.38, W - 0.04, 3.4, split - 1.2, 1.5, 2.3, white)
 	box(W - 0.66, W - 0.04, split - 1.15, split - 0.3, 0.0, 2.1, Color(0.85, 0.86, 0.86), true)  # fridge
 	box(W - 0.6, W - 0.2, 5.0, 5.6, 0.93, 0.945, FRAME)
 	box(W - 0.6, W - 0.15, 6.4, 7.1, 0.93, 0.96, STEEL)
@@ -941,13 +1113,13 @@ func _apartment(pal: Array) -> void:
 	asset("chair", dx - 0.85, dz, PI * 0.5)
 	asset("chair", dx + 0.85, dz, -PI * 0.5)
 	hang(dx, dz, 1.75, Color(0.92, 0.9, 0.86), 0.2)
-	plant_big(0.8, split - 0.7)
+	plant_big(0.8, 3.2)
 	plant_big(right - 0.6, split - 0.6, 0.8)
 	trophy_shelf(0.6, 3.7, WIN_Z, 1.3, 1.0, OAK)
 	box(bx0 + 0.3, bx0 + 0.75, 4.75, 5.05, 0.95, 0.965, Color(0.15, 0.15, 0.16))  # tablet on the bar
 	gbox(bx0 + 0.32, bx0 + 0.73, 4.77, 5.03, 0.965, 0.97, Color(0.45, 0.7, 1.0))
-	spot("wardrobe", 1.3, split + 2.8)
-	spot("bed", 5.3, D - 2.4)
+	spot("wardrobe", left - 1.35, split + 2.6)
+	spot("bed", 1.5, D - 2.6)
 	spot("jobs", bx0 + 0.5, 6.1)
 	spot("trophies", 2.2, 1.3)
 	lights.append([Vector3(sx, H - 0.5, split * 0.55), Color(1.0, 0.9, 0.78), 1.3, 8.5])
@@ -982,15 +1154,11 @@ func _loft(pal: Array) -> void:
 	box(5.2, 5.8, D - 0.6, D - 0.1, 0.96, 0.98, STEEL)  # sink
 	box(2.0, 2.7, D - 0.6, D - 0.1, 0.96, 0.975, FRAME)  # hob
 	box(7.7, 8.5, D - 0.7, D - 0.05, 0.0, 2.2, Color(0.2, 0.2, 0.21), true)  # fridge
-	for x: float in [0.6, 2.4, 4.2, 6.0, 7.5]:
-		tube(Vector3(x, 1.4, D - 0.05), Vector3(x, 2.9, D - 0.05), 0.012, STEEL, 4)
-	for y: float in [1.55, 2.15, 2.75]:
-		box(0.5, 7.6, D - 0.34, D - 0.04, y, y + 0.04, OAK)
-		books(0.7, 2.0, D - 0.3, D - 0.08, y + 0.04, int(y * 10.0))
-		for i in 8:
-			var x := 2.4 + i * 0.6
-			tube(Vector3(x, y + 0.04, D - 0.2), Vector3(x, y + 0.2 + 0.06 * (i % 2), D - 0.2), 0.07,
-				[CHALK, Color(0.3, 0.32, 0.35), Color(0.75, 0.6, 0.4)][i % 3], 8)
+	for i in 6:  # jars and a coffee machine along the back of the worktop (glass above)
+		var jx := 3.2 + i * 0.32
+		tube(Vector3(jx, 0.96, D - 0.25), Vector3(jx, 1.14 + 0.06 * (i % 2), D - 0.25), 0.07,
+			[CHALK, Color(0.3, 0.32, 0.35), Color(0.75, 0.6, 0.4)][i % 3], 8)
+	box(0.8, 1.25, D - 0.5, D - 0.12, 0.96, 1.4, Color(0.15, 0.15, 0.16))
 	var iz := D - 4.4
 	box(1.6, 6.4, iz, iz + 1.1, 0.0, 0.9, WALNUT, true)
 	box(1.55, 6.45, iz - 0.05, iz + 1.15, 0.9, 0.97, conc)
@@ -1033,8 +1201,10 @@ func _loft(pal: Array) -> void:
 	# Training corner (front left, clear of the opening): bag, pull-up bar, bench, rack.
 	tube(Vector3(1.8, H, 4.8), Vector3(1.8, 2.1, 4.8), 0.01, STEEL, 4)
 	tube(Vector3(1.8, 0.9, 4.8), Vector3(1.8, 2.1, 4.8), 0.2, Color(0.55, 0.1, 0.08), 12)
-	tube(Vector3(0.05, 2.4, 3.0), Vector3(1.2, 2.4, 3.0), 0.018, STEEL, 6)
-	box(0.0, 0.08, 2.9, 3.1, 2.25, 2.55, STEEL)
+	for fx2: float in [0.5, 1.8]:  # free-standing pull-up frame (the wall is glass)
+		tube(Vector3(fx2, 0.0, 3.0), Vector3(fx2, 2.45, 3.0), 0.03, STEEL, 6)
+		tube(Vector3(fx2, 0.02, 2.6), Vector3(fx2, 0.02, 3.4), 0.03, STEEL, 6)
+	tube(Vector3(0.5, 2.4, 3.0), Vector3(1.8, 2.4, 3.0), 0.018, STEEL, 6)
 	box(0.6, 1.0, 6.6, 7.9, 0.0, 0.45, black, true)
 	for zz: float in [7.0, 7.5]:
 		tube(Vector3(0.5, 0.62, zz), Vector3(1.1, 0.62, zz), 0.02, STEEL, 5)
@@ -1044,12 +1214,12 @@ func _loft(pal: Array) -> void:
 	for i in 4:
 		tube(Vector3(0.3, 0.9, 8.8 + i * 0.35), Vector3(0.3, 1.08, 8.8 + i * 0.35), 0.1 + 0.015 * i, black, 8)
 	_rug(0.3, 3.4, 3.4, 10.2, Color(0.2, 0.2, 0.22))
-	# Neon over the training corner: a wave on the brick.
+	# Neon on the brick bay between the kitchen and the bedroom: a wave.
 	for i in 12:
 		var a := float(i) / 11.0
-		var zz := 4.0 + a * 4.0
-		var yy := 3.9 + sin(a * TAU * 1.5) * 0.35
-		gbox(0.02, 0.05, zz, zz + 0.36, yy, yy + 0.05, Color(1.0, 0.3, 0.55))
+		var xx := 8.9 + a * 3.6
+		var yy := 3.5 + sin(a * TAU * 1.5) * 0.35
+		gbox(xx, xx + 0.32, D - 0.05, D - 0.02, yy, yy + 0.05, Color(1.0, 0.3, 0.55))
 	# Record wall (right): low cabinet, turntable, speakers, sleeves above.
 	cabinet(W - 0.6, W - 0.05, 3.2, 6.8, 0.72, WALNUT, WALNUT.darkened(0.2))
 	box(W - 0.5, W - 0.12, 4.6, 5.1, 0.72, 0.8, FRAME)
@@ -1057,12 +1227,10 @@ func _loft(pal: Array) -> void:
 	for zz: float in [2.6, 7.0]:
 		box(W - 0.55, W - 0.1, zz, zz + 0.45, 0.0, 1.15, black, true)
 		tube(Vector3(W - 0.55, 0.8, zz + 0.225), Vector3(W - 0.57, 0.8, zz + 0.225), 0.13, Color(0.3, 0.3, 0.32), 10)
-	for r in 3:
-		for i in 7:
-			var zz := 3.3 + i * 0.5
-			box(W - 0.06, W - 0.04, zz, zz + 0.4, 1.6 + r * 0.55, 2.0 + r * 0.55,
-				[Color(0.85, 0.3, 0.2), Color(0.1, 0.4, 0.55), CHALK, Color(0.95, 0.75, 0.2), black][(i + r * 2) % 5])
-	board("right", W - 0.02, 8.6, 2.2, 1.6, STEEL)
+	for i in 9:  # records filed on the cabinet
+		var zz := 5.4 + i * 0.13
+		box(W - 0.52, W - 0.14, zz, zz + 0.012, 0.72, 1.04, [Color(0.85, 0.3, 0.2), Color(0.1, 0.4, 0.55), CHALK, Color(0.95, 0.75, 0.2), black][i % 5])
+	board("back", D - 0.02, 10.7, 2.0, 1.6, STEEL)
 	# Lounge in the middle: sofa to the view, a second at right angles, rug.
 	var lx := W * 0.55
 	asset("sofa", lx, 8.9)
@@ -1085,7 +1253,7 @@ func _loft(pal: Array) -> void:
 	lights.append([Vector3(4.0, H - 2.6, iz + 0.5), Color(1.0, 0.78, 0.5), 1.5, 8.0])
 	lights.append([Vector3(lx, H - 1.6, 7.4), Color(1.0, 0.86, 0.68), 1.4, 10.0])
 	lights.append([Vector3(W - 3.4, 2.4, D - 2.6), Color(1.0, 0.8, 0.6), 1.0, 6.5])
-	lights.append([Vector3(1.0, 3.8, 6.0), Color(1.0, 0.35, 0.55), 0.9, 6.0])
+	lights.append([Vector3(10.7, 3.4, D - 1.2), Color(1.0, 0.35, 0.55), 0.9, 6.0])  # neon spill
 	lights.append([Vector3(W - 1.5, 2.6, 5.0), Color(1.0, 0.84, 0.62), 0.7, 5.0])
 
 
@@ -1153,7 +1321,6 @@ func _sky(pal: Array) -> void:
 	tube(Vector3(sx - 0.22, 0.85, D - 4.9), Vector3(sx - 0.22, 1.35, D - 4.9), 0.1, Color(0.15, 0.25, 0.3), 10)
 	# Kitchen: marble run along the right wall (in front of the suite), island.
 	kitchen_run(true, 4.4, sz - 0.3, CHALK, STONE, BRASS)
-	box(W - 0.4, W - 0.04, 4.4, sz - 0.3, 1.6, 2.5, WALNUT)
 	box(W - 0.6, W - 0.2, 6.2, 6.8, 0.96, 0.975, FRAME)
 	var kx0 := W - 5.4
 	var kx1 := W - 2.2
@@ -1323,11 +1490,8 @@ func _penthouse(pal: Array) -> void:
 	tube(Vector3(W - 1.3, 1.1, 3.7), Vector3(W - 0.7, 1.45, 3.0), 0.075, BRASS, 10)
 	box(0.4, 1.3, 3.2, 4.1, 0.0, 1.0, STONE, true)
 	ring(Vector3(0.85, 1.65, 3.65), Vector3.FORWARD, 0.55, 0.06, BRASS, 20)
-	# A big canvas on the marble wall, and a tall one by the stairs.
-	box(W - 0.06, W - 0.02, 4.0, 11.0, 1.6, 5.2, Color(0.08, 0.07, 0.07))
-	box(W - 0.07, W - 0.06, 4.1, 7.5, 1.7, 5.1, Color(0.85, 0.4, 0.18))
-	box(W - 0.07, W - 0.06, 7.5, 10.9, 1.7, 5.1, Color(0.15, 0.2, 0.35))
-	picture("left", 0.0, 4.6, 8.6, 3.8, 6.4, [Color(0.75, 0.7, 0.62), Color(0.2, 0.22, 0.26), Color(0.7, 0.5, 0.3)])
+	# A big canvas on the stone wall above the stairs (the rest is glass).
+	picture("left", 0.0, mz - 4.9, mz - 0.4, 4.0, 6.7, [Color(0.85, 0.4, 0.18)])
 	plant_big(2.6, mz - 3.4, 1.3)
 	plant_big(W - 1.0, mz - 1.0, 1.5)
 	plant_big(W * 0.5, D - 0.8, 1.2)

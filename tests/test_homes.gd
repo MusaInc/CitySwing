@@ -239,7 +239,7 @@ func test_indoor_camera_keeps_the_hero_in_view(t) -> void:
 		var reached := 0
 		var top := 0.0
 		for wp: Array in routes[h["id"]]:
-			var goal := Apartments.face_point(h, float(h["a0"]) + float(wp[0]), -float(wp[1]), float(h["y0"]))
+			var goal := Apartments.face_point(h, float(h["a0"]) + probe.probe_x(h, wp[0]), -probe.probe_z(h, wp[1]), float(h["y0"]))
 			for i in 420:
 				var to := goal - player.global_position
 				to.y = 0.0

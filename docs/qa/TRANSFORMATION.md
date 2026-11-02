@@ -122,3 +122,13 @@ rack (touch: the WARDROBE button). Bottom: the Homes screen with real
 renders, floor sizes and Visit; the penthouse at night.
 
 ![homes v3](transformation/homes_v3.jpg)
+
+## 8. 360° homes (2026-11-02)
+
+Each home is a whole floor with glass on all four sides. Top four: the
+studio, the apartment, the loft, the sky apartment from the back (glass
+both sides of the fire, the dining room against the sea). Then the
+penthouse; and from outside at night, the homes are the lit glass floors on
+their towers (apartment, sky apartment, penthouse).
+
+![homes 360](transformation/homes_360.jpg)

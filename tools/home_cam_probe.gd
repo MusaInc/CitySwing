@@ -4,16 +4,18 @@ extends SceneTree
 ## frames where the lens leaves the room or loses sight of the hero.
 ##   godot --headless --fixed-fps 30 -s res://tools/home_cam_probe.gd -- [home id] [shots dir]
 ## (with a display and a shots dir, saves a frame at every waypoint)
+## Route points are room coords [x, z]; negative means from the far wall
+## (W + x, D + z), as the rooms take their tower's floor plate.
 
 const ROUTES := {
 	"starter": [[6, 4.5], [3.2, 5.5], [5, 9.5], [9.8, 8.5], [9.5, 3.5], [3.2, 2.8], [6, 4]],
-	"city": [[8, 4], [2, 2.6], [5.5, 7.8], [5.4, 10.4], [5.5, 7.8], [8.8, 11], [8.8, 7], [12.5, 7.0], [12.0, 10.0],
-		[12, 7.5], [8, 3]],
+	"city": [[8, 4], [2, 2.6], [5.5, 7.8], [5.4, 10.4], [5.5, 7.8], [8.8, 11], [8.8, 7], [12.5, 7.0], [-4.2, 10.0],
+		[-4.2, 7.5], [8, 3]],
 	"loft": [[10, 4], [2.5, 5.5], [2.5, 9], [7.5, 10.5], [13.4, 9.9], [13.4, 12.5], [13.4, 9.9], [17, 6], [10, 3]],
 	"sky": [[12, 4], [6.5, 7.6], [6.5, 12.5], [10, 15], [11, 12], [15.5, 10.3], [15.6, 13.5], [15.5, 10.0], [17, 9.5],
 		[12, 3]],
-	"penthouse": [[13, 5], [11, 11], [1.4, 9.0], [1.4, 15.6], [8, 17.5], [17, 16.5], [8, 17.5], [1.4, 15.4], [1.4, 9.4],
-		[8, 15.8], [11, 11], [24.5, 12], [24.5, 5], [19.6, 6], [13, 4]],
+	"penthouse": [[13, 5], [11, 11], [1.4, 9.0], [1.4, -4.4], [8, -2.5], [17, -3.5], [8, -2.5], [1.4, -4.6], [1.4, 9.4],
+		[8, -3.0], [11, 11], [-1.5, 12], [-1.5, 5], [-6.4, 6], [13, 4]],
 }
 
 
@@ -73,7 +75,7 @@ func _go() -> void:
 		var route: Array = ROUTES[h["id"]]
 		for wi in route.size():
 			var wp: Array = route[wi]
-			var goal := Apartments.face_point(h, float(h["a0"]) + float(wp[0]), -float(wp[1]), float(h["y0"]))
+			var goal := Apartments.face_point(h, float(h["a0"]) + probe_x(h, wp[0]), -probe_z(h, wp[1]), float(h["y0"]))
 			var t := 0.0
 			while t < 7.0:
 				var to := goal - player.global_position
@@ -89,8 +91,8 @@ func _go() -> void:
 				frames += 1
 				var c := cam.global_position
 				var f := Apartments.to_face(h, c)
-				var inside: bool = f.x > float(h["a0"]) + 0.02 and f.x < float(h["a1"]) - 0.02 and f.y < -0.02 \
-					and f.y > -float(h["depth"]) + 0.02 and f.z > float(h["y0"]) + 0.05 and f.z < float(h["y1"]) - 0.05
+				var inside: bool = f.x > float(h["a0"]) and f.x < float(h["a1"]) and f.y < 0.0 \
+					and f.y > -float(h["depth"]) and f.z > float(h["y0"]) and f.z < float(h["y1"])
 				if not inside and not in_opening(h, f):
 					outside += 1
 					worst = "wp%d out f=%s" % [wi, (f - Vector3(float(h["a0"]), 0, float(h["y0"]))).snapped(Vector3.ONE * 0.01)]
@@ -138,3 +140,11 @@ func _thin(hit: Dictionary) -> bool:
 func in_opening(h: Dictionary, f: Vector3) -> bool:
 	return f.y >= 0.0 and f.y < 1.0 and f.x > float(h["oa0"]) and f.x < float(h["oa1"]) \
 		and f.z > float(h["oy0"]) and f.z < float(h["oy1"])
+
+
+static func probe_x(h: Dictionary, x: float) -> float:
+	return x if x >= 0.0 else float(h["a1"]) - float(h["a0"]) + x
+
+
+static func probe_z(h: Dictionary, z: float) -> float:
+	return z if z >= 0.0 else float(h["depth"]) + z
