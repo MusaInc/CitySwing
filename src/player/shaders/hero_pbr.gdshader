@@ -11,6 +11,7 @@ uniform sampler2D ao_map : filter_linear_mipmap, hint_default_white;
 uniform sampler2D roughness_map : filter_linear_mipmap, hint_default_white;
 uniform float roughness = 0.8;
 uniform float normal_strength = 0.0;
+uniform vec3 surface_emission = vec3(0.0);
 uniform vec3 cloth_drag = vec3(0.0);
 uniform float cloth_flutter = 0.0;
 uniform float cloth_time = 0.0;
@@ -32,6 +33,7 @@ void fragment() {
     float surface_roughness = roughness * texture(roughness_map, UV).g;
     ROUGHNESS = mix(surface_roughness, max(0.3, surface_roughness - 0.18), wetness);
     SPECULAR = 0.35;
+    EMISSION = surface_emission;
     AO = texture(ao_map, UV).r;
     AO_LIGHT_AFFECT = 0.15;
     NORMAL_MAP = texture(normal_map, UV).rgb;

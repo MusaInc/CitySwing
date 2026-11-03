@@ -260,7 +260,7 @@ func test_expert_swings_through_generated_city(t) -> void:
 	var w := CityWorld.new()
 	add_child(w)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 21
+	rng.seed = int(OS.get_environment("CITY_SEED")) if OS.get_environment("CITY_SEED") != "" else 21
 	var dists: Array[float] = []
 	var touches: Array[int] = []
 	var swings: Array[int] = []

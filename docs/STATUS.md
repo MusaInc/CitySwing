@@ -1,3 +1,47 @@
+# Status: 2026-11-03 (City Loop, coast, crashes, web reach, look)
+
+- **City Loop replaces the edge railways.** The coastal Loop Line viaduct,
+  the brick waterfront viaduct, the Valley shuttle and the dead-ended
+  Cross-City Line are gone. One closed, one-way line (`RailNetwork`, line
+  "city") runs north up the Spine through the CBD, west round the inner ring,
+  down Dock Road, west along Valley Road and over its own **rail-only bridge**
+  across the strait: a white steel through-arch (ribs take a web) to a turning
+  loop on Westbank's quay (`RailNetwork.TERMINUS`, kept clear by
+  `generate_mainland`), then back over the bridge and along Valley Road.
+  Six stations (stairs via `CityInfrastructure.station_access`), three trains
+  spaced through one timetable (`oneway`/`trains` in the line dict). Buildings
+  in its path are cleared (`_clear_corridor`, 1 today). The island layout now
+  generates Westbank itself (the line needs its ground); CityWorld reuses it.
+- **Edges:** `CoastLife` – North Beach (the shore apron widens to ~88 m of
+  sand between x 140–615: huts, steps, umbrellas/loungers, lifeguard towers,
+  volleyball, a 150 m pleasure pier with a domed pavilion) and the Marina off
+  the west quay (pontoons, fingers, piles, yachts whose masts take a web,
+  motor boats, gangways, harbour hut). Kits with their own RNG.
+- **Riding trains:** car collision is a hull of the drawn profile (curved roof)
+  plus the roof pods (was a flat box 18 cm under the pods / floating at the
+  edges); feet travel with the roof (`Gait.shift` from `Player.carry_velocity`);
+  landing on a train keeps at most 4 m/s of relative speed, leaving it keeps
+  the train's speed.
+- **Crashes:** a knocked-out body now lies flat on the ground (ragdoll pin
+  drops to lying height on the floor), `Player.slammed` → hit-stop beat,
+  shake, thud, dust (`ImpactFx.slam/dust`), 1–2 bounces and a skid (humans
+  only), limbs flung on impact. Cars and trains knock you out (`VehicleHits`,
+  `Player.hit_by`; HUD "HIT BY A CAR/TRAIN"). Humans only.
+- **Web reach from height:** `Player.reach_extra` (up to +50 m, humans only)
+  from height above ground and fall speed; `p_eff()` carries it into
+  targeting/attach/rope length; flatter fan rows (`LOW_ELEVATIONS`) while it
+  is on. Web half-width 0.012.
+- **Look:** richer blue sky, blue depth fog starting at 110 m (gradual, takes
+  distant contrast), warmer sun, cooler shade, soft daytime bloom, a little
+  more saturation and split toning. **Hills:** 45 m mesh, gullies/knolls in
+  `Hinterland.height_at`, ~5k instanced conifers in clumps, canopy/strata
+  detail and detail normals in hinterland.gdshader.
+- Merged `improvement/world-cleanup` (bridge approach ramp, public spaces,
+  station access, junction-clear piers, swing assist, touch/HUD fixes).
+- Known: `test_skinned_body_follows_the_rig` fails intermittently on cold
+  starts (394.2 mm) on the untouched pre-session commit too. `--cam` stills
+  come out pink/dim (capture path), gameplay captures are correct.
+
 # Status: 2026-11-02 (homes: 360° glass)
 
 - **Every home is a whole floor of its tower, glass on all four sides.**

@@ -19,8 +19,8 @@ extends Node3D
 
 signal thunder(delay: float, strength: float)
 
-const ZENITH := Color(0.17, 0.38, 0.74)
-const HORIZON := Color(0.78, 0.84, 0.9)
+const ZENITH := Color(0.11, 0.32, 0.72)
+const HORIZON := Color(0.6, 0.75, 0.92)
 ## The default (captures, tools, first launch): late-afternoon golden hour.
 const DEFAULT_HOUR := 16.0
 const DAY_MINUTES := 16.0
@@ -100,17 +100,17 @@ func _ready() -> void:
 	env.tonemap_white = 8.0
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
-	env.fog_depth_curve = 1.45
+	env.fog_depth_curve = 1.35
 	env.fog_sun_scatter = 0.3
-	env.fog_aerial_perspective = 0.7
+	env.fog_aerial_perspective = 0.8
 	env.fog_sky_affect = 0.15
 	env.glow_enabled = preset.get("glow", true)
-	env.glow_intensity = 0.4
-	env.glow_bloom = 0.05
+	env.glow_intensity = 0.22
+	env.glow_bloom = 0.035
 	env.glow_hdr_threshold = 1.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.1
-	env.adjustment_contrast = 1.12
+	env.adjustment_saturation = 1.07
+	env.adjustment_contrast = 1.1
 	env.adjustment_color_correction = grade_lut()
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -118,7 +118,7 @@ func _ready() -> void:
 
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
-	sun.light_angular_distance = 0.6
+	sun.light_angular_distance = 0.85
 	sun.shadow_enabled = preset.get("shadows", true)
 	sun.shadow_bias = 0.1
 	sun.shadow_normal_bias = 0.8
@@ -246,8 +246,8 @@ func _apply(dt: float, instant: bool) -> void:
 	if el > -3.0:
 		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
 		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.5, 0.26)], [8.0, Color(1.0, 0.72, 0.48)],
-			[25.0, Color(1.0, 0.84, 0.64)], [60.0, Color(1.0, 0.95, 0.88)]])
-		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.3], [10.0, 2.1], [25.0, 2.65], [60.0, 2.85]])
+			[25.0, Color(1.0, 0.8, 0.58)], [60.0, Color(1.0, 0.9, 0.76)]])
+		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.3], [10.0, 1.8], [25.0, 2.1], [60.0, 2.25]])
 		sky_mat.set_shader_parameter("sun_glow", 1.0)
 		sky_mat.set_shader_parameter("disc_size", 0.9993)
 		sky_mat.set_shader_parameter("disc_k", 6.0)
@@ -266,9 +266,9 @@ func _apply(dt: float, instant: bool) -> void:
 
 	# --- sky colours by sun height, greyed by cloud.
 	var zen := _ramp(el, [[-18.0, Color(0.012, 0.02, 0.05)], [-6.0, Color(0.07, 0.1, 0.25)],
-		[0.0, Color(0.15, 0.22, 0.45)], [8.0, Color(0.17, 0.32, 0.62)], [25.0, ZENITH], [60.0, Color(0.2, 0.43, 0.8)]])
+		[0.0, Color(0.15, 0.22, 0.45)], [8.0, Color(0.17, 0.32, 0.62)], [25.0, ZENITH], [60.0, Color(0.13, 0.37, 0.78)]])
 	var hor := _ramp(el, [[-18.0, Color(0.04, 0.06, 0.1)], [-6.0, Color(0.36, 0.3, 0.4)],
-		[0.0, Color(0.95, 0.6, 0.42)], [8.0, Color(0.88, 0.78, 0.72)], [25.0, HORIZON], [60.0, Color(0.8, 0.87, 0.93)]])
+		[0.0, Color(0.95, 0.6, 0.42)], [8.0, Color(0.88, 0.78, 0.72)], [25.0, HORIZON], [60.0, Color(0.6, 0.76, 0.93)]])
 	var haze := _ramp(el, [[-18.0, Color(0.05, 0.06, 0.1)], [-6.0, Color(0.5, 0.3, 0.32)],
 		[0.0, Color(1.0, 0.5, 0.25)], [8.0, Color(1.0, 0.62, 0.38)], [25.0, Color(1.0, 0.66, 0.42)],
 		[60.0, Color(0.95, 0.85, 0.75)]])
@@ -305,20 +305,24 @@ func _apply(dt: float, instant: bool) -> void:
 	# The non-sky share: light bounced off sunlit stone (warm-neutral by day,
 	# dusky at sunset, moonlit blue at night).
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
-		[15.0, Color(0.8, 0.76, 0.72)], [40.0, Color(0.8, 0.79, 0.78)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
+		[15.0, Color(0.72, 0.73, 0.82)], [40.0, Color(0.72, 0.75, 0.85)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
 	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast)
-	# High up, the haze starts further out (looking down 300 m through a
-	# 130 m fog start turned the whole city grey from the top floors).
+	# Depth fog only: a clear near field, subtle blue-grey middle distance,
+	# and skyline silhouettes merging with the horizon. Rooftop views get a
+	# modest visibility lift; no volume textures, raymarching or extra lights.
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
-	env.fog_depth_begin = lerpf(220.0, 12.0, fog) * (1.0 + 4.0 * alt * (1.0 - fog))
-	env.fog_depth_end = lerpf(2600.0, 520.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_density = lerpf(0.46, 0.97, fog) * (1.0 - 0.35 * alt * (1.0 - fog))
-	env.fog_light_color = hor.lerp(Color(0.68, 0.77, 0.9), 0.35 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
+	# Blue aerial perspective: distance fades buildings gradually into the
+	# atmosphere (which also takes their contrast), near things stay crisp.
+	env.fog_depth_begin = lerpf(110.0, 12.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(2000.0, 520.0, fog) * (1.0 + 0.35 * alt * (1.0 - fog))
+	env.fog_density = lerpf(0.82, 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
+	env.fog_light_color = hor.lerp(Color(0.52, 0.66, 0.86), 0.5 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
 	env.fog_light_energy = lerpf(1.0, 0.55, night)
 	env.fog_sun_scatter = 0.3 * day_light * (1.0 - overcast)
-	env.glow_intensity = lerpf(0.4, 0.75, night)
-	env.glow_hdr_threshold = lerpf(1.0, 0.8, night)
+	# Soft bloom: by day only the brightest sunlit glass and sky blooms.
+	env.glow_intensity = lerpf(0.34, 0.42, night)
+	env.glow_hdr_threshold = lerpf(1.05, 1.0, night)
 
 	# --- shared shader inputs.
 	var top_l := zen.srgb_to_linear()
@@ -380,7 +384,7 @@ static func grade(c: Color) -> Color:
 	# Split tone: shadows towards blue-violet, highlights towards warm gold.
 	var sh := clampf(1.0 - s * 2.2, 0.0, 1.0)
 	var hi := clampf((s - 0.55) * 2.2, 0.0, 1.0)
-	o += Color(-0.004, 0.0, 0.012) * sh + Color(0.025, 0.01, -0.025) * hi
+	o += Color(-0.01, 0.0, 0.022) * sh + Color(0.03, 0.012, -0.03) * hi
 	# Mid saturation boost (fades out in deep shadow and near-white).
 	var ol := 0.2126 * o.r + 0.7152 * o.g + 0.0722 * o.b
 	var sat := 1.0 + 0.12 * (1.0 - absf(ol * 2.0 - 1.0))

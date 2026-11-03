@@ -262,3 +262,17 @@ class _Idle:
 	extends RefCounted
 	func drive(_p, _dt) -> Dictionary:
 		return {"move": Vector3.ZERO, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+
+func test_home_tap_is_not_a_web_or_jump(t) -> void:
+	var controls := TouchControls.new()
+	add_child(controls)
+	controls.player = player
+	controls.home_button_rect = Rect2(500, 16, 56, 56)
+	var requests := [0]
+	controls.home_pressed.connect(func(): requests[0] += 1)
+	controls.touch_down(3, Vector2(528, 44))
+	t.check(requests[0] == 1, "one home request per tap")
+	t.check(controls.touches.is_empty(), "home tap creates no movement or web role")
+	t.check(player.line_state == Player.Line.IDLE, "home tap does not launch a web")
+	controls.touch_up(3)
+	controls.queue_free()

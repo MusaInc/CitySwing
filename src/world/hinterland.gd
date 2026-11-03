@@ -14,7 +14,11 @@ extends Node3D
 const BAY_C := Vector2(-80.0, 0.0)   # bay ellipse centre (x, z)
 const BAY_R := Vector2(1950.0, 1450.0)
 const EXTENT := Rect2(-5600.0, -4600.0, 9800.0, 9200.0)
-const CELL := 90.0
+const CELL := 45.0
+## Trees on the foothills facing the city (instanced cones), so the hills'
+## outline and slopes read as land, not a smooth sheet.
+const TREES := 5200
+const TREE_REACH := 3300.0          # m from the bay centre
 const SEA_Y := -1.6
 
 
@@ -36,7 +40,13 @@ static func height_at(x: float, z: float) -> float:
 	var rise := smoothstep(0.0, 1.0, clampf(out / lerpf(1400.0, 1900.0, west), 0.0, 1.0))
 	var ridges := 0.55 + 0.75 * _ridged(Vector2(x, z) * 0.00042)
 	var hills := 30.0 * smoothstep(-40.0, 120.0, out) * (0.6 + _fbm(Vector2(x, z) * 0.004, 2))
-	var h := (hills + peak * rise * ridges) * lift
+	# Spurs and gullies down the slopes (finer ridged noise, strongest on
+	# the steep middle of the rise), and knolls on the foothills: the land
+	# reads as eroded ground, not one smooth sheet.
+	var mid := smoothstep(0.05, 0.4, rise) * (1.0 - 0.5 * smoothstep(0.7, 1.0, rise))
+	var gullies := (_ridged(Vector2(x, z) * 0.0019 + Vector2(3.1, 7.7)) - 0.35) * peak * 0.16 * mid
+	var knolls := 22.0 * smoothstep(0.0, 260.0, out) * (_fbm(Vector2(x, z) * 0.011 + Vector2(11.0, 4.0), 3) - 0.45)
+	var h := (hills + peak * rise * ridges + gullies + knolls) * lift
 	# Beach: a gentle shelf through the waterline.
 	h += clampf(out * 0.08, -6.0, 0.0)
 	return h if lift > 0.02 else minf(h, -30.0)
@@ -136,6 +146,7 @@ func _ready() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.extra_cull_margin = 50.0
 	add_child(mi)
+	_trees()
 	var lines := PowerLines.new()
 	lines.name = "PowerLines"
 	add_child(lines)
@@ -144,3 +155,79 @@ func _ready() -> void:
 func triangle_count() -> int:
 	var mi: MeshInstance3D = get_node_or_null("Mountains")
 	return mi.mesh.surface_get_array_index_len(0) / 3 if mi else 0
+
+
+## Conifer clumps on the forested foothills (where hinterland.gdshader paints
+## forest: above the beach, below the rock and snow, not too steep), one
+## MultiMesh of low-poly cones. Deterministic.
+func _trees() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 90210
+	var xfs: Array[Transform3D] = []
+	var tries := 0
+	while xfs.size() < TREES and tries < TREES * 12:
+		tries += 1
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(0.97, TREE_REACH / BAY_R.y)
+		var x := BAY_C.x + cos(a) * BAY_R.x * r
+		var z := BAY_C.y + sin(a) * BAY_R.y * r
+		var h := height_at(x, z)
+		if h < 8.0 or h > 520.0:
+			continue
+		var sl := Vector2(height_at(x + 12.0, z) - height_at(x - 12.0, z), height_at(x, z + 12.0) - height_at(x, z - 12.0)).length() / 24.0
+		if sl > 0.7:
+			continue
+		# Clumped: the same noise the shader's forest uses decides.
+		if _fbm(Vector2(x, z) * 0.006, 3) + 0.25 * smoothstep(20.0, 200.0, h) < 0.42 + rng.randf() * 0.12:
+			continue
+		# A clump of 3-6 round this spot.
+		for k in rng.randi_range(3, 6):
+			var q := Vector2(x, z) + Vector2(rng.randf_range(-22.0, 22.0), rng.randf_range(-22.0, 22.0))
+			var s := rng.randf_range(0.75, 1.45) * lerpf(1.0, 0.7, smoothstep(250.0, 500.0, h))
+			xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.85, 1.25), s)),
+				Vector3(q.x, height_at(q.x, q.y) - 1.0, q.y)))
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = _tree_mesh()
+	mm.instance_count = xfs.size()
+	for i in xfs.size():
+		mm.set_instance_transform(i, xfs[i])
+		var g := rng.randf_range(0.75, 1.15)
+		mm.set_instance_color(i, Color(0.13 * g, 0.21 * g, 0.12 * g))
+	var mi := MultiMeshInstance3D.new()
+	mi.name = "Trees"
+	mi.multimesh = mm
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.95
+	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = mat
+	add_child(mi)
+
+
+## A conifer ~18 m tall in two tiers of six-sided cones (24 triangles).
+static func _tree_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for tier: Array in [[0.0, 11.0, 5.5], [7.0, 18.0, 4.0]]:
+		var y0: float = tier[0]
+		var y1: float = tier[1]
+		var r: float = tier[2]
+		for i in 6:
+			var a0 := TAU * i / 6.0
+			var a1 := TAU * (i + 1) / 6.0
+			var p0 := Vector3(cos(a0) * r, y0, sin(a0) * r)
+			var p1 := Vector3(cos(a1) * r, y0, sin(a1) * r)
+			var tip := Vector3(0.0, y1, 0.0)
+			var n := (p1 - p0).cross(tip - p0).normalized()
+			if n.dot(p0 + p1) < 0.0:
+				n = -n
+			# (Lighter toward the tip: sunlit crowns, shaded skirts.)
+			for v: Vector3 in [p0, tip, p1]:
+				st.set_normal((n + Vector3.UP * 0.3).normalized())
+				st.set_color(Color.WHITE * lerpf(0.75, 1.25, v.y / 18.0))
+				st.add_vertex(v)
+	return st.commit()

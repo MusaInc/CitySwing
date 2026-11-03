@@ -14,12 +14,15 @@ extends Control
 ##                surface; SWING remains the assisted fallback.
 ## There is no manual camera control: the camera frames the action itself.
 
+signal home_pressed
+var home_button_rect := Rect2()
 signal pause_pressed
 ## The home prompt's button was tapped (see use_label).
 signal use_pressed
 ## Feedback for the HUD: where the finger went, whether it fired, and why not.
 signal web_feedback(screen_pos: Vector2, ok: bool, reason: String)
 
+const STICK_DRAW_RADIUS := 78.0
 const STICK_RADIUS := 128.0  # finger travel for full speed (longer = finer walking control)
 
 var camera: SwingCamera
@@ -55,7 +58,7 @@ func _ready() -> void:
 func _update_safe() -> void:
 	var sa := DisplayServer.get_display_safe_area()
 	var win := DisplayServer.window_get_size()
-	if sa.size.x <= 0 or win.x <= 0:
+	if sa.size.x <= 0 or win.x <= 0 or DisplayServer.screen_get_size() != win:
 		_safe = Rect2(Vector2.ZERO, size)
 		return
 	var k := size / Vector2(win)
@@ -108,6 +111,11 @@ func _input(event: InputEvent) -> void:
 ## Positions are viewport coordinates (the same space the 3D camera projects in).
 func touch_down(idx: int, pos: Vector2) -> void:
 	var local := _to_local(pos)
+	if home_button_rect.has_area() and home_button_rect.has_point(local):
+		release_all()
+		home_pressed.emit()
+		Settings.haptic(12, 0.4)
+		return
 	if local.distance_to(Vector2(_safe.end.x - 44, _safe.position.y + 44)) < 40:
 		pause_pressed.emit()
 		return
@@ -236,28 +244,29 @@ func _draw() -> void:
 	var white := Color(1, 1, 1, 0.85)
 	var shade := Color(0, 0, 0, 0.22)
 	if _has_kind("stick"):
-		draw_circle(_stick_origin, STICK_RADIUS, Color(UiStyle.INK, 0.3))
-		draw_arc(_stick_origin, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.35), 2.0, true)
+		draw_circle(_stick_origin, STICK_DRAW_RADIUS, Color(UiStyle.INK, 0.3))
+		draw_arc(_stick_origin, STICK_DRAW_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.35), 2.0, true)
 		var d := _stick_pos - _stick_origin
 		if d.length() > 14.0:
 			# Steering: a gold chevron on the rim where the web will lean.
 			var u := d.normalized()
-			var tip := _stick_origin + u * (STICK_RADIUS + 16.0)
+			var tip := _stick_origin + u * (STICK_DRAW_RADIUS + 16.0)
 			var side := Vector2(-u.y, u.x)
 			var k := clampf(d.length() / STICK_RADIUS, 0.0, 1.0)
 			draw_colored_polygon(PackedVector2Array([tip, tip - u * 14.0 + side * 11.0, tip - u * 14.0 - side * 11.0]),
 				Color(UiStyle.GOLD, 0.4 + 0.5 * k))
-			draw_arc(_stick_origin, STICK_RADIUS, d.angle() - 0.5 * k, d.angle() + 0.5 * k, 12, Color(UiStyle.GOLD, 0.8), 4.0, true)
-		draw_circle(_stick_pos, 36.0, shade)
-		draw_circle(_stick_pos, 34.0, Color(1, 1, 1, 0.6))
+			draw_arc(_stick_origin, STICK_DRAW_RADIUS, d.angle() - 0.5 * k, d.angle() + 0.5 * k, 12, Color(UiStyle.GOLD, 0.8), 4.0, true)
+		var nub := _stick_origin + d.limit_length(STICK_RADIUS) * (STICK_DRAW_RADIUS / STICK_RADIUS)
+		draw_circle(nub, 25.0, shade)
+		draw_circle(nub, 23.0, Color(1, 1, 1, 0.42))
 	else:
 		var hint := Vector2(_safe.position.x + 150, _safe.end.y - 150)
-		draw_circle(hint, STICK_RADIUS, Color(1, 1, 1, 0.05))
-		draw_arc(hint, STICK_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.22), 2.0, true)
+		draw_circle(hint, STICK_DRAW_RADIUS, Color(1, 1, 1, 0.05))
+		draw_arc(hint, STICK_DRAW_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.22), 2.0, true)
 		draw_circle(hint, 30.0, Color(1, 1, 1, 0.12))  # resting thumb nub
 		draw_arc(hint, 30.0, 0, TAU, 32, Color(1, 1, 1, 0.3), 1.5, true)
 		var lw := _font.get_string_size("MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(_font, hint + Vector2(-lw / 2.0, STICK_RADIUS - 14.0), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.38))
+		draw_string(_font, hint + Vector2(-lw / 2.0, STICK_DRAW_RADIUS - 14.0), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.38))
 	var web_down := _has_kind("web")
 	var jump_down := false
 	for t in touches.values():
@@ -271,17 +280,18 @@ func _draw() -> void:
 		# Same family as the HUD panels: Night Ink glass, a hairline ring, and
 		# gold only to say "a web will land" (ring + label), filled when held.
 		var hot: bool = action == "grapple" and ready and Settings.aim_mode != "tap"
-		var fill := Color(UiStyle.INK, 0.62 if down else 0.38)
+		var visual_r: float = 64.0 if action == "grapple" else 44.0
+		var fill := Color(UiStyle.INK, 0.46 if down else 0.23)
 		if down and action == "grapple":
 			fill = Color(UiStyle.GOLD, 0.5)
-		draw_circle(c, b["r"], fill)
+		draw_circle(c, visual_r, fill)
 		var ring := Color(UiStyle.WEB, 0.9 if down else 0.38)
 		if hot:
 			ring = Color(UiStyle.GOLD, 0.95)
-			draw_arc(c, b["r"] + 7.0, -PI * 0.75, -PI * 0.25, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
-			draw_arc(c, b["r"] + 7.0, PI * 0.25, PI * 0.75, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
-		draw_arc(c, b["r"], 0, TAU, 48, ring, 2.5 if not hot else 4.0, true)
-		var fs := 22 if action == "grapple" else 15
+			draw_arc(c, visual_r + 7.0, -PI * 0.75, -PI * 0.25, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
+			draw_arc(c, visual_r + 7.0, PI * 0.25, PI * 0.75, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
+		draw_arc(c, visual_r, 0, TAU, 48, ring, 1.5 if not hot else 2.0, true)
+		var fs := 17 if action == "grapple" else 13
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var label_col := UiStyle.GOLD if hot and not down else white
 		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, label_col)

@@ -16,6 +16,24 @@ var hint := ""
 var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
+var indoors := false
+signal home_requested
+var home_button: Button
+var home_available := false
+
+func home_rect() -> Rect2:
+	var safe := _safe_rect()
+	return Rect2(Vector2(safe.end.x - 138.0, safe.position.y + 16.0), Vector2(56, 56))
+
+func _draw_home_button() -> void:
+	var c := Vector2(28, 28)
+	home_button.draw_circle(c, 22, Color(UiStyle.INK, 0.3))
+	home_button.draw_arc(c, 22, 0, TAU, 32, Color(UiStyle.WEB, 0.4), 1.5, true)
+	var col := UiStyle.GOLD if home_button.is_hovered() else Color(UiStyle.WEB, 0.88)
+	home_button.draw_polyline(PackedVector2Array([c + Vector2(-10, -1), c + Vector2(0, -9), c + Vector2(10, -1)]), col, 2, true)
+	home_button.draw_polyline(PackedVector2Array([c + Vector2(-7, -2), c + Vector2(-7, 9), c + Vector2(7, 9), c + Vector2(7, -2)]), col, 2, true)
+	home_button.draw_rect(Rect2(c + Vector2(-2, 3), Vector2(4, 6)), col)
+
 ## Something to use within reach at home ("" = none). On touch the controls
 ## draw it as a button; otherwise the HUD shows it with the key.
 var prompt := ""
@@ -62,6 +80,17 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_font = UiStyle.font("bold")
 	_font_black = UiStyle.font("black")
+	home_button = Button.new()
+	home_button.name = "HomeButton"
+	home_button.tooltip_text = "Go to your apartment"
+	home_button.focus_mode = Control.FOCUS_NONE
+	for style in ["normal", "hover", "pressed", "focus", "disabled"]:
+		home_button.add_theme_stylebox_override(style, StyleBoxEmpty.new())
+	home_button.draw.connect(_draw_home_button)
+	home_button.pressed.connect(func(): home_requested.emit())
+	home_button.mouse_entered.connect(func(): home_button.queue_redraw())
+	home_button.mouse_exited.connect(func(): home_button.queue_redraw())
+	add_child(home_button)
 	minimap = Minimap.new()
 	minimap.name = "Minimap"
 	add_child(minimap)
@@ -116,10 +145,15 @@ func flash(text: String, seconds := 2.0) -> void:
 
 
 func _process(dt: float) -> void:
+	if home_button:
+		home_button.position = home_rect().position
+		home_button.size = home_rect().size
+		home_button.visible = home_available
+		home_button.mouse_filter = Control.MOUSE_FILTER_IGNORE if touch_mode else Control.MOUSE_FILTER_STOP
 	if minimap:
-		# Responsive: ~22% of the short side, inside the safe area (clear of
+		# Responsive: ~18% of the short side, inside the safe area (clear of
 		# the Dynamic Island / notch in landscape: it's centred, below the top).
-		var d := clampf(minf(size.x, size.y) * 0.22, 104.0, 196.0)
+		var d := clampf(minf(size.x, size.y) * 0.18, 104.0, 148.0)
 		minimap.size = Vector2(d, d)
 		minimap.position = Vector2(size.x * 0.5 - d * 0.5, _safe_origin().y + 10.0)
 	_banner_t -= dt
@@ -391,21 +425,21 @@ static func _fmt_int(n: int) -> String:
 ## Speed: a 270° gauge (full at 144 km/h) that warms from white to gold
 ## once speed lines kick in, with the number in the middle.
 func _draw_speed_gauge(c: Vector2, white: Color, shadow: Color) -> void:
-	var r := 52.0
+	var r := 39.0
 	var a0 := PI * 0.75
 	var sweep := PI * 1.5
 	var k := clampf(_speed_smooth / 40.0, 0.0, 1.0)
 	draw_circle(c, r + 6.0, Color(UiStyle.INK, 0.45))
-	draw_arc(c, r, a0, a0 + sweep, 48, Color(1, 1, 1, 0.16), 6.0, true)
+	draw_arc(c, r, a0, a0 + sweep, 48, Color(1, 1, 1, 0.16), 3.0, true)
 	if k > 0.005:
 		var hot := clampf((_speed_smooth - SPEED_LINES_FROM) / (SPEED_LINES_FULL - SPEED_LINES_FROM), 0.0, 1.0)
-		draw_arc(c, r, a0, a0 + sweep * k, maxi(4, int(48 * k)), Color(1, 1, 1, 0.9).lerp(UiStyle.GOLD, hot), 6.0, true)
+		draw_arc(c, r, a0, a0 + sweep * k, maxi(4, int(48 * k)), Color(1, 1, 1, 0.9).lerp(UiStyle.GOLD, hot), 3.0, true)
 	var txt := "%d" % int(_speed_smooth * 3.6)
-	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38).x
-	draw_string(_font_black, c + Vector2(-tw / 2.0 + 2, 12), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38, shadow)
-	draw_string(_font_black, c + Vector2(-tw / 2.0, 10), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38, white)
+	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+	draw_string(_font_black, c + Vector2(-tw / 2.0 + 2, 12), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, shadow)
+	draw_string(_font_black, c + Vector2(-tw / 2.0, 10), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, white)
 	var uw := _font.get_string_size("KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	draw_string(_font, c + Vector2(-uw / 2.0, 30), "KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
+	draw_string(_font, c + Vector2(-uw / 2.0, 25), "KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
 
 
 ## Four corner brackets turning slowly round a dot.
@@ -488,6 +522,8 @@ func _draw_pointer(cam: Camera3D) -> void:
 ## left of pause), heist crack progress and the settle toast.
 func _draw_jobs(cam: Camera3D, white: Color, shadow: Color) -> void:
 	var pp := player.global_position
+	if indoors and jobs.active.is_empty():
+		return
 	if jobs.active.is_empty():
 		# At most three labels (tracked first, then nearest), and they fade
 		# out at swing speed: the beacons themselves carry the city view.
@@ -507,7 +543,7 @@ func _draw_jobs(cam: Camera3D, white: Color, shadow: Color) -> void:
 				continue
 			shown += 1
 			var sp := cam.unproject_position(at)
-			if sp.x < 0.0 or sp.x > size.x or sp.y < 0.0 or sp.y > size.y:
+			if sp.x < 0.0 or sp.x > size.x or sp.y < 160.0 or sp.y > size.y - 180.0:
 				continue
 			var col: Color = JobBoard.COL_LEGAL if o["legal"] else JobBoard.COL_CRIME
 			var a := clampf(1.4 - d / 650.0, 0.35, 1.0) * (1.0 if o["id"] == jobs.tracked or d < 300.0 else 0.75) * calm
@@ -545,7 +581,7 @@ func _draw_job_card(white: Color, shadow: Color) -> void:
 	var col: Color = JobBoard.COL_LEGAL if legal else JobBoard.COL_CRIME
 	var w := 272.0
 	var h := 96.0 if legal else 126.0
-	var origin := Vector2(size.x - _safe_origin().x - 92.0 - w, _safe_origin().y + 18.0)
+	var origin := Vector2(_safe_rect().end.x - 158.0 - w, _safe_origin().y + 18.0)
 	var r := Rect2(origin, Vector2(w, h))
 	UiStyle.pill(self, r, Color(UiStyle.INK, 0.6))
 	draw_rect(Rect2(origin + Vector2(10, 12), Vector2(3, h - 24)), col)
@@ -623,11 +659,16 @@ func _draw_job_toast(white: Color, shadow: Color) -> void:
 
 ## Safe-area top-left in HUD pixels (zero on desktop).
 func _safe_origin() -> Vector2:
+	return _safe_rect().position
+
+
+func _safe_rect() -> Rect2:
 	var sa := DisplayServer.get_display_safe_area()
 	var win := DisplayServer.window_get_size()
 	if sa.size.x <= 0 or win.x <= 0 or DisplayServer.screen_get_size() != win:
-		return Vector2.ZERO  # (windowed on desktop: screen-space safe area doesn't apply)
-	return (Vector2(sa.position) * size / Vector2(win)).clamp(Vector2.ZERO, size * 0.2)
+		return Rect2(Vector2.ZERO, size)
+	var scale := size / Vector2(win)
+	return Rect2(Vector2(sa.position) * scale, Vector2(sa.size) * scale).intersection(Rect2(Vector2.ZERO, size))
 
 
 ## Markers never sit under the stick (bottom left) or SWING/JUMP (bottom

@@ -21,6 +21,7 @@ const ELEVATIONS := [30.0, 42.0, 55.0, 68.0, 80.0]
 const LOW_ELEVATIONS := [12.0, 20.0, 30.0, 42.0, 55.0, 68.0, 80.0]
 const YAWS := [-42.0, -24.0, -9.0, 0.0, 9.0, 24.0, 42.0]
 
+var human_assist := false
 var has_target := false
 var point := Vector3.ZERO
 var normal := Vector3.ZERO
@@ -219,7 +220,7 @@ func refresh_pick(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.Sta
 		if near:
 			continue
 		tried.append(pt)
-		var r := predict_swing(space, from_state, pt, p, exclude, heading)
+		var r := predict_swing(space, from_state, pt, p, exclude, heading, human_assist)
 		if not r["clear"]:
 			continue
 		var exit_v: Vector3 = r["exit_v"]
@@ -262,7 +263,7 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 ## flight (window scaled to the rope's swing period). clear = no building or street on the way; exit_v = velocity at the
 ## release; min_y = lowest point; path = sampled body positions.
 static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, anchor: Vector3,
-		p: SwingParams, exclude: Array[RID], _heading: Vector3) -> Dictionary:
+		p: SwingParams, exclude: Array[RID], _heading: Vector3, assisted := false) -> Dictionary:
 	var out := {"clear": false, "released": false, "landed": false, "exit_v": Vector3.ZERO, "min_y": from_state.position.y,
 		"path": PackedVector3Array()}
 	var s := SwingPhysics.State.new()
@@ -271,6 +272,7 @@ static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhy
 	if not SwingPhysics.attach(s, anchor, p):
 		return out
 	var c := SwingPhysics.Controls.new()
+	c.human = assisted
 	var attach_length := s.rope_length
 	var q := PhysicsRayQueryParameters3D.new()
 	q.collision_mask = 1 | GRAPPLE_MASK | (1 << 3)
@@ -289,7 +291,7 @@ static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhy
 	for i in steps:
 		var a := s.position
 		if released < 0.0:
-			c.reel = SwingPhysics.auto_tighten(s, p, attach_length)  # same pull as the real player
+			c.reel = SwingPhysics.auto_tighten(s, p, attach_length, assisted)  # same pull as the real player
 		SwingPhysics.step(s, c, p, dt)
 		var dir := s.position - a
 		q.from = a

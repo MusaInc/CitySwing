@@ -80,6 +80,9 @@ var coast := PackedVector2Array()  # the island outline (sea wall), from CityRoa
 var sea: Array = []            # Rect2 (also in `water`); the island is cut out by is_water
 var reserved: Array = []       # Rect2 footprints owned by landmarks and set pieces (world, axis-aligned)
 var structures: Array = []     # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
+var bridge_ramp := PackedVector3Array()  # island approach, deck centreline
+var public_furniture: Array = []  # authored public spaces, merged with street furniture
+var public_gardens: Array[Vector3] = []
 var anchor_lines: Array = []   # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
 ## Set-piece collision that isn't an axis-aligned box: [Transform3D, size]
 ## oriented boxes (beams) and convex hulls (PackedVector3Array).
@@ -137,6 +140,7 @@ func generate(p_seed := 1207) -> CityLayout:
 	CoastLife.new(self).build()  # North Beach and the Marina
 	_traffic()
 	_sea()
+	CityInfrastructure.public_spaces(self)
 	_place_plant()
 	apartments = Apartments.place(self)
 	return self
@@ -241,6 +245,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	_construction()
 	_skybridges()
 	_traffic()
+	CityInfrastructure.public_spaces(self)
 	_place_plant()
 	return self
 
@@ -1748,15 +1753,18 @@ func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> v
 	_box(m.x - 1.6, m.y - 1.6, m.x + 1.6, m.y + 1.6, 1.2, mh)  # lattice mast (chords included)
 	_box(m.x - 1.8, m.y - 1.8, m.x + 1.8, m.y + 1.8, mh, mh + 1.2)  # slewing unit
 	var side := Vector2(-d.y, d.x)
-	var j0 := m - side * 1.2
-	var j1 := tip + side * 1.2
-	_box(j0.x, j0.y, j1.x, j1.y, mh + 1.0, mh + 3.6)
-	var c0 := m - side * 1.8
-	var c1 := back + side * 1.8
-	_box(c0.x, c0.y, c1.x, c1.y, mh + 1.0, mh + 3.2)
-	var w0 := back + d * 4.0 - side * 1.8
-	var w1 := back + side * 1.8
-	_box(w0.x, w0.y, w1.x, w1.y, mh - 2.6, mh + 1.2)
+	# Collide with the three longitudinal chords, not an invisible cuboid
+	# spanning the triangular girder. Thin diagonal braces remain decorative.
+	for span in [[tip, 1.0, 2.2], [back, 1.5, 1.8]]:
+		for chord: Vector2 in [Vector2(-float(span[1]), 0), Vector2(float(span[1]), 0), Vector2(0, float(span[2]))]:
+			var a := m + side * chord.x
+			var b: Vector2 = span[0] + side * chord.x
+			var extent := side.abs() * 0.2
+			_box(minf(a.x, b.x) - extent.x, minf(a.y, b.y) - extent.y,
+				maxf(a.x, b.x) + extent.x, maxf(a.y, b.y) + extent.y, mh + 1.0 + chord.y, mh + 1.4 + chord.y)
+	var weight := back + d * 2.0
+	_box(minf(weight.x, back.x) - 1.8 * absf(side.x) - 0.1, minf(weight.y, back.y) - 1.8 * absf(side.y) - 0.1,
+		maxf(weight.x, back.x) + 1.8 * absf(side.x) + 0.1, maxf(weight.y, back.y) + 1.8 * absf(side.y) + 0.1, mh - 2.6, mh + 1.2)
 	_box(m.x - 1.0, m.y - 1.0, m.x + 1.0, m.y + 1.0, mh + 3.4, mh + 13.0)
 	_anchor(Vector3(m.x + d.x * 4.0, mh + 0.9, m.y + d.y * 4.0), Vector3(tip.x, mh + 0.9, tip.y))
 	_anchor(Vector3(m.x - d.x * 3.0, mh + 0.9, m.y - d.y * 3.0), Vector3(back.x + d.x * 4.0, mh + 0.9, back.y + d.y * 4.0))
@@ -1794,24 +1802,12 @@ func _bridge() -> void:
 		for yy in [[deck - 6.0, deck - 2.0], [88.0, 92.0], [top - 6.0, top - 2.0]]:
 			_box(tx - 2.5, zc - 9.5, tx + 2.5, zc + 9.5, yy[0], yy[1])
 			_anchor(Vector3(tx, yy[0] - 0.1, zc - 9.0), Vector3(tx, yy[0] - 0.1, zc + 9.0))
-	# Anchorages (solid stone blocks at both ends).
-	_add(_building([[x_east - 2.0, zc - 14.0, x_east + 14.0, zc + 14.0, 0.0, deck + 6.0]], Style.STONE,
-		Color(0.62, 0.58, 0.52), "plain"))
-	# The roadway runs into the east anchorage through a tunnel portal (it
-	# carries on under the waterfront to the city), so the deck doesn't just
-	# stop at a blank wall: a dark mouth in a dressed-stone surround. Drawn
-	# only – it's flush with the block, which already collides.
-	var portal := _kit("bridge_portal")
-	var fx := x_east - 2.0
-	var mouth := Color(0.035, 0.035, 0.04)
-	var dressed := Color(0.7, 0.66, 0.58)
-	_ksolid(portal, fx - 0.06, zc - 8.4, fx + 0.02, zc + 8.4, deck, deck + 5.2, mouth, false)
-	_ksolid(portal, fx - 0.45, zc - 9.4, fx + 0.02, zc + 9.4, deck + 5.2, deck + 6.4, dressed, false)
+	# Cable anchor housings flank a genuinely open roadway.
 	for sz: float in [-1.0, 1.0]:
-		_ksolid(portal, fx - 0.45, zc + sz * 8.4, fx + 0.02, zc + sz * 9.4, deck, deck + 5.2, dressed, false)
-	# Tunnel lamps glow inside the mouth.
-	for lz: float in [-6.0, -2.0, 2.0, 6.0]:
-		_ksolid(portal, fx - 0.1, zc + lz - 0.35, fx - 0.05, zc + lz + 0.35, deck + 4.6, deck + 4.8, Color(1.0, 0.85, 0.55), false)
+		_add(_building([[x_east - 2.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_east + 14.0,
+			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 6.0]], Style.STONE,
+			Color(0.5, 0.47, 0.42), "plain"))
+	CityInfrastructure.bridge_landing(self)
 	# West anchorage: the roadway runs over it onto the approach viaduct; the
 	# cables go down into stone housings either side.
 	_add(_building([[x_west - 16.0, zc - 10.5, x_west + 2.0, zc + 10.5, -2.0, deck - 2.0]], Style.STONE,

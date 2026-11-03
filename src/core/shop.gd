@@ -14,7 +14,7 @@ const SLOTS := [
 	["gloves", "Gloves"], ["head", "Hats"], ["face", "Masks"], ["web", "Webs"], ["gadget", "Gadgets"],
 ]
 const DEFAULTS := {"hero": "hero_kai", "top": "top_long", "suit": "ember", "pants": "pants_navy",
-	"shoes": "shoes_classic", "gloves": "gloves_black", "head": "head_bare", "face": "face_none",
+	"shoes": "shoes_classic", "gloves": "gloves_black", "head": "head_bare", "face": "mask_courier",
 	"web": "web_classic", "gadget": "gadget_none"}
 ## The classic web glow (gauntlet LEDs, spool rings, visor) is teal under a
 ## white line.

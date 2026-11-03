@@ -199,6 +199,8 @@ func _ready() -> void:
 	touch.gadgets = gadgets
 	hud.touch_mode = DisplayServer.is_touchscreen_available() or args.has("touch")
 	touch.pause_pressed.connect(pause)
+	touch.home_pressed.connect(_return_home)
+	hud.home_requested.connect(_return_home)
 	menus = Menus.new()
 	ui.add_child(menus)
 	menus.params = player.params
@@ -434,6 +436,29 @@ func spawn_at_home(id: String, force := false) -> bool:
 		return false
 	homes.spawn_in(h, world, camera)
 	return true
+
+
+var _going_home := false
+
+func _return_home() -> void:
+	if state != State.PLAYING or _going_home or _dipping or homes == null:
+		return
+	_going_home = true
+	touch.release_all()
+	_dip(func():
+		if not (mode is FreeSwingMode):
+			start_mode("free", Homes.selected())
+		elif mode.jobs:
+			mode.jobs.abandon()
+		spawn_at_home(Homes.selected(), true)
+		# A teleport is not a route segment: don't collect tokens or meet
+		# contract checkpoints along the line back to the apartment.
+		if mode is FreeSwingMode:
+			mode._prev = player.global_position
+			if mode.jobs:
+				mode.jobs._prev = player.global_position
+		hud.flash("HOME", 1.4)
+		_going_home = false)
 
 
 # ------------------------------------------------------------ home things
@@ -821,8 +846,11 @@ func _process(dt: float) -> void:
 	var lbl: String = sp.get("label", "")
 	if hud:
 		hud.prompt = lbl
+		hud.indoors = homes != null and homes.inside() != ""
+		hud.home_available = state == State.PLAYING and homes != null and not homes.homes.is_empty()
 	if touch:
 		touch.use_label = lbl
+		touch.home_button_rect = hud.home_rect() if hud.home_available else Rect2()
 	if lbl != "" and Input.is_action_just_pressed("interact"):
 		_use(sp)
 	if state == State.TITLE and is_instance_valid(director):

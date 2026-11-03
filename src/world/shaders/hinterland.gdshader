@@ -46,6 +46,19 @@ void fragment() {
 	c = mix(c, snow, snowy);
 	// Wet sand darkens at the waterline.
 	c *= 1.0 - 0.25 * (1.0 - smoothstep(-1.0, 2.5, y));
+	// Ground detail the 45 m mesh can't carry: forest canopy as dark/light
+	// clumps, rock strata, and small-scale relief in the normal so light
+	// rakes across the slopes instead of shading one smooth sheet.
+	float canopy = vnoise(p * 0.11) * 0.6 + vnoise(p * 0.31) * 0.4;
+	c *= mix(1.0, 0.72 + 0.5 * canopy, forest_k * (1.0 - clamp(rocky, 0.0, 1.0)));
+	c *= mix(1.0, 0.85 + 0.25 * vnoise(vec2(p.x * 0.004, y * 0.25)), clamp(rocky, 0.0, 1.0) * (1.0 - snowy));
+	float e = 3.0;
+	float s0 = fbm(p * 0.045);
+	float gx = fbm((p + vec2(e, 0.0)) * 0.045) - s0;
+	float gz = fbm((p + vec2(0.0, e)) * 0.045) - s0;
+	float amp = 6.0 * (0.4 + 0.6 * clamp(rocky + forest_k * 0.6, 0.0, 1.0));
+	vec3 wn = normalize(v_wn - vec3(gx, 0.0, gz) * amp);
+	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	ALBEDO = c;
 	ROUGHNESS = mix(0.95, 0.6, snowy);
 }

@@ -39,6 +39,10 @@ func _go() -> void:
 	var t0 := Time.get_ticks_msec()
 	var tris := _mirror_visuals(world)
 	print("AUDIT mirrored %d triangles in %d ms" % [tris, Time.get_ticks_msec() - t0])
+	if tris == 0:
+		push_error("Collision audit has no visual geometry; scene failed to build")
+		quit(1)
+		return
 	await physics_frame
 	await physics_frame
 	var space := world.get_world_3d().direct_space_state
@@ -105,7 +109,7 @@ func _probe_down(space: PhysicsDirectSpaceState3D, top: Vector3) -> void:
 	if vis.is_empty() and col.is_empty():
 		return
 	if vis.is_empty() or (cy - vy > 0.4):
-		_note("ghost", Vector3(top.x, cy, top.z), " vis %.1f" % vy)
+		_note("ghost", Vector3(top.x, cy, top.z), " vis %.1f %s" % [vy, str(col.get("collider", "none"))])
 		return
 	var water := world.layout.is_water(Vector3(top.x, 0, top.z)) and vy < -0.5
 	if water:
@@ -164,10 +168,10 @@ func _mirror_visuals(n: Node) -> int:
 		var nm := String(c.name)
 		if c is MeshInstance3D:
 			var mi := c as MeshInstance3D
-			if nm in ["Detail", "Features", "Ground", "Water", "Outskirts", "OutskirtsNear", "OutskirtsBlocks", "OutskirtsGround"] \
+			if nm in ["Detail", "Features", "Furniture", "Ground", "Water", "Outskirts", "OutskirtsNear", "OutskirtsBlocks", "OutskirtsGround"] \
 					and mi.mesh != null:
 				tris += _add_trimesh(mi.mesh, mi.global_transform, String(mi.get_parent().name) + "/" + nm)
-		elif c is MultiMeshInstance3D and nm.begins_with("Landmark_"):
+		elif c is MultiMeshInstance3D and (nm.begins_with("Landmark_") or nm.begins_with("Props_")):
 			var mm := (c as MultiMeshInstance3D).multimesh
 			for i in mm.instance_count:
 				tris += _add_trimesh(mm.mesh, (c as Node3D).global_transform * mm.get_instance_transform(i), nm)

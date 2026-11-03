@@ -290,9 +290,16 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			material.set_shader_parameter("albedo_map", source.albedo_texture)
 		if source.normal_enabled and source.normal_texture:
 			material.set_shader_parameter("normal_map", source.normal_texture)
-			material.set_shader_parameter("normal_strength", source.normal_scale)
+			material.set_shader_parameter("normal_strength", minf(source.normal_scale, 0.45))
 		if source.ao_enabled and source.ao_texture:
 			material.set_shader_parameter("ao_map", source.ao_texture)
+		# A readable slate shell and muted teal lens give the masked hero a
+		# recognisable face even in shade; no extra mesh, texture or light.
+		if source.resource_name == "hero_mask_courier":
+			material.set_shader_parameter("base_color", Color(0.10, 0.13, 0.16))
+		elif source.resource_name == "hero_lens":
+			material.set_shader_parameter("base_color", Color(0.15, 0.40, 0.43))
+			material.set_shader_parameter("surface_emission", Vector3(0.015, 0.045, 0.05))
 		mi.set_surface_override_material(surface, material)
 		var region := ""
 		var reference := Color.WHITE
@@ -813,6 +820,9 @@ func _knockout_ragdoll(speed: float) -> void:
 
 
 func _on_respawned() -> void:
+	_edge = 0.0
+	_edge_goal = 0.0
+	_edge_probe = 0.0
 	ragdolling = false
 	_flip = 0.0
 	_trick = ""
@@ -2700,6 +2710,7 @@ var _shift_next := 4.0
 var _gaze := Vector2.ZERO   # current head yaw/pitch offset (rad)
 var _gaze_goal := Vector2.ZERO
 var _gaze_next := 1.5
+var _edge_goal := 0.0
 var _edge := 0.0            # 0..1 standing at a drop in front
 var _edge_probe := 0.0
 var _idle_sink := 0.0       # m the hips sink (winded)
@@ -2754,7 +2765,8 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 		var from := player.global_position + _facing * 0.85 + Vector3.UP * 0.3
 		var eq := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.5, player.collision_mask, [player.get_rid()])
 		var at_edge := get_world_3d().direct_space_state.intersect_ray(eq).is_empty()
-		_edge = 1.0 if at_edge else 0.0
+		_edge_goal = 1.0 if at_edge else 0.0
+	_edge = move_toward(_edge, _edge_goal, dt * 2.5)
 	var edge_k := _edge
 	var high := clampf((player.height_above_ground() - 25.0) / 80.0, 0.0, 1.0)
 	# Gaze: pick somewhere to look, ease to it, hold it a while.

@@ -282,7 +282,10 @@ func _viaduct(pts: PackedVector3Array) -> void:
 			var sp := ceilf(s0 / 30.0) * 30.0
 			while sp < s1:
 				var p := _at(pts, sp)
-				if not _over_water(Vector2(p.x, p.z)):
+				# (No pier over the strait, nor in a junction's mouth: the span
+				# carries across it.)
+				var junction := p.x > CityLayout.RIVER_EDGE and L.roads.field_at(Vector2(p.x, p.z)).w < 2.0
+				if not _over_water(Vector2(p.x, p.z)) and not junction:
 					var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
 					dir.y = 0.0
 					dir = dir.normalized()
@@ -337,13 +340,18 @@ func _station(line: Dictionary, s0: float) -> void:
 			Color(0.3, 0.38, 0.42), false)
 		var m := (pa + pb) * 0.5 + side * sgn * 1.55 + Vector3.UP * 3.3
 		L._kbeam(k, m - d * 2.4, m + d * 2.4, 0.1, 0.7, Color(0.08, 0.16, 0.36), false)
-	# Stair/lift tower on the outside of the curve (solid: a landing spot).
-	var bend := _at(pts, s0 + 30.0) + _at(pts, s0 - 30.0) - c * 2.0
-	var out := -side if Vector3(bend.x, 0.0, bend.z).dot(side) > 0.0 else side
-	var tw := c + out * 9.0
-	var gy := ground(tw.x, tw.z)
-	L._kbeam(k, Vector3(tw.x, gy, tw.z), Vector3(tw.x, c.y + 5.0, tw.z), 4.0, 4.0, Color(0.36, 0.38, 0.4))
-	L._kbeam(k, Vector3(tw.x, c.y + 5.0, tw.z), Vector3(tw.x, c.y + 5.3, tw.z), 4.6, 4.6, CANOPY)
+	# Switchback stairs down to a clear bit of pavement, a walkway across to
+	# the platform (CityInfrastructure).
+	if c.x > CityLayout.RIVER_EDGE:
+		CityInfrastructure.station_access(L, k, c, d, side)
+	else:
+		# (Westbank's quay plaza: a stair tower on the outside of the loop.)
+		var bend := _at(pts, s0 + 30.0) + _at(pts, s0 - 30.0) - c * 2.0
+		var out := -side if Vector3(bend.x, 0.0, bend.z).dot(side) > 0.0 else side
+		var tw := c + out * 9.0
+		var gy := ground(tw.x, tw.z)
+		L._kbeam(k, Vector3(tw.x, gy, tw.z), Vector3(tw.x, c.y + 5.0, tw.z), 4.0, 4.0, Color(0.36, 0.38, 0.4))
+		L._kbeam(k, Vector3(tw.x, c.y + 5.0, tw.z), Vector3(tw.x, c.y + 5.3, tw.z), 4.6, 4.6, CANOPY)
 
 
 # ------------------------------------------------------- the strait bridge
@@ -442,11 +450,11 @@ static func _chord_dev(pts: PackedVector3Array, i: int, j: int) -> float:
 
 
 ## Point s metres along a line's samples (wraps for loops, clamps otherwise).
-static func _at(pts: PackedVector3Array, s: float) -> Vector3:
+static func _at(pts: PackedVector3Array, s: float, loop := true) -> Vector3:
 	var n := pts.size()
-	var f := fposmod(s / STEP, float(n))
+	var f := fposmod(s / STEP, float(n)) if loop else clampf(s / STEP, 0.0, float(n - 1))
 	var i := int(f)
-	return pts[i].lerp(pts[(i + 1) % n], f - i)
+	return pts[i].lerp(pts[(i + 1) % n] if loop else pts[mini(i + 1, n - 1)], f - i)
 
 
 static func _resample_closed(p: PackedVector2Array, step: float) -> PackedVector2Array:
