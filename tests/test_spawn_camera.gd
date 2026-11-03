@@ -306,7 +306,7 @@ func test_swing_launches_cleanly_from_the_street_and_rooftops(t) -> void:
 		var q: Vector2 = spine[k][0]
 		var nxt: Vector2 = spine[k][1]
 		var fwd := Vector3(q.x - nxt.x, 0.0, q.y - nxt.y).normalized()  # (the spine runs north → south)
-		# The Cross-City Line's viaduct runs down the spine's median now: stand
+		# The City Loop's viaduct runs down the spine's median now: stand
 		# by the kerb, clear of its deck (a swing straight up
 		# under an elevated railway meets the railway).
 		var side := Vector2(-fwd.z, fwd.x) * 12.0

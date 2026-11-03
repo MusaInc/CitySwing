@@ -76,6 +76,7 @@ var bones := {}
 var launcher: Node3D  # the web hand; RopeVisual starts here
 var ragdoll := VerletRagdoll.new()
 var ragdolling := false
+var _rag_low := 0.0  # 0 = pelvis at the capsule's centre, 1 = lying on the ground
 var _hero_materials: Array[Dictionary] = []
 var _glove_mesh: MeshInstance3D
 var _finger_curl := {"l": 0.0, "r": 0.0}
@@ -428,6 +429,7 @@ func _connect_player() -> void:
 	player.released.connect(_on_released)
 	player.stun_started.connect(_on_stun)
 	player.stun_ended.connect(_on_stun_ended)
+	player.slammed.connect(_on_slam)
 	player.perfect_release.connect(_on_perfect)
 	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.MANTLE_MAX))
 	player.respawned.connect(_on_respawned)
@@ -751,9 +753,26 @@ func _probe_ground() -> float:
 	return INF if hit.is_empty() else from.y - 0.9 - (hit.position as Vector3).y
 
 
+## The limp body hits the ground: arms and legs flung up and out by the
+## impact, the head nods with it (the pelvis follows the capsule's bounce).
+func _on_slam(speed: float, _point: Vector3) -> void:
+	if not ragdolling:
+		return
+	var k := clampf(speed, 4.0, 30.0)
+	var pv := {}
+	for j in ["wr_l", "wr_r", "an_l", "an_r"]:
+		var side := Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)) * k * 0.09
+		pv[j] = Vector3.UP * k * randf_range(0.14, 0.22) + side
+	for j in ["el_l", "el_r", "kn_l", "kn_r"]:
+		pv[j] = Vector3.UP * k * randf_range(0.06, 0.11)
+	pv["head"] = Vector3.UP * k * 0.05
+	ragdoll.kick(pv)
+
+
 func _on_stun(speed: float) -> void:
 	ragdolling = true
 	_rag_time = 0.0
+	_rag_low = 0.0
 	_trick = ""
 	# A landing that turns into a crash must not leave its roll / crouch
 	# queued for after the get-up.
@@ -1359,6 +1378,12 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	var run0 := g.run
 	var crouch := (0.012 + 0.038 * run0 + 0.018 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
 	var td := g.touchdowns
+	# On a moving train the feet travel with the roof.
+	var carry := player.carry_velocity * dt
+	if carry != Vector3.ZERO:
+		g.shift(carry)
+		for sd in _plant:
+			_plant[sd][0] = (_plant[sd][0] as Vector3) + carry
 	g.update(dt, player.s.velocity, _facing, player.global_position, hips_w, ground, crouch)
 	if g.touchdowns != td:
 		footstep.emit(g.last_touchdown)
@@ -2448,7 +2473,11 @@ static func _group(b: String) -> String:
 # ------------------------------------------------------------------ ragdoll
 func _update_ragdoll(dt: float) -> void:
 	_rag_time += dt
-	var anchor := player.global_position + Vector3(0, 0.08, 0)
+	# On the ground the body lies flat: the pelvis comes down from the
+	# capsule's centre to lying height (fast – it slaps down, it doesn't sink).
+	var lie := 1.0 if player.is_on_floor() else 0.0
+	_rag_low = move_toward(_rag_low, lie, dt * (9.0 if lie > _rag_low else 4.0))
+	var anchor := player.global_position + Vector3(0, 0.08 - 0.74 * _rag_low, 0)
 	var hanging := player.line_state == Player.Line.ATTACHED
 	ragdoll.hand_pin = player.hand_position() if hanging else Vector3.INF
 	# Protective reflex while dropping toward the ground: the arms reach down

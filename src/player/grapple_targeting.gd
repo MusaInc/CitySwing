@@ -16,6 +16,9 @@ extends RefCounted
 
 const GRAPPLE_MASK := 1 << 1
 const ELEVATIONS := [30.0, 42.0, 55.0, 68.0, 80.0]
+## Falling from high with long reach (Player.reach_extra): flatter webs to
+## the facades of towers further off, which the steep fan misses.
+const LOW_ELEVATIONS := [12.0, 20.0, 30.0, 42.0, 55.0, 68.0, 80.0]
 const YAWS := [-42.0, -24.0, -9.0, 0.0, 9.0, 24.0, 42.0]
 
 var has_target := false
@@ -45,7 +48,7 @@ const STREET_CLEARANCE := 10.0   # m: arcs bottoming out lower than this rank do
 ## `aim` is the camera's forward vector; `travel` is the player's velocity.
 ## `steer` is the stick direction in world space (zero when not pushed).
 func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, travel: Vector3,
-		p: SwingParams, grounded: bool, exclude: Array[RID], steer := Vector3.ZERO) -> void:
+		p: SwingParams, grounded: bool, exclude: Array[RID], steer := Vector3.ZERO, low := false) -> void:
 	has_target = false
 	score = -INF
 	heading = Vector3(aim.x, 0.0, aim.z)
@@ -61,13 +64,14 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 	# Aim pitch nudges which elevation band is preferred (look up = steeper anchors).
 	var aim_pitch := rad_to_deg(asin(clampf(aim.normalized().y, -1.0, 1.0)))
 	var q := PhysicsRayQueryParameters3D.new()
-	# The web layer, plus solid-only bodies (world layer: e.g. the Cross-City
+	# The web layer, plus solid-only bodies (world layer: e.g. the City Loop
 	# viaduct) as occluders – a web can't pass through them, so nothing
 	# behind one is a candidate. Buildings are on both layers (unchanged).
 	q.collision_mask = GRAPPLE_MASK | 1
 	q.exclude = exclude
 	var candidates: Array = []
-	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, ELEVATIONS, YAWS, candidates)
+	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, LOW_ELEVATIONS if low else ELEVATIONS,
+		YAWS, candidates)
 	if not anchor_lines.is_empty():
 		_scan_lines(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, candidates)
 	# (Tried: a ±65–90° side fan when nothing ahead qualifies. Novices flew

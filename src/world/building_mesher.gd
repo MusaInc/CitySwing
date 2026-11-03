@@ -1883,6 +1883,11 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var amt := x_taper * (1.0 - dock)
 	var r := smoothstep(4.0, 9.0, H)
 	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
+	# North Beach (CoastLife): a long, wide, shallow sand beach.
+	var bk := 0.0 if layout.is_mainland else CoastLife.beach_k(p)
+	if bk > 0.0:
+		r *= 1.0 - bk
+		w = lerpf(w, CoastLife.BEACH_W + 6.0 * n2, bk)
 	var j := func(k: int) -> float: return (_snoise(s / 32.0 + k * 17.3) - 0.5) * r
 	var rock := [[0.0, H - 0.5], [w * 0.07 + 2.0 * j.call(1), H * 0.66 + H * 0.14 * j.call(2)],
 		[w * 0.3 + 6.0 * j.call(3), H * 0.32 + H * 0.2 * j.call(4)],

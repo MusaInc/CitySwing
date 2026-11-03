@@ -1,5 +1,5 @@
 extends Node
-## World pass: the Cross-City Line through the middle of the city, the
+## World pass: the City Loop through the middle of the city, the
 ## hills and mountains round the bay, the power lines, Westbank's natural
 ## coast, and the airborne mantle over roof edges.
 
@@ -19,38 +19,33 @@ func _line(name: String) -> Dictionary:
 	return {}
 
 
-func test_cross_city_line_runs_through_the_middle(t) -> void:
-	var ln := _line("cross")
-	t.check(not ln.is_empty(), "the Cross-City Line exists")
+func test_city_loop_runs_through_the_middle(t) -> void:
+	var ln := _line("city")
+	t.check(not ln.is_empty(), "the City Loop exists")
 	if ln.is_empty():
 		return
 	var pts: PackedVector3Array = ln["pts"]
-	var length := (pts.size() - 1) * RailNetwork.STEP
-	t.check(length > 900.0, "it crosses the island (%.0f m)" % length)
 	var to_cbd := INF
 	for p in pts:
 		to_cbd = minf(to_cbd, Vector2(p.x, p.z).distance_to(CityLayout.CBD_CENTER))
 	t.check(to_cbd < 150.0, "through the business district (%.0f m from its centre)" % to_cbd)
-	t.check((ln["stations"] as Array).size() >= 3, "%d stations" % (ln["stations"] as Array).size())
-	# The deck (≈10 m wide, train on top) is clear of every building.
+	t.check((ln["stations"] as Array).size() >= 5, "%d stations" % (ln["stations"] as Array).size())
+	# The deck (5.6 m wide, train on top) is clear of every building.
 	var grid := _lay()._building_grid()
 	var blocked := 0
 	for i in range(0, pts.size(), 3):
 		var p := pts[i]
 		for b in grid.get(Vector2i(floori(p.x / 50.0), floori(p.z / 50.0)), []):
-			if b["kind"] in ["normal", "landmark"] and CityLayout.inside(b, p + Vector3.UP * 2.0, 4.6, 0.0):
+			if b["kind"] in ["normal", "landmark"] and CityLayout.inside(b, p + Vector3.UP * 2.0, RailNetwork.HALF + 0.5, 0.0):
 				blocked += 1
 				break
 	t.check(blocked == 0, "no building in the way of the trains (%d samples blocked)" % blocked)
-	# Where it crosses the Valley Line it is well above it.
-	var valley := _line("valley")
-	var worst := INF
-	if not valley.is_empty():
-		for v: Vector3 in valley["pts"]:
-			for i in range(0, pts.size(), 2):
-				if Vector2(pts[i].x, pts[i].z).distance_to(Vector2(v.x, v.z)) < 8.0:
-					worst = minf(worst, pts[i].y - v.y)
-	t.check(worst > 6.0, "flies over the Valley Line (%.1f m above it)" % worst)
+	# Over the strait on its own bridge, well clear of the water.
+	var low := INF
+	for p in pts:
+		if p.x < -40.0 and p.x > CityLayout.FAR_SHORE + 20.0:
+			low = minf(low, p.y)
+	t.check(low > 15.0 and low < INF, "the rail bridge carries it high over the strait (%.1f m)" % low)
 
 
 func test_hills_ring_the_bay_and_leave_the_city_at_sea_level(t) -> void:

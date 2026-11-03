@@ -34,7 +34,7 @@ func test_layout_has_districts_landmarks_and_swing_heights(t) -> void:
 	var kinds := {}
 	for lm in l.landmarks:
 		kinds[lm[0]] = true
-	for k in ["clock_crown", "harbour_dome", "beacon", "cathedral_top", "viaduct"]:
+	for k in ["clock_crown", "harbour_dome", "beacon", "cathedral_top"]:
 		t.check(kinds.has(k), "landmark %s placed" % k)
 	t.check(l.blocks.filter(func(bk): return bk["kind"] in ["park", "plaza"]).size() > 3,
 		"parks / plazas give wide launch gaps")

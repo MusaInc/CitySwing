@@ -22,8 +22,6 @@ const WHEEL_AT := Vector2(135, 219)
 const YARDS_AT := [Vector2(135, 505), Vector2(135, 300)]
 const SHIP_AT := Vector2(240, 423)
 const LIGHTHOUSE_AT := Vector2(8, 560)
-const EL_FROM_X := 440.0      # the elevated railway runs along Valley Road from here east
-const EL_DECK := 14.0
 
 const RED := Color(0.72, 0.12, 0.1)
 const WHITE := Color(0.9, 0.9, 0.87)
@@ -429,67 +427,6 @@ func ship(basin: Rect2) -> void:
 		L._anchor(foot + Vector3.UP * 2.0 + (tip - foot - Vector3.UP * 2.0) * 0.3, tip)
 	# Bow mast with a light.
 	L._kbeam(k, Vector3(bow + 2.0, deck, c.y), Vector3(bow + 2.0, deck + 8.0, c.y), 0.3, 0.3, WHITE)
-
-
-# -------------------------------------------------------- elevated rail
-## Elevated railway along Valley Road (curving with it): deck segments on
-## steel bents at the kerbs (never in a traffic lane or a junction), side
-## girders and rails; a three-car shuttle runs on it (RailNetwork/Trains).
-## Run along it, swing under it, land on the train.
-func elevated_rail() -> void:
-	var k := L._kit("el")
-	var road: Dictionary = L.roads.by_name.get("valley", {})
-	if road.is_empty():
-		return
-	var keep: PackedVector2Array = Geometry2D.offset_polygon(L.coast, -60.0)[0]
-	var path := PackedVector2Array()
-	for q in CityRoads._simplify(road["pts"], 0.4):
-		if q.x >= EL_FROM_X and Geometry2D.is_point_in_polygon(q, keep):
-			path.append(q)
-	if path.size() < 2:
-		return
-	var deck := EL_DECK
-	var half := 5.0
-	var green := Color(0.3, 0.4, 0.38)
-	for i in path.size() - 1:
-		var a := Vector3(path[i].x, deck - 0.5, path[i].y)
-		var b := Vector3(path[i + 1].x, deck - 0.5, path[i + 1].y)
-		var d := (b - a).normalized()
-		var side := Vector3(-d.z, 0.0, d.x)
-		var ext := d * 0.6  # overlap the joints
-		L._kbeam(k, a - ext, b + ext, half * 2.0, 1.0, Color(0.36, 0.37, 0.38))
-		for s: float in [-1.0, 1.0]:
-			var o: Vector3 = side * s * (half + 0.25)
-			L._kbeam(k, a - ext + o + Vector3(0, -0.6, 0), b + ext + o + Vector3(0, -0.6, 0), 0.5, 2.45, green)
-			for r: float in [-0.75, 0.75]:
-				var ro: Vector3 = side * (s * 2.0 + r) + Vector3(0, 0.58, 0)
-				L._kbeam(k, a + ro, b + ro, 0.12, 0.16, STEEL, false)
-			L._anchor(a + o * 1.06 + Vector3(0, -1.9, 0), b + o * 1.06 + Vector3(0, -1.9, 0))
-	# Bents every ~24 m, skipping junctions.
-	var total := CityRoads.length_of(path)
-	var t := 6.0
-	while t < total - 4.0:
-		var p := _at(path, t)
-		var dir := (_at(path, t + 1.0) - _at(path, t - 1.0)).normalized()
-		var sd := Vector2(-dir.y, dir.x)
-		var ok := true
-		for s: float in [-1.0, 1.0]:
-			var f: Vector4 = L.roads.field_at(p + sd * s * 11.8)
-			if f.w < 4.0:
-				ok = false
-		if ok:
-			for s: float in [-1.0, 1.0]:
-				var c: Vector2 = p + sd * s * 11.8
-				var gy := L.terrain.road_y(c.x, c.y)
-				L._kbeam(k, Vector3(c.x, gy - 0.3, c.y), Vector3(c.x, deck - 2.2, c.y), 0.9, 0.9, green)
-			var e0 := p - sd * 12.0
-			var e1 := p + sd * 12.0
-			L._kbeam(k, Vector3(e0.x, deck - 2.8, e0.y), Vector3(e1.x, deck - 2.8, e1.y), 1.2, 1.2, green)
-			t += 24.0
-		else:
-			t += 4.0
-	# The trains themselves move (Trains): register the line.
-	L.rail.add_valley(path, deck)
 
 
 ## Point `t` metres along a polyline (clamped).

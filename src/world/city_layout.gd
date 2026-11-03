@@ -7,7 +7,7 @@ extends RefCounted
 ## to the west, a waterfront of three domed/clock-towered landmarks, a dense
 ## glass business district peaking around a radio beacon, brick docks with
 ## basins and cranes to the north, low Georgian terraces to the east under a
-## huge sandstone cathedral, and an elevated railway along the waterfront.
+## huge sandstone cathedral, and a metro loop on viaducts through the middle.
 ## Heights are shaped for swinging: tall clusters, wide avenues as launch gaps,
 ## low-rise districts as technical terrain.
 ## Compact (~0.94 x 1.24 km) so every street is worth swinging down: a
@@ -86,7 +86,7 @@ var anchor_lines: Array = []   # [from:Vector3, to:Vector3] web anchors on thin 
 var kit_obbs: Array = []
 var kit_hulls: Array = []
 var pieces: SetPieces
-## Railways the trains run on (and the Loop Line's viaduct and stations).
+## The railway the trains run on (and the City Loop's viaduct, stations and bridge).
 var rail: RailNetwork
 ## The five homes (Apartments.place, after everything else is laid out).
 var apartments: Apartments
@@ -127,13 +127,14 @@ func generate(p_seed := 1207) -> CityLayout:
 	_bridge()
 	_blocks()
 	_construction()
-	_viaduct()
-	_skybridges()
+	# Westbank first: the City Loop crosses the strait and turns round on its
+	# quay (its ground, its buildings kept clear of the turning loop).
+	mainland = CityLayout.new().generate_mainland(p_seed)
 	rail = RailNetwork.new(self)
-	pieces.elevated_rail()
-	rail.build_loop()
-	rail.build_cross()
+	rail.build_city_loop()
+	_skybridges()  # (after the line: it may have cleared a tower from its path)
 	pieces.lighthouse()
+	CoastLife.new(self).build()  # North Beach and the Marina
 	_traffic()
 	_sea()
 	_place_plant()
@@ -187,6 +188,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	rail = RailNetwork.new(self)
 	var under := Rect2(APPROACH_END, BRIDGE_Z - 13.0, FAR_SHORE - 62.0 - APPROACH_END, 26.0)
 	reserved.append(under)
+	reserved.append(RailNetwork.TERMINUS)  # the City Loop's turning loop on the quay
 	roads = CityRoads.new()
 	roads.inner_radius = 0.0
 	roads.landform = "westbank"
@@ -207,21 +209,23 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 		"shore": [Vector2(W, -300.0), Vector2(160.0, -330.0), Vector2(300.0, -420.0), Vector2(400.0, N)],
 		"harbour": [Vector2(W, 250.0), Vector2(170.0, 235.0), Vector2(320.0, 300.0), Vector2(430.0, S)],
 	}
-	var keep: Array = [_rect_poly(Rect2(float(px.call(under.end.x)), under.position.y, under.size.x, under.size.y))]
+	var term := RailNetwork.TERMINUS
+	var keep: Array = [_rect_poly(Rect2(float(px.call(under.end.x)), under.position.y, under.size.x, under.size.y)),
+		_rect_poly(Rect2(float(px.call(term.end.x)), term.position.y, term.size.x, term.size.y))]
 	roads.generate(seed, func(x: float, z: float) -> String: return district(MIRROR - x, z), MAINLAND_PLAN, keep)
 	roads.mirror_x(MIRROR)
-	# The strip under the approach viaduct: cut out of the blocks it crosses
-	# and kept as an open plaza.
-	var cut := _rect_poly(under)
-	var kept: Array = []
-	for b in roads.blocks:
-		for q in Geometry2D.clip_polygons(b["poly"], cut):
-			if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 60.0:
-				kept.append({"poly": q, "district": b["district"], "kind": b["kind"]})
-		for q in Geometry2D.intersect_polygons(b["poly"], cut):
-			if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 30.0:
-				kept.append({"poly": q, "district": b["district"], "kind": "plaza"})
-	roads.blocks = kept
+	# The strip under the approach viaduct and the railway's turning loop:
+	# cut out of the blocks they cross and kept as open plazas.
+	for cut in [_rect_poly(under), _rect_poly(term)]:
+		var kept: Array = []
+		for b in roads.blocks:
+			for q in Geometry2D.clip_polygons(b["poly"], cut):
+				if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 60.0:
+					kept.append({"poly": q, "district": b["district"], "kind": b["kind"]})
+			for q in Geometry2D.intersect_polygons(b["poly"], cut):
+				if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 30.0:
+					kept.append({"poly": q, "district": b["district"], "kind": "plaza"})
+		roads.blocks = kept
 	roads.bake_field(2.0)
 	coast = roads.coast
 	island = _bbox(coast)
@@ -1623,7 +1627,7 @@ func _anchor(a: Vector3, b: Vector3) -> void:
 ## A kit: one structure spec the mesher draws ("solids", "beams", "prisms")
 ## whose collision is made from the very same list.
 ## While set, kit beams collide but take no web (world layer only, like the
-## street): the Cross-City viaduct right over a boulevard would otherwise be
+## street): the City Loop viaduct right over a boulevard would otherwise be
 ## every street launch's anchor (a short, low swing).
 var kit_solid_only := false
 var kit_obbs_solid: Array = []
@@ -1899,13 +1903,3 @@ func _bridge_approach(x0: float, zc: float, deck: float) -> void:
 
 
 
-func _viaduct() -> void:
-	# Elevated railway along the waterfront – a long, low, grappleable line.
-	var z := MIN_Z + 20.0
-	while z < MAX_Z - 25.0:
-		landmarks.append(["viaduct", Transform3D(Basis(Vector3.UP, PI), Vector3(48, 0, z + 25.0))])
-		z += 25.0
-	# (Its walkable deck: the arches and girders collide from the mesh itself;
-	# the Loop Line's trains run on top, so this stops at the deck.)
-	_add(_building([[43.5, MIN_Z + 20.0, 52.5, z, 9.8, RailNetwork.VIADUCT_DECK]], Style.MODERN, Color(0.2, 0.24, 0.26),
-		"invisible"))

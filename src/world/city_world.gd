@@ -150,7 +150,8 @@ func _ready() -> void:
 	mainland = CityWorld.new()
 	mainland.name = "Mainland"
 	mainland.secondary = true
-	mainland.layout = CityLayout.new().generate_mainland(layout.seed)
+	# (The island's layout made Westbank's already: the railway crosses to it.)
+	mainland.layout = layout.mainland if layout.mainland else CityLayout.new().generate_mainland(layout.seed)
 	add_child(mainland)
 	layout.mainland = mainland.layout
 	# (The bridge's anchor lines are the island layout's; the mainland's

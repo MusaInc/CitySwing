@@ -39,6 +39,7 @@ var _font_black: Font
 var _reticle_spin := 0.0
 var _ko_t := 0.0           # knockout flash + banner (s remaining, real time)
 var _ko_kmh := 0
+var _ko_cause := "WALL"
 const KO_TIME := 2.2
 var _reticle_pos := Vector2.INF
 var _speed_smooth := 0.0
@@ -89,6 +90,7 @@ func on_close_call(razor: bool, coins_won: int) -> void:
 func on_knockout(speed: float) -> void:
 	_ko_t = KO_TIME
 	_ko_kmh = int(speed * 3.6)
+	_ko_cause = String(player.ko_cause).to_upper() if player else "WALL"
 
 
 func on_gadget(kind: String) -> void:
@@ -295,12 +297,12 @@ func _draw_knockout() -> void:
 	var shake := Vector2(sin(age * 53.0), sin(age * 47.0 + 1.0)) * 7.0 * exp(-age * 4.0)
 	var pop := 1.0 + 0.6 * exp(-age * 12.0)
 	var fs := int(56 * pop)
-	var txt := "KNOCKED OUT"
+	var txt := "KNOCKED OUT" if _ko_cause == "WALL" else "HIT BY A %s" % _ko_cause
 	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var p := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.36) + shake
 	draw_string(_font_black, p + Vector2(3, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.5 * a))
 	draw_string(_font_black, p, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.32, 0.26, a))
-	var sub := "WALL · %d KM/H" % _ko_kmh
+	var sub := "%s · %d KM/H" % [_ko_cause, _ko_kmh]
 	var sw := _font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 	_text(Vector2(size.x / 2.0 - sw / 2.0, size.y * 0.36 + 32), sub, 18, Color(1, 1, 1, 0.8 * a), Color(0, 0, 0, 0.4 * a))
 	if _lost_t > 0.0:

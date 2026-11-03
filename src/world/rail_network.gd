@@ -1,32 +1,53 @@
 class_name RailNetwork
 extends RefCounted
-## The city's railways as data the trains run on, plus the Loop Line's
-## viaduct and stations (built into the layout as set-piece kits, so they're
-## drawn and collide like everything else).
+## The city's railway: the City Loop, one closed line right through the
+## middle of the city and across the strait, as data the trains run on plus
+## its viaduct, stations and the rail bridge (set-piece kits, drawn and
+## collided like everything else).
 ##
-##   * Loop Line: right round the island – up the waterfront on the old brick
-##     viaduct, then on a concrete viaduct over the coastal ring road (one
-##     central pier per span in the median, so traffic runs underneath). Two
-##     tracks; one train each way. Four stations.
-##   * Valley Line: the existing elevated line along Valley Road – a shuttle
-##     that runs end to end and back.
+## The route, in the direction the trains run (one way round, single track,
+## several trains spaced along it – a metro loop, never a dead end):
+##   * north up the Central Spine, through midtown and the business district,
+##     on median piers over the boulevard;
+##   * west round the inner ring and down Dock Road to Valley Road;
+##   * west along Valley Road and over the strait on its own bridge – a steel
+##     through-arch, trains only – to Westbank, where it turns round on a
+##     loop at the quay (Westbank station) and comes back over the bridge;
+##   * east along Valley Road (the two directions side by side) and back
+##     onto the Spine.
+## Buildings in the way are left out of the city (_clear_corridor), so the
+## line has a clear run wherever it leaves a street.
 ##
 ## A line: {name, pts: PackedVector3Array (rail top on the centreline, every
-## STEP m), loop: bool, tracks: [offset m, ...] (+ = left of travel),
-## stations: [s m, ...], cars: int}
+## STEP m), loop: bool, oneway: bool, trains: int, tracks: [offset m, ...]
+## (+ = left of travel), stations: [s m, ...], cars: int}
 
 const STEP := 2.0
-const LOOP_DECK_ABOVE_ROAD := 10.6   # the brick viaduct's deck height (its road is at sea level)
-const VIADUCT_X := 48.0
-const VIADUCT_DECK := 10.6
 const RAIL_H := 0.2                  # rail top above the deck
-const TRACK := 2.1                   # each track's offset from the centreline
+const DECK := 16.0                   # deck above the street
+const WATER_DECK := 22.0             # deck over the strait (ships pass under)
+const HALF := 2.8                    # deck half-width (one track)
+## Where the line runs both ways side by side (Valley Road, the bridge),
+## each direction's centreline is this far off the middle.
+const PAIR := 3.6
+const BRIDGE_Z := 370.0
+const ARCH_X := [-360.0, -90.0]      # the arch span's springings
+const ARCH_RISE := 54.0              # crown above the deck
+const ARCH_SIDE := 8.6               # ribs either side of the middle
+## The turning loop on Westbank's quay (generate_mainland keeps it clear).
+const TERMINUS := Rect2(-640.0, 304.0, 200.0, 140.0)
+const LOOP_C := Vector2(-580.0, 370.0)
+const LOOP_R := 46.0
+## Stations by where they are (each placed on the straightest run nearby).
+const STATIONS := [Vector2(527.0, -300.0), Vector2(568.0, -105.0), Vector2(634.0, 175.0), Vector2(376.0, 215.0),
+	Vector2(-626.0, 372.0), Vector2(520.0, 385.0)]
 const CONCRETE := Color(0.62, 0.61, 0.58)
 const CONCRETE_DK := Color(0.45, 0.45, 0.44)
 const RAIL_STEEL := Color(0.3, 0.3, 0.31)
+const ARCH_WHITE := Color(0.88, 0.88, 0.86)
 const CANOPY := Color(0.18, 0.22, 0.24)
 const PLATFORM := Color(0.7, 0.69, 0.66)
-const STATION_LEN := 64.0
+const STATION_LEN := 78.0            # four cars (72 m) and a little
 ## Platform edge from the track centre: half the car (1.5 m) + a 10 cm gap.
 const PLATFORM_GAP := 1.6
 
@@ -38,138 +59,201 @@ func _init(layout: CityLayout) -> void:
 	L = layout
 
 
-# ------------------------------------------------------------- the Loop Line
-func build_loop() -> void:
-	var ring: Dictionary = L.roads.by_name.get("ring", {})
-	if ring.is_empty():
+# ------------------------------------------------------------ the City Loop
+func build_city_loop() -> void:
+	var ctrl := _route()
+	if ctrl.size() < 16:
+		push_warning("City Loop: route not found")
 		return
-	var rp: PackedVector2Array = ring["pts"]
-	var n := rp.size()
-	if rp[0].distance_to(rp[n - 1]) < 0.5:
-		n -= 1
-	# The ring without its west leg (the waterfront viaduct replaces it):
-	# start just after the west leg, run round N → E → S until it comes back.
-	var start := -1
-	for i in n:
-		if rp[(i - 1 + n) % n].x < 200.0 and rp[i].x >= 200.0:
-			start = i
-			break
-	if start < 0:
-		return
-	var path := PackedVector2Array()
-	for k in n:
-		var q := rp[(start + k) % n]
-		if q.x < 200.0:
-			break
-		path.append(q)
-	# Down the waterfront on the brick viaduct (south → north), every 20 m.
-	var z_hi := minf(path[-1].y - 80.0, CityLayout.MAX_Z - 60.0)
-	var z_lo := maxf(path[0].y + 80.0, CityLayout.MIN_Z + 60.0)
-	var z := z_hi
-	while z > z_lo:
-		path.append(Vector2(VIADUCT_X, z))
-		z -= 20.0
-	path.append(Vector2(VIADUCT_X, z_lo))
-	# Round the corners (Chaikin on a 20 m resample: ~50 m radius curves).
-	var sm := _resample_closed(path, 36.0)
+	var sm := _resample_closed(ctrl, 30.0)
 	for it in 4:
 		sm = _chaikin_closed(sm)
-	# Swing out round anything in the way (the cathedral's close to the ring
-	# on the east coast): push blocked points seaward, then re-ease.
-	sm = _clear_buildings(sm)
-	sm = _resample_closed(sm, 24.0)
-	for it in 3:
-		sm = _chaikin_closed(sm)
-	# (Chaikin keeps the long waterfront straight exactly on the viaduct's
-	# axis: collinear points stay collinear.)
 	var flat := _resample_closed(sm, STEP)
-	# Heights: deck = road + 10.6 (exactly the brick viaduct on the
-	# waterfront), eased along the line so grades stay gentle.
+	var n := flat.size()
+	var g := PackedFloat32Array()
+	g.resize(n)
 	var ys := PackedFloat32Array()
-	ys.resize(flat.size())
-	for i in flat.size():
+	ys.resize(n)
+	for i in n:
 		var q := flat[i]
-		var on_viaduct := q.x < VIADUCT_X + 0.05
-		ys[i] = VIADUCT_DECK if on_viaduct else L.terrain.road_y(q.x, q.y) + LOOP_DECK_ABOVE_ROAD
+		g[i] = ground(q.x, q.y)
+		ys[i] = WATER_DECK if _over_water(q) else g[i] + DECK
 	for pass_i in 3:
 		ys = _ease_closed(ys, 40)
-	for i in flat.size():
-		var q := flat[i]
-		if q.x < VIADUCT_X + 0.5:
-			ys[i] = VIADUCT_DECK
-		else:
-			ys[i] = maxf(ys[i], L.terrain.road_y(q.x, q.y) + 8.5)
+	for i in n:
+		ys[i] = maxf(ys[i], (WATER_DECK - 1.0) if _over_water(flat[i]) else g[i] + DECK - 1.5)
 	ys = _ease_closed(ys, 10)
-	for i in flat.size():
-		if flat[i].x < VIADUCT_X + 0.5:
-			ys[i] = VIADUCT_DECK
 	var pts := PackedVector3Array()
-	for i in flat.size():
+	for i in n:
 		pts.append(Vector3(flat[i].x, ys[i] + RAIL_H, flat[i].y))
-	var total := pts.size() * STEP
 	var stations: Array = []
-	for f: float in [0.1, 0.33, 0.58, 0.86]:
-		stations.append(_straightest(pts, total * f, 160.0))
-	var line := {"name": "loop", "pts": pts, "loop": true, "tracks": [TRACK, -TRACK], "stations": stations,
-		"cars": 4}
+	for at: Vector2 in STATIONS:
+		var best := 0
+		for i in n:
+			if flat[i].distance_squared_to(at) < flat[best].distance_squared_to(at):
+				best = i
+		stations.append(_straightest(pts, best * STEP, 40.0))
+	stations.sort()
+	var line := {"name": "city", "pts": pts, "loop": true, "oneway": true, "trains": 3, "tracks": [0.0],
+		"stations": stations, "cars": 4}
 	lines.append(line)
-	_loop_viaduct(pts)
+	_clear_corridor(pts)
+	L.kit_solid_only = true  # solid, but webs go to the towers either side
+	_viaduct(pts)
 	for s: float in stations:
 		_station(line, s)
+	L.kit_solid_only = false
+	_strait_bridge(pts)
 
 
-func _clear_buildings(p: PackedVector2Array) -> PackedVector2Array:
+## Street level under (x, z): the island's, Westbank's past the strait, the
+## sea in between.
+func ground(x: float, z: float) -> float:
+	if x < CityLayout.FAR_SHORE + 2.0 and L.mainland:
+		return L.mainland.terrain.road_y(x, z)
+	if x < CityLayout.RIVER_EDGE:
+		return 0.0
+	return L.terrain.road_y(x, z)
+
+
+static func _over_water(q: Vector2) -> bool:
+	return q.x < CityLayout.RIVER_EDGE + 4.0 and q.x > CityLayout.FAR_SHORE - 4.0
+
+
+## The control polyline, in travel order (see the header).
+func _route() -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var spine: Dictionary = L.roads.by_name.get("spine", {})
+	var inner: Dictionary = L.roads.by_name.get("inner", {})
+	var valley: Dictionary = L.roads.by_name.get("valley", {})
+	if spine.is_empty() or inner.is_empty() or valley.is_empty():
+		return out
+	# 1. North up the Spine, from Valley Road to the inner ring's north roundabout.
+	var sp: PackedVector2Array = spine["pts"]
+	for i in range(sp.size() - 1, -1, -1):
+		if sp[i].y < 340.0 and sp[i].y > -318.0:
+			out.append(sp[i])
+	# 2. West and south round the inner ring to its south-west roundabout.
+	var ip: PackedVector2Array = inner["pts"]
+	var i0 := _nearest(ip, Vector2(468.0, -348.0))
+	var i1 := _nearest(ip, Vector2(304.0, -105.0))
+	var k := i0
+	while k != i1:
+		out.append(ip[k])
+		k = (k - 1 + ip.size()) % ip.size() if _ring_dir(ip, i0, i1) < 0 else (k + 1) % ip.size()
+	# 3. Down Dock Road (the street from that roundabout to Valley Road).
+	var dock := _road_between(Vector2(310.0, -30.0), Vector2(419.0, 370.0))
+	for q in dock:
+		if q.y > -40.0 and q.y < 305.0:
+			out.append(q)
+	# 4. West along Valley Road (the north side), over the strait.
+	var vp: PackedVector2Array = valley["pts"]
+	for i in range(vp.size() - 1, -1, -1):
+		if vp[i].x < 368.0 and vp[i].x > 70.0:
+			out.append(vp[i] + _north(vp, i) * PAIR)
+	var x := 40.0
+	while x > CityLayout.FAR_SHORE - 30.0:
+		out.append(Vector2(x, BRIDGE_Z - PAIR))
+		x -= 30.0
+	# 5. Round the turning loop on Westbank's quay.
+	out.append(Vector2(-505.0, BRIDGE_Z - PAIR - 2.0))
+	var phi := -40.0
+	while phi > -320.0:
+		out.append(LOOP_C + Vector2(cos(deg_to_rad(phi)), sin(deg_to_rad(phi))) * LOOP_R)
+		phi -= 12.0
+	out.append(Vector2(-505.0, BRIDGE_Z + PAIR + 2.0))
+	# 6. Back over the bridge (south side) and east along Valley Road.
+	x = CityLayout.FAR_SHORE - 30.0
+	while x < 40.0:
+		out.append(Vector2(x, BRIDGE_Z + PAIR))
+		x += 30.0
+	for i in vp.size():
+		if vp[i].x > 70.0 and vp[i].x < 600.0:
+			out.append(vp[i] - _north(vp, i) * PAIR)
+	return out
+
+
+static func _nearest(p: PackedVector2Array, at: Vector2) -> int:
+	var best := 0
+	for i in p.size():
+		if p[i].distance_squared_to(at) < p[best].distance_squared_to(at):
+			best = i
+	return best
+
+
+## -1 if the short way from i0 to i1 round a closed polyline is backwards.
+static func _ring_dir(p: PackedVector2Array, i0: int, i1: int) -> int:
+	var fwd := posmod(i1 - i0, p.size())
+	return 1 if fwd <= p.size() / 2 else -1
+
+
+## North-pointing normal of a west→east road at sample i.
+static func _north(p: PackedVector2Array, i: int) -> Vector2:
+	var a := p[maxi(i - 1, 0)]
+	var b := p[mini(i + 1, p.size() - 1)]
+	var e := (b - a).normalized()
+	return Vector2(e.y, -e.x)
+
+
+## The street running from near `a` to near `b` (either way round).
+func _road_between(a: Vector2, b: Vector2) -> PackedVector2Array:
+	for r in L.roads.roads:
+		var p: PackedVector2Array = r["pts"]
+		if p.size() < 2:
+			continue
+		if p[0].distance_to(a) < 30.0 and p[-1].distance_to(b) < 30.0:
+			return p
+		if p[-1].distance_to(a) < 30.0 and p[0].distance_to(b) < 30.0:
+			var rev := p.duplicate()
+			rev.reverse()
+			return rev
+	# (No such street: a straight run.)
+	return PackedVector2Array([a, a.lerp(b, 0.33), a.lerp(b, 0.66), b])
+
+
+## Buildings in the line's way (any part of them under or through the deck)
+## are left out of the city, with whatever stood on their roofs.
+func _clear_corridor(pts: PackedVector3Array) -> void:
 	var grid := L._building_grid()
-	var c := L.island.get_center()
-	var hit := func(q: Vector2) -> bool:
-		var y := L.terrain.road_y(q.x, q.y) + LOOP_DECK_ABOVE_ROAD
-		for b in grid.get(Vector2i(floori(q.x / 50.0), floori(q.y / 50.0)), []):
-			if CityLayout.inside(b, Vector3(q.x, y + 1.0, q.y), 7.0, 4.0):
-				return true
-		return false
-	# How far out each point must go, as a smooth bulge: push until clear,
-	# widen (max filter) and ease (box filter) the offsets, apply; twice.
-	var n := p.size()
-	for it in 2:
-		var need := PackedFloat32Array()
-		need.resize(n)
-		var any := false
-		for i in n:
-			if p[i].x < VIADUCT_X + 6.0:
+	var gone := {}
+	var keep_kinds := ["landmark", "structure", "invisible", "bridge"]
+	for i in range(0, pts.size(), 2):
+		var p := pts[i]
+		if _over_water(Vector2(p.x, p.z)):
+			continue
+		for b in grid.get(Vector2i(floori(p.x / 50.0), floori(p.z / 50.0)), []):
+			if gone.has(b) or b["kind"] in keep_kinds:
 				continue
-			var out := (p[i] - c).normalized()
-			var d := 0.0
-			while d < 30.0 and hit.call(p[i] + out * d):
-				d += 2.0
-			need[i] = d
-			any = any or d > 0.0
-		if not any:
-			break
-		var wide := PackedFloat32Array()
-		wide.resize(n)
-		for i in n:
-			var m := 0.0
-			for o in range(-12, 13):
-				m = maxf(m, need[(i + o + n) % n])
-			wide[i] = m
-		for pass_i in 2:
-			wide = _ease_closed(wide, 12)
-		for i in n:
-			p[i] += (p[i] - c).normalized() * wide[i] * 1.15
-	return p
+			var q := CityLayout.bxf(b).affine_inverse() * p if float(b.get("rot", 0.0)) != 0.0 else p
+			for t in b["tiers"]:
+				if q.x > t[0] - HALF - 2.0 and q.x < t[2] + HALF + 2.0 and q.z > t[1] - HALF - 2.0 \
+						and q.z < t[3] + HALF + 2.0 and t[4] < p.y + 6.0:
+					gone[b] = true
+					break
+	if gone.is_empty():
+		return
+	L.buildings = L.buildings.filter(func(b): return not gone.has(b))
+	L.props = L.props.filter(func(pr):
+		var o: Vector3 = (pr[1] as Transform3D).origin
+		for b in gone:
+			if CityLayout.inside(b, o, 1.0, 8.0):
+				return false
+		return true)
+	L._plant_candidates = L._plant_candidates.filter(func(c): return not gone.has(c[0]))
+	print("City Loop: %d buildings cleared from its path" % gone.size())
 
 
-## The concrete viaduct and the rails (the waterfront leg already has its
-## brick viaduct: rails only there). Kits of ~300 m so each culls on its own.
-func _loop_viaduct(pts: PackedVector3Array, loop := true, prefix := "loop") -> void:
+## The viaduct: deck, girder, parapets, rails and ballast, on a column with a
+## hammerhead every ~30 m (in the street's median; none over the strait,
+## where the bridge carries it). Kits of ~300 m so each culls on its own.
+func _viaduct(pts: PackedVector3Array) -> void:
 	var n := pts.size()
-	var k := L._kit(prefix + "_0")
+	var k := L._kit("city_0")
 	var run := 0.0
 	var i := 0
 	var seg := 10  # samples per drawn segment (20 m on straights)
-	var last := n if loop else n - 1
-	while i < last:
-		var j := mini(i + seg, last)  # (j == n closes the loop back to sample 0)
+	while i < n:
+		var j := mini(i + seg, n)  # (j == n closes the loop back to sample 0)
 		# Shorter chords on curves, so the straight rail pieces stay on the
 		# path the wheels follow (within ~12 cm).
 		while j > i + 1 and _chord_dev(pts, i, j) > 0.12:
@@ -181,52 +265,44 @@ func _loop_viaduct(pts: PackedVector3Array, loop := true, prefix := "loop") -> v
 		var ext := d.normalized() * 0.3
 		var deck_a := a - Vector3.UP * RAIL_H
 		var deck_b := b - Vector3.UP * RAIL_H
-		var brick := a.x < VIADUCT_X + 0.5 and b.x < VIADUCT_X + 0.5
-		if not brick:
-			L._kbeam(k, deck_a - ext + Vector3.DOWN * 0.7, deck_b + ext + Vector3.DOWN * 0.7, 9.6, 1.4, CONCRETE)
-			L._kbeam(k, deck_a - ext + Vector3.DOWN * 1.7, deck_b + ext + Vector3.DOWN * 1.7, 5.0, 0.8, CONCRETE_DK, false)
-			for sgn: float in [-1.0, 1.0]:
-				var o := side * sgn * 4.6
-				L._kbeam(k, deck_a - ext + o + Vector3.UP * 0.5, deck_b + ext + o + Vector3.UP * 0.5, 0.4, 1.0, CONCRETE)
-				if loop:
-					# (Anchor lines along the coastal Loop's deck edges. The
-					# Cross-City Line over the boulevard has none: right
-					# overhead they'd win every street launch with a short,
-					# weak swing; its deck still takes a web like any surface.)
-					L._anchor(deck_a + side * sgn * 4.9 + Vector3.DOWN * 1.2, deck_b + side * sgn * 4.9 + Vector3.DOWN * 1.2)
-		for t: float in [TRACK, -TRACK]:
-			for r: float in [-0.72, 0.72]:
-				var ro := side * (t + r) + Vector3.DOWN * 0.08
-				L._kbeam(k, a + ro - ext, b + ro + ext, 0.1, 0.16, RAIL_STEEL, false)
-			if not brick:
-				var so := side * t + Vector3.DOWN * (RAIL_H - 0.04)
-				L._kbeam(k, a + so - ext, b + so + ext, 2.6, 0.12, Color(0.36, 0.33, 0.3), false)  # ballast bed
-		# Piers: one column in the ring road's median every ~30 m, with a hammerhead.
-		if not brick:
+		var water := _over_water(Vector2(a.x, a.z)) and _over_water(Vector2(b.x, b.z))
+		L._kbeam(k, deck_a - ext + Vector3.DOWN * 0.7, deck_b + ext + Vector3.DOWN * 0.7, HALF * 2.0, 1.4, CONCRETE)
+		L._kbeam(k, deck_a - ext + Vector3.DOWN * 1.7, deck_b + ext + Vector3.DOWN * 1.7, 3.0, 0.8,
+			RAIL_STEEL if water else CONCRETE_DK, false)
+		for sgn: float in [-1.0, 1.0]:
+			var o := side * sgn * (HALF - 0.2)
+			L._kbeam(k, deck_a - ext + o + Vector3.UP * 0.5, deck_b + ext + o + Vector3.UP * 0.5, 0.4, 1.0, CONCRETE)
+			var ro := side * sgn * 0.72 + Vector3.DOWN * 0.08
+			L._kbeam(k, a + ro - ext, b + ro + ext, 0.1, 0.16, RAIL_STEEL, false)
+		var so := Vector3.DOWN * (RAIL_H - 0.04)
+		L._kbeam(k, a + so - ext, b + so + ext, 2.6, 0.12, Color(0.36, 0.33, 0.3), false)  # ballast bed
+		if not water:
 			var s0 := i * STEP
 			var s1 := j * STEP
 			var sp := ceilf(s0 / 30.0) * 30.0
 			while sp < s1:
 				var p := _at(pts, sp)
-				var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
-				dir.y = 0.0
-				dir = dir.normalized()
-				var ps := Vector3(-dir.z, 0.0, dir.x)
-				var gy := L.terrain.road_y(p.x, p.z)
-				var top := p.y - RAIL_H - 2.1
-				L._kbeam(k, Vector3(p.x, gy - 0.3, p.z), Vector3(p.x, top, p.z), 1.7, 1.7, CONCRETE_DK)
-				L._kbeam(k, Vector3(p.x, top + 0.4, p.z) - ps * 4.2, Vector3(p.x, top + 0.4, p.z) + ps * 4.2, 1.8, 1.0,
-					CONCRETE)
+				if not _over_water(Vector2(p.x, p.z)):
+					var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
+					dir.y = 0.0
+					dir = dir.normalized()
+					var ps := Vector3(-dir.z, 0.0, dir.x)
+					var gy := ground(p.x, p.z)
+					var top := p.y - RAIL_H - 2.1
+					L._kbeam(k, Vector3(p.x, gy - 0.3, p.z), Vector3(p.x, top, p.z), 1.5, 1.5, CONCRETE_DK)
+					L._kbeam(k, Vector3(p.x, top + 0.4, p.z) - ps * 2.6, Vector3(p.x, top + 0.4, p.z) + ps * 2.6, 1.6,
+						1.0, CONCRETE)
 				sp += 30.0
 		run += d.length()
 		if run > 300.0:
 			run = 0.0
-			k = L._kit("%s_%d" % [prefix, L.structures.size()])
+			k = L._kit("city_%d" % L.structures.size())
 		i = j
 
 
-## A station: platforms both sides (outboard of the tracks), canopies on
-## columns, a lift/stair tower down to the street, name boards.
+## A station: a platform each side of the track, canopies on columns, a
+## stair/lift tower down to the street on the outside of the curve, name
+## boards.
 func _station(line: Dictionary, s0: float) -> void:
 	var pts: PackedVector3Array = line["pts"]
 	var k := L._kit("station")
@@ -237,13 +313,12 @@ func _station(line: Dictionary, s0: float) -> void:
 	d = d.normalized()
 	var side := Vector3(-d.z, 0.0, d.x)
 	var c := _at(pts, s0)
-	var brick := c.x < VIADUCT_X + 0.5
 	for sgn: float in [-1.0, 1.0]:
-		var off := side * sgn * (TRACK + PLATFORM_GAP + 1.75)
+		var off := side * sgn * (PLATFORM_GAP + 1.75)
 		var pa := a + off
 		var pb := b + off
 		# Platform at car-floor height, its edge along the track.
-		L._kbeam(k, pa + Vector3.DOWN * 0.1, pb + Vector3.DOWN * 0.1, 3.5, 2.2 if not brick else 1.6, PLATFORM)
+		L._kbeam(k, pa + Vector3.DOWN * 0.1, pb + Vector3.DOWN * 0.1, 3.5, 2.2, PLATFORM)
 		L._kbeam(k, pa + side * sgn * -1.72 + Vector3.UP * 0.96, pb + side * sgn * -1.72 + Vector3.UP * 0.96,
 			0.06, 0.04, Color(0.95, 0.8, 0.15), false)  # yellow safety line
 		# Canopy: columns down the outer edge, a roof sloping to the track.
@@ -262,115 +337,96 @@ func _station(line: Dictionary, s0: float) -> void:
 			Color(0.3, 0.38, 0.42), false)
 		var m := (pa + pb) * 0.5 + side * sgn * 1.55 + Vector3.UP * 3.3
 		L._kbeam(k, m - d * 2.4, m + d * 2.4, 0.1, 0.7, Color(0.08, 0.16, 0.36), false)
-	# Stair/lift tower down to the street on the seaward side, past the road
-	# (solid: a landing spot).
-	var out := side if (Vector2(c.x, c.z) + Vector2(side.x, side.z)).distance_to(L.island.get_center()) \
-		> Vector2(c.x, c.z).distance_to(L.island.get_center()) else -side
-	var tw := c + out * 13.8
-	var gy := L.terrain.road_y(tw.x, tw.z)
+	# Stair/lift tower on the outside of the curve (solid: a landing spot).
+	var bend := _at(pts, s0 + 30.0) + _at(pts, s0 - 30.0) - c * 2.0
+	var out := -side if Vector3(bend.x, 0.0, bend.z).dot(side) > 0.0 else side
+	var tw := c + out * 9.0
+	var gy := ground(tw.x, tw.z)
 	L._kbeam(k, Vector3(tw.x, gy, tw.z), Vector3(tw.x, c.y + 5.0, tw.z), 4.0, 4.0, Color(0.36, 0.38, 0.4))
 	L._kbeam(k, Vector3(tw.x, c.y + 5.0, tw.z), Vector3(tw.x, c.y + 5.3, tw.z), 4.6, 4.6, CANOPY)
 
 
-# ------------------------------------------------------- the Cross-City Line
-## Straight through the middle: an elevated two-track metro down the Central
-## Spine, north coast to south coast through Old Town, the business district
-## and midtown, on median piers over the boulevard (traffic runs either side).
-## It climbs onto a flyover where it crosses the Valley Line. Stations at the
-## straightest stretches; trains shuttle end to end through every station.
-const CROSS_STATIONS := [0.08, 0.32, 0.58, 0.9]
-## Higher than the Loop Line's deck: over the boulevard it's a swing anchor
-## too, and from the street a longer rope swings you properly.
-const CROSS_DECK := 16.0
-
-
-func build_cross() -> void:
-	var road: Dictionary = L.roads.by_name.get("spine", {})
-	if road.is_empty():
-		return
-	var inner: PackedVector2Array = Geometry2D.offset_polygon(L.coast, -(CityRoads.ESPLANADE + CityRoads.RING_W + 34.0))[0]
-	var path := PackedVector2Array()
-	for q: Vector2 in road["pts"]:
-		if Geometry2D.is_point_in_polygon(q, inner):
-			path.append(q)
-	if path.size() < 4:
-		return
-	var flat := _resample_open(path, STEP)
-	# The Valley Line's viaduct (EL_DECK) is crossed on a flyover.
-	var valley := PackedVector2Array()
-	for ln in lines:
-		if ln["name"] == "valley":
-			for v: Vector3 in ln["pts"]:
-				valley.append(Vector2(v.x, v.z))
-	var ys := PackedFloat32Array()
-	ys.resize(flat.size())
-	for i in flat.size():
-		var q := flat[i]
-		var y := L.terrain.road_y(q.x, q.y) + CROSS_DECK
-		if not valley.is_empty():
-			var dv := INF
-			for k in range(0, valley.size(), 4):
-				dv = minf(dv, valley[k].distance_to(q))
-			if dv < 90.0:
-				y = maxf(y, SetPieces.EL_DECK + 10.0)
-		ys[i] = y
-	for pass_i in 3:
-		ys = _ease_open(ys, 30)
-	for i in flat.size():
-		ys[i] = maxf(ys[i], L.terrain.road_y(flat[i].x, flat[i].y) + CROSS_DECK - 1.5)
-	ys = _ease_open(ys, 8)
-	var pts := PackedVector3Array()
-	for i in flat.size():
-		pts.append(Vector3(flat[i].x, ys[i] + RAIL_H, flat[i].y))
-	var total := (pts.size() - 1) * STEP
-	var stations: Array = []
-	for f: float in CROSS_STATIONS:
-		stations.append(clampf(_straightest(pts, total * f, 90.0), STATION_LEN, total - STATION_LEN))
-	var line := {"name": "cross", "pts": pts, "loop": false, "tracks": [TRACK, -TRACK], "stations": stations,
-		"cars": 3}
-	lines.append(line)
-	L.kit_solid_only = true  # solid, but webs go to the towers either side
-	_loop_viaduct(pts, false, "cross")
-	# Buffer stops at both ends.
-	var k := L._kit("cross_end")
-	for e in 2:
-		var a := pts[0] if e == 0 else pts[-1]
-		var b := pts[1] if e == 0 else pts[-2]
-		var d := (a - b).normalized()
-		var side := Vector3(-d.z, 0.0, d.x)
-		L._kbeam(k, a - side * 4.8, a + side * 4.8, 0.8, 1.6, Color(0.75, 0.62, 0.15))
-	for s: float in stations:
-		_station(line, s)
-	L.kit_solid_only = false
-
-
-static func _ease_open(y: PackedFloat32Array, r: int) -> PackedFloat32Array:
-	var n := y.size()
-	var out := PackedFloat32Array()
-	out.resize(n)
-	for i in n:
-		var acc := 0.0
-		var cnt := 0
-		for k in range(maxi(0, i - r), mini(n, i + r + 1)):
-			acc += y[k]
+# ------------------------------------------------------- the strait bridge
+## The line's own bridge over the strait (the road has the suspension
+## bridge): both directions side by side on one deck, concrete piers in the
+## water, and over the shipping channel a white steel through-arch – two
+## ribs either side of the trains, hangers down to the deck, wind bracing
+## overhead. The ribs take a web (anchor lines): a high, long swing over
+## the water.
+func _strait_bridge(pts: PackedVector3Array) -> void:
+	var k := L._kit("rail_bridge")
+	# Deck level on the bridge (the line's own height there).
+	var dy := 0.0
+	var cnt := 0
+	for p in pts:
+		if p.x < -60.0 and p.x > CityLayout.FAR_SHORE + 40.0 and absf(p.z - BRIDGE_Z) < 10.0:
+			dy += p.y - RAIL_H
 			cnt += 1
-		out[i] = acc / cnt
-	return out
-
-
-# ------------------------------------------------------------ the Valley Line
-## Registers the existing elevated line (SetPieces.elevated_rail builds its
-## structure) as a shuttle: one track, stations at both ends.
-func add_valley(path2: PackedVector2Array, deck: float) -> void:
-	var flat := _resample_open(path2, STEP)
-	var pts := PackedVector3Array()
-	for q in flat:
-		pts.append(Vector3(q.x, deck + 0.16, q.y))
-	var total := (pts.size() - 1) * STEP
-	if total < 120.0:
+	if cnt == 0:
 		return
-	lines.append({"name": "valley", "pts": pts, "loop": false, "tracks": [-2.0], "stations": [24.0, total - 24.0],
-		"cars": 3})
+	dy /= cnt
+	var zc := BRIDGE_Z
+	var w := PAIR + HALF  # half-width of the double deck
+	# Edge girders the length of the bridge (a deep steel fascia each side).
+	for sz: float in [-1.0, 1.0]:
+		L._kbeam(k, Vector3(CityLayout.FAR_SHORE - 6.0, dy - 1.2, zc + sz * (w + 0.3)),
+			Vector3(CityLayout.RIVER_EDGE + 6.0, dy - 1.2, zc + sz * (w + 0.3)), 0.6, 2.6, ARCH_WHITE.darkened(0.15))
+	# Piers: a pair of columns under the two tracks, a cap beam across.
+	var piers: Array = [CityLayout.FAR_SHORE + 25.0, ARCH_X[0], ARCH_X[1], -45.0, 0.0]
+	for x: float in piers:
+		var heavy := x in ARCH_X
+		for sz: float in [-1.0, 1.0]:
+			var cw := 4.4 if heavy else 2.6
+			L._kbeam(k, Vector3(x, -8.0, zc + sz * PAIR), Vector3(x, dy - 2.6, zc + sz * PAIR), cw, cw, CONCRETE_DK)
+		L._kbeam(k, Vector3(x, dy - 2.4, zc - w - 1.2), Vector3(x, dy - 2.4, zc + w + 1.2), 3.0 if heavy else 2.0, 1.6,
+			CONCRETE)
+		if heavy:
+			# The arch's springing block: a cutwater base in the water, and
+			# a leg up to each rib's foot.
+			L._kbeam(k, Vector3(x, -6.0, zc - ARCH_SIDE - 2.0), Vector3(x, 3.0, zc + ARCH_SIDE + 2.0), 9.0, 9.0,
+				CONCRETE_DK)
+			for sz: float in [-1.0, 1.0]:
+				L._kbeam(k, Vector3(x, 2.0, zc + sz * ARCH_SIDE), Vector3(x, dy - 5.0, zc + sz * ARCH_SIDE), 3.2, 3.2,
+					CONCRETE)
+	# The arch ribs: a parabola from below the deck at the springings up
+	# over the trains, each a chain of box-section beams.
+	var x0: float = ARCH_X[0]
+	var x1: float = ARCH_X[1]
+	var segs := 18
+	var rib := func(u: float) -> float:
+		var v := u * 2.0 - 1.0
+		return dy - 6.0 + (ARCH_RISE + 6.0) * (1.0 - v * v)
+	for sz: float in [-1.0, 1.0]:
+		var z := zc + sz * ARCH_SIDE
+		for i in segs:
+			var u0 := float(i) / segs
+			var u1 := float(i + 1) / segs
+			var a := Vector3(lerpf(x0, x1, u0), rib.call(u0), z)
+			var b := Vector3(lerpf(x0, x1, u1), rib.call(u1), z)
+			var ext := (b - a).normalized() * 0.6
+			L._kbeam(k, a - ext, b + ext, 1.4, 2.2, ARCH_WHITE)
+			if a.y > dy + 6.0 and b.y > dy + 6.0:
+				L._anchor(a + Vector3.DOWN * 1.2, b + Vector3.DOWN * 1.2)
+		# Hangers every 15 m, from the rib down to the deck's edge girder.
+		var hx := x0 + 15.0
+		while hx < x1 - 10.0:
+			var hy: float = rib.call((hx - x0) / (x1 - x0))
+			if hy > dy + 3.0:
+				L._kbeam(k, Vector3(hx, dy - 0.2, z), Vector3(hx, hy - 1.0, z), 0.22, 0.22, ARCH_WHITE.darkened(0.1),
+					false)
+			hx += 15.0
+	# Wind bracing between the ribs, high over the trains.
+	for i in range(2, segs - 1, 2):
+		var u := float(i) / segs
+		var x := lerpf(x0, x1, u)
+		var y: float = rib.call(u)
+		if y < dy + 12.0:
+			continue
+		L._kbeam(k, Vector3(x, y, zc - ARCH_SIDE), Vector3(x, y, zc + ARCH_SIDE), 0.8, 1.0, ARCH_WHITE)
+		if i + 2 < segs:
+			var xn := lerpf(x0, x1, float(i + 2) / segs)
+			var yn: float = rib.call(float(i + 2) / segs)
+			L._kbeam(k, Vector3(x, y, zc - ARCH_SIDE), Vector3(xn, yn, zc + ARCH_SIDE), 0.5, 0.5, ARCH_WHITE, false)
 
 
 # ------------------------------------------------------------------- helpers

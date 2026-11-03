@@ -71,10 +71,11 @@ func test_trains_and_platforms_line_up(t) -> void:
 	t.check(car.size.y > 3.6 and car.size.y < 4.4, "car roof ~4 m over the rail")
 	# Platform top (RailNetwork._station) sits at the car floor: 1.0 m over the rail.
 	t.check(absf(-0.1 + 2.2 * 0.5 - 1.0) < 0.05, "platform level with the car floor")
-	# Platform edge clear of the car side: track 2.1 + half car 1.45 < platform inner edge.
-	var inner := RailNetwork.TRACK + RailNetwork.PLATFORM_GAP
-	t.check(inner > RailNetwork.TRACK + car.size.x * 0.5 and inner < RailNetwork.TRACK + car.size.x * 0.5 + 0.2,
-		"platform edge clears the train by a few cm (%.2f m)" % (inner - RailNetwork.TRACK - car.size.x * 0.5))
+	# Platform edge clear of the car side: half car 1.45 < platform inner edge
+	# (the City Loop is single track: platforms either side of the centreline).
+	var inner := RailNetwork.PLATFORM_GAP
+	t.check(inner > car.size.x * 0.5 and inner < car.size.x * 0.5 + 0.2,
+		"platform edge clears the train by a few cm (%.2f m)" % (inner - car.size.x * 0.5))
 
 
 func test_balconies_are_person_scaled(t) -> void:

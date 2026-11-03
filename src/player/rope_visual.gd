@@ -9,7 +9,7 @@ const SEGMENTS := 14
 var player: Player
 ## Optional node whose position the web leaves from (the rig's launcher hand).
 var hand: Node3D
-var width := 0.022  # half-width (m); thin like a real web line
+var width := 0.012  # half-width (m); a fine line, like a real web
 var _mesh := ImmediateMesh.new()
 var _wave := 0.0
 var _mat: StandardMaterial3D
@@ -110,7 +110,7 @@ func _process(dt: float) -> void:
 				# Catch twang: a standing wave along the taut line, dying fast.
 				p += side * sin(t * PI * 3.0) * sin(_wave * 1.7) * 0.09 * _twang * _twang
 			var to_cam := (cam_pos - p).normalized()
-			var taper := 1.0 + 0.8 * maxf(0.0, 1.0 - p.distance_to(pts[0]) / 1.2)
+			var taper := 1.0 + 0.6 * maxf(0.0, 1.0 - p.distance_to(pts[0]) / 1.2)
 			var w := tangent.cross(to_cam).normalized() * width * w_scale * taper * (1.0 + p.distance_to(cam_pos) * 0.009)
 			if rainbow:
 				_mesh.surface_set_color(Color.from_hsv(fmod(_hue + (seg_i + t) * 0.35, 1.0), 0.75, 1.0))

@@ -31,6 +31,11 @@ signal knockout(speed: float, normal: Vector3)
 ## JUMP pressed just before a knockout-speed wall hit: kicked off it instead.
 signal wall_saved(speed: float)
 signal stun_ended
+## A limp body hit the ground (falling, thrown off a wall or by a vehicle):
+## speed into the ground and where. Each bounce of the same crash fires again.
+signal slammed(speed: float, point: Vector3)
+## Hit by a vehicle ("car" / "train") – a knockout follows.
+signal struck(kind: String, speed: float)
 signal launched
 signal stepped_up(height: float)
 ## Any contact with a wall or obstacle worth a visible reaction (visual only):
@@ -93,6 +98,11 @@ var knocked_out := false
 var ko_normal := Vector3.ZERO
 var ko_velocity := Vector3.ZERO  # velocity just before the hit
 var _kick_window := 0.0
+var _bounces := 0  # ground bounces this crash (a limp body bounces twice, smaller each time)
+## What knocked you out last: "wall", "car", "train".
+var ko_cause := "wall"
+## Velocity of the moving floor under the body (a train), zero otherwise.
+var carry_velocity := Vector3.ZERO
 var _stun_time := 0.0
 var _settle_time := 0.0
 var spawn_transform := Transform3D.IDENTITY
@@ -132,6 +142,13 @@ var _bump_cool := 0.0
 var ground_fn: Callable
 var stagger_t := 0.0  # > 0 while staggering back off a wall (no stick)
 var _stagger_cool := 0.0
+## Long reach (humans only): the higher you are and the faster you fall, the
+## further a web reaches (m added to grapple_range), so a long drop off a
+## supertall still finds a facade to catch. Bots and recorded courses keep
+## the plain range.
+var reach_extra := 0.0
+const REACH_MAX_EXTRA := 50.0
+var _rp: SwingParams  # params with the extended reach (see p_eff)
 
 
 func _ready() -> void:
@@ -201,7 +218,7 @@ func ray_target(from: Vector3, dir: Vector3, length: float) -> Dictionary:
 	if not (col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & GRAPPLE_LAYER)):
 		return {"ok": false, "reason": "street", "point": point, "normal": normal}
 	var hand := hand_position()
-	if hand.distance_to(point) > params.grapple_range:
+	if hand.distance_to(point) > p_eff().grapple_range:
 		return {"ok": false, "reason": "too far", "point": point, "normal": normal}
 	# Line of sight from the launcher: the web can't pass through another building.
 	var to_point := point - hand
@@ -268,6 +285,33 @@ func _read_input(dt: float) -> Dictionary:
 	}
 
 
+## The params in force this tick: `params`, or a copy with the long reach
+## (and a rope that long allowed) while reach_extra is on or a long web is
+## still attached.
+func p_eff() -> SwingParams:
+	var long_rope := s.attached and s.rope_length > params.max_rope_length
+	if reach_extra < 0.5 and not long_rope:
+		return params
+	if _rp == null:
+		_rp = params.duplicate()
+	_rp.grapple_range = params.grapple_range + reach_extra
+	_rp.max_rope_length = maxf(params.max_rope_length + reach_extra, s.rope_length if s.attached else 0.0)
+	return _rp
+
+
+func _update_reach(dt: float) -> void:
+	var want := 0.0
+	if controls.human and not is_on_floor() and not stunned:
+		var h := height_above_ground()
+		var fall := -s.velocity.y
+		want = REACH_MAX_EXTRA * clampf(0.45 * clampf((h - 45.0) / 180.0, 0.0, 1.0)
+			+ 0.75 * clampf((fall - 9.0) / 26.0, 0.0, 1.0), 0.0, 1.0)
+	# Grows quickly as you drop, eases back once you're caught.
+	reach_extra = move_toward(reach_extra, want, dt * (60.0 if want > reach_extra else 25.0))
+	if reach_extra < 0.5 and not (s.attached and s.rope_length > params.max_rope_length):
+		_rp = null  # (fresh copy next time: picks up any tuning edits)
+
+
 ## Height above the street / pavement below (the terrain isn't flat).
 func height_above_ground() -> float:
 	if ground_fn.is_valid():
@@ -312,12 +356,14 @@ func _physics_process(dt: float) -> void:
 	if inp.get("respawn", false):
 		respawn()
 		return
+	_update_reach(dt)
+	var pe := p_eff()
 
 	var origin := hand_position()
-	targeting.update(get_world_3d().direct_space_state, origin, aim_dir, s.velocity, params,
-		is_on_floor(), [get_rid()], _move_smooth)
+	targeting.update(get_world_3d().direct_space_state, origin, aim_dir, s.velocity, pe,
+		is_on_floor(), [get_rid()], _move_smooth, reach_extra > 12.0)
 	if line_state == Line.IDLE or line_state == Line.ATTACHED:
-		targeting.refresh_pick(get_world_3d().direct_space_state, _launch_state(), params, [get_rid()], dt)
+		targeting.refresh_pick(get_world_3d().direct_space_state, _launch_state(), pe, [get_rid()], dt)
 
 	# Assisted grapple (button/autopilot). Touch webs are driven by fire_at/release_web.
 	# While stunned the hand stays clenched on the line: input can't release it.
@@ -355,7 +401,7 @@ func _physics_process(dt: float) -> void:
 	s.grounded = is_on_floor() and not _launch_pending
 	_launch_pending = false
 	var start := global_position
-	SwingPhysics.step(s, controls, params, dt)
+	SwingPhysics.step(s, controls, p_eff(), dt)
 	if s.snap_speed > 2.0:
 		rope_snapped.emit(s.snap_speed)
 	floor_snap_length = 0.0 if (s.attached or s.velocity.y > 0.5) else 0.4
@@ -365,6 +411,25 @@ func _physics_process(dt: float) -> void:
 	elif not s.grounded and not s.attached and not stunned:
 		_try_mantle(velocity * dt)
 	move_and_slide()
+	# Riding something that moves (a train): the model's velocity is relative
+	# to it while aboard. Landing on it takes its velocity off yours; leaving
+	# it (jumping, running off, a web) keeps its speed on top of yours.
+	var prev_carry := carry_velocity
+	carry_velocity = get_platform_velocity() if is_on_floor() else Vector3.ZERO
+	carry_velocity.y = 0.0
+	if carry_velocity.length_squared() < 0.01:
+		carry_velocity = Vector3.ZERO
+	if prev_carry == Vector3.ZERO and carry_velocity != Vector3.ZERO:
+		# (Forgiving: you catch the train's speed and at most a short skid
+		# is left over, so a drop onto a roof sticks instead of throwing you
+		# off the back.)
+		var rel := s.velocity - carry_velocity
+		var vy := s.velocity.y
+		rel.y = 0.0
+		s.velocity = rel.limit_length(4.0)
+		s.velocity.y = vy
+	elif prev_carry != Vector3.ZERO and carry_velocity == Vector3.ZERO:
+		s.velocity += prev_carry
 	_resolve_contacts(dt)
 	if s.attached and params.rope_wrapping:
 		_update_wraps()
@@ -485,6 +550,10 @@ func _resolve_contacts(dt: float) -> void:
 		on_street = floor_street
 		var land_speed := -get_real_velocity().y
 		var speed_in := maxf(land_speed, worst_into)
+		if stunned:
+			_slam(maxf(-pre_hit.y, speed_in), pre_hit)
+			was_on_floor = on_floor
+			return
 		# The animation wants the true vertical impact (speed_in is softened
 		# for the stun rules).
 		land_impact = maxf(-pre_hit.y, speed_in)
@@ -496,6 +565,7 @@ func _resolve_contacts(dt: float) -> void:
 			last_safe_position = global_position + Vector3.UP * 0.2
 		if speed_in > params.ragdoll_fall_speed:
 			stun(speed_in)
+			_slam(maxf(-pre_hit.y, speed_in), pre_hit)
 	elif on_floor:
 		on_street = floor_street
 	var facade := wall_n != Vector3.ZERO and worst_into > params.hard_impact_speed and not stunned
@@ -683,11 +753,11 @@ func _fire(origin: Vector3) -> void:
 	line_will_hit = targeting.has_target
 	if line_will_hit:
 		s.position = global_position
-		line_target = targeting.best_flyable(get_world_3d().direct_space_state, s, params, [get_rid()])
+		line_target = targeting.best_flyable(get_world_3d().direct_space_state, s, p_eff(), [get_rid()])
 		if bot != null and bot.has_method("choose_anchor"):
 			line_target = bot.choose_anchor(self, line_target)  # title-screen pilot
 	else:
-		line_target = origin + aim_dir.normalized() * params.grapple_range * 0.8
+		line_target = origin + aim_dir.normalized() * p_eff().grapple_range * 0.8
 	grapple_fired.emit(line_target, line_will_hit)
 
 
@@ -707,7 +777,7 @@ func _advance_line(dt: float, _origin: Vector3) -> void:
 		var col: Object = hit["collider"]
 		var grappleable := col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & GRAPPLE_LAYER) != 0
 		line_tip = hit["position"]
-		if line_will_hit and grappleable and hand.distance_to(line_tip) <= params.grapple_range \
+		if line_will_hit and grappleable and hand.distance_to(line_tip) <= p_eff().grapple_range \
 				and SwingPhysics.attach(s, line_tip, _range_tolerant()):
 			line_target = line_tip
 			wraps.clear()
@@ -736,9 +806,10 @@ func _advance_line(dt: float, _origin: Vector3) -> void:
 
 ## The anchor may drift slightly out of range while the line travels; allow 10%.
 func _range_tolerant() -> SwingParams:
-	if s.position.distance_to(line_target) <= params.grapple_range:
-		return params
-	var p: SwingParams = params.duplicate()
+	var pe := p_eff()
+	if s.position.distance_to(line_target) <= pe.grapple_range:
+		return pe
+	var p: SwingParams = pe.duplicate()
 	p.grapple_range *= 1.1
 	return p
 
@@ -806,7 +877,49 @@ func stun(impact_speed: float) -> void:
 	stunned = true
 	_stun_time = 0.0
 	_settle_time = 0.0
+	_bounces = 0
 	stun_started.emit(impact_speed)
+
+
+## A limp body meets the ground: it lands flat with a thud, bounces once or
+## twice (smaller each time) and skids out its speed along the ground,
+## instead of stopping dead on the spot. (The bounce is for people only:
+## bots and recorded courses keep the plain model.)
+func _slam(into: float, pre: Vector3) -> void:
+	if into < 4.0:
+		return
+	slammed.emit(into, global_position + Vector3.DOWN * 0.9)
+	if not controls.human or _bounces >= 2 or into < 7.0:
+		return
+	_bounces += 1
+	var vh := Vector3(pre.x, 0.0, pre.z)
+	s.velocity = vh * (0.72 if _bounces == 1 else 0.55)
+	s.velocity.y = clampf(into * 0.16, 1.8, 5.5) / _bounces
+	_launch_pending = true  # off the floor next step
+
+
+## Hit by a vehicle moving at `vel` (people only; see VehicleHits). The body
+## is thrown along with it and up, limp: a knockout.
+func hit_by(kind: String, vel: Vector3) -> void:
+	if stunned or scripted or not controls.human:
+		return
+	var spd := vel.length()
+	var dir := Vector3(vel.x, 0.0, vel.z).normalized()
+	if dir.length_squared() < 0.5:
+		return
+	_let_go()
+	ko_cause = kind
+	ko_normal = dir
+	ko_velocity = s.velocity
+	s.velocity = dir * (spd * 1.15 + 2.0) + Vector3.UP * clampf(3.0 + spd * 0.3, 4.0, 9.0)
+	velocity = s.velocity
+	_launch_pending = true
+	chain = 0
+	perfect_streak = 0
+	knocked_out = true
+	struck.emit(kind, spd)
+	knockout.emit(spd, dir)
+	stun(spd * 1.6)
 
 
 ## Head-on into a wall: the web lets go and the body bounces off the facade
@@ -823,6 +936,7 @@ func _knockout(into: float, wall_n: Vector3, pre: Vector3) -> void:
 	chain = 0
 	perfect_streak = 0
 	knocked_out = true
+	ko_cause = "wall"
 	knockout.emit(into, out)
 	stun(into)
 
@@ -865,6 +979,9 @@ func respawn(at: Variant = null) -> void:
 	_move_smooth = Vector3.ZERO
 	stagger_t = 0.0
 	_stagger_cool = 0.0
+	reach_extra = 0.0
+	_rp = null
+	carry_velocity = Vector3.ZERO
 	s.position = global_position
 	was_on_floor = false
 	chain = 0

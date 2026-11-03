@@ -166,6 +166,23 @@ func _ready() -> void:
 		audio.play("knockout", linear_to_db(clampf(spd / 35.0, 0.5, 1.0)))
 		Settings.haptic(160, 1.0))
 	player.respawned.connect(func(): impact_fx.cancel())
+	# A limp body hitting the ground: a thud you feel (beat, shake, dust),
+	# louder and longer the harder it lands.
+	player.slammed.connect(func(spd: float, at: Vector3):
+		impact_fx.slam(spd)
+		camera.shake(clampf(spd / 60.0, 0.12, 0.45))
+		audio.play("impact", linear_to_db(clampf(spd / 28.0, 0.3, 1.0)), randf_range(0.8, 0.95))
+		audio.play("bump", linear_to_db(clampf(spd / 20.0, 0.3, 0.9)), 0.7)
+		ImpactFx.dust(self, at, spd)
+		Settings.haptic(int(clampf(spd * 3.0, 30.0, 120.0)), clampf(spd / 25.0, 0.4, 1.0)))
+	player.struck.connect(func(kind: String, _spd: float):
+		audio.play("horn", -4.0 if kind == "car" else 0.0, 1.0 if kind == "car" else 0.6))
+	if world is CityWorld:
+		var vh := VehicleHits.new()
+		vh.name = "VehicleHits"
+		vh.player = player
+		vh.world = world
+		add_child(vh)
 	gadgets = Gadgets.new()
 	gadgets.name = "Gadgets"
 	add_child(gadgets)

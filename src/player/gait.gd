@@ -89,6 +89,19 @@ static func cadence(s: float) -> float:
 
 
 ## Forget everything: the next update starts from the current ankle positions.
+## The ground under the feet moved by d (riding a train): planted feet and
+## swing paths move with it, so nothing skates or re-steps.
+func shift(d: Vector3) -> void:
+	if d == Vector3.ZERO:
+		return
+	for f: Foot in feet.values():
+		f.pos += d
+		f.from += d
+		f.target += d
+		f.cur += d
+		f.out += d
+
+
 func reset() -> void:
 	active = false
 	moving = false
