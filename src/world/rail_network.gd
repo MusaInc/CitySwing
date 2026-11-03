@@ -207,12 +207,16 @@ func _loop_viaduct(pts: PackedVector3Array, loop := true, prefix := "loop") -> v
 			var s1 := j * STEP
 			var sp := ceilf(s0 / 30.0) * 30.0
 			while sp < s1:
-				var p := _at(pts, sp)
-				var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
+				var p := _at(pts, sp, loop)
+				var dir := _at(pts, sp + 2.0, loop) - _at(pts, sp - 2.0, loop)
 				dir.y = 0.0
 				dir = dir.normalized()
 				var ps := Vector3(-dir.z, 0.0, dir.x)
-				var gy := L.terrain.road_y(p.x, p.z)
+				# Keep junction mouths clear; spans carry across them.
+				if L.roads.field_at(Vector2(p.x, p.z)).w < 2.0:
+					sp += 30.0
+					continue
+				var gy := -5.0 if L.is_water(p) else L.terrain.road_y(p.x, p.z)
 				var top := p.y - RAIL_H - 2.1
 				L._kbeam(k, Vector3(p.x, gy - 0.3, p.z), Vector3(p.x, top, p.z), 1.7, 1.7, CONCRETE_DK)
 				L._kbeam(k, Vector3(p.x, top + 0.4, p.z) - ps * 4.2, Vector3(p.x, top + 0.4, p.z) + ps * 4.2, 1.8, 1.0,
@@ -229,14 +233,15 @@ func _loop_viaduct(pts: PackedVector3Array, loop := true, prefix := "loop") -> v
 ## columns, a lift/stair tower down to the street, name boards.
 func _station(line: Dictionary, s0: float) -> void:
 	var pts: PackedVector3Array = line["pts"]
+	var loop: bool = line["loop"]
 	var k := L._kit("station")
-	var a := _at(pts, s0 - STATION_LEN * 0.5)
-	var b := _at(pts, s0 + STATION_LEN * 0.5)
+	var a := _at(pts, s0 - STATION_LEN * 0.5, loop)
+	var b := _at(pts, s0 + STATION_LEN * 0.5, loop)
 	var d := (b - a)
 	d.y = 0.0
 	d = d.normalized()
 	var side := Vector3(-d.z, 0.0, d.x)
-	var c := _at(pts, s0)
+	var c := _at(pts, s0, loop)
 	var brick := c.x < VIADUCT_X + 0.5
 	for sgn: float in [-1.0, 1.0]:
 		var off := side * sgn * (TRACK + PLATFORM_GAP + 1.75)
@@ -262,14 +267,7 @@ func _station(line: Dictionary, s0: float) -> void:
 			Color(0.3, 0.38, 0.42), false)
 		var m := (pa + pb) * 0.5 + side * sgn * 1.55 + Vector3.UP * 3.3
 		L._kbeam(k, m - d * 2.4, m + d * 2.4, 0.1, 0.7, Color(0.08, 0.16, 0.36), false)
-	# Stair/lift tower down to the street on the seaward side, past the road
-	# (solid: a landing spot).
-	var out := side if (Vector2(c.x, c.z) + Vector2(side.x, side.z)).distance_to(L.island.get_center()) \
-		> Vector2(c.x, c.z).distance_to(L.island.get_center()) else -side
-	var tw := c + out * 13.8
-	var gy := L.terrain.road_y(tw.x, tw.z)
-	L._kbeam(k, Vector3(tw.x, gy, tw.z), Vector3(tw.x, c.y + 5.0, tw.z), 4.0, 4.0, Color(0.36, 0.38, 0.4))
-	L._kbeam(k, Vector3(tw.x, c.y + 5.0, tw.z), Vector3(tw.x, c.y + 5.3, tw.z), 4.6, 4.6, CANOPY)
+	CityInfrastructure.station_access(L, k, c, d, side)
 
 
 # ------------------------------------------------------- the Cross-City Line
@@ -369,8 +367,20 @@ func add_valley(path2: PackedVector2Array, deck: float) -> void:
 	var total := (pts.size() - 1) * STEP
 	if total < 120.0:
 		return
-	lines.append({"name": "valley", "pts": pts, "loop": false, "tracks": [-2.0], "stations": [24.0, total - 24.0],
-		"cars": 3})
+	var line := {"name": "valley", "pts": pts, "loop": false, "tracks": [-2.0], "stations": [40.0, total - 40.0],
+		"cars": 3}
+	lines.append(line)
+	for station: float in line.stations:
+		_station(line, station)
+	var end_kit := L._kit("valley_buffers")
+	for end in [0, pts.size() - 1]:
+		var p := pts[end]
+		var d := (pts[mini(end + 1, pts.size() - 1)] - pts[maxi(0, end - 1)]).normalized()
+		var side := Vector3(-d.z, 0.0, d.x)
+		for track: float in [-2.0, 2.0]:
+			var c := p + side * track
+			L._kbeam(end_kit, c - side * 1.2 + Vector3.UP * 0.6, c + side * 1.2 + Vector3.UP * 0.6, 0.4, 0.35, Color(0.64, 0.27, 0.19))
+
 
 
 # ------------------------------------------------------------------- helpers
@@ -386,11 +396,11 @@ static func _chord_dev(pts: PackedVector3Array, i: int, j: int) -> float:
 
 
 ## Point s metres along a line's samples (wraps for loops, clamps otherwise).
-static func _at(pts: PackedVector3Array, s: float) -> Vector3:
+static func _at(pts: PackedVector3Array, s: float, loop := true) -> Vector3:
 	var n := pts.size()
-	var f := fposmod(s / STEP, float(n))
+	var f := fposmod(s / STEP, float(n)) if loop else clampf(s / STEP, 0.0, float(n - 1))
 	var i := int(f)
-	return pts[i].lerp(pts[(i + 1) % n], f - i)
+	return pts[i].lerp(pts[(i + 1) % n] if loop else pts[mini(i + 1, n - 1)], f - i)
 
 
 static func _resample_closed(p: PackedVector2Array, step: float) -> PackedVector2Array:

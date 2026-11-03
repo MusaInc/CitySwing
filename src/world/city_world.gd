@@ -161,6 +161,10 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	for task in _pending.values():
+		WorkerThreadPool.wait_for_task_completion(task)
+	_pending.clear()
+	_results.clear()
 	if not secondary:
 		GrappleTargeting.anchor_lines = []
 
@@ -790,6 +794,12 @@ func _place_furniture() -> Dictionary:
 					elif roll < 0.6:
 						put.call("planter", d, 4.0)
 				d += rng.randf_range(16.0, 34.0)
+	for item in layout.public_furniture:
+		var p: Vector3 = item[1].origin
+		var key := Vector2i(floori(p.x / CHUNK), floori(p.z / CHUNK))
+		if not out.has(key):
+			out[key] = []
+		out[key].append(item)
 	return out
 
 
@@ -1253,7 +1263,10 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 	order.sort_custom(func(a, b): return want[a] < want[b])
 	var in_flight := _pending.size()
 	for key in order:
-		if _loaded.has(key) or _pending.has(key):
+		_mutex.lock()
+		var ready: bool = _results.has(key)
+		_mutex.unlock()
+		if _loaded.has(key) or _pending.has(key) or ready:
 			continue
 		if in_flight >= 3:
 			break
@@ -1610,6 +1623,14 @@ func _pavement_paths() -> Array:
 				var b := Vector3(r[(k + 1) % r.size()].x, 0.15, r[(k + 1) % r.size()].y)
 				if a.distance_to(b) > 6.0:
 					out.append([a, b] if fwd else [b, a])
+	# The quay promenade has its own walking route, clear of the garden bays.
+	if not layout.is_mainland:
+		for z in range(-500, 501, 100):
+			var a := Vector3(33.8, 0.15, z)
+			var b := a + Vector3(0, 0, 85)
+			if not layout.is_water(a) and not layout.is_water(b):
+				out.append([a, b])
+				out.append([b + Vector3(1.1, 0, 0), a + Vector3(1.1, 0, 0)])
 	return out
 
 

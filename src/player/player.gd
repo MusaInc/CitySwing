@@ -295,6 +295,7 @@ func _physics_process(dt: float) -> void:
 	# review script can opt in with `human_steer` to move like a player).
 	controls.turn_assist = bot == null or bot.get("human_steer") == true
 	controls.human = controls.turn_assist
+	targeting.human_assist = controls.human
 	# Trains are solid (ride them!) for people only: bots and recorded
 	# courses must not depend on where a train happens to be.
 	set_collision_mask_value(6, controls.human)
@@ -791,7 +792,7 @@ func auto_tighten() -> float:
 		if s.rope_length > _attach_length * params.auto_tighten_min_fraction + 0.5:
 			return 2.0
 		_zip = false
-	return SwingPhysics.auto_tighten(s, params, _attach_length)
+	return SwingPhysics.auto_tighten(s, params, _attach_length, controls.human)
 
 
 # ----------------------------------------------------------- stun / reset

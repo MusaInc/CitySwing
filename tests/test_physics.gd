@@ -387,3 +387,53 @@ func test_human_steering_turns_a_corner_in_the_air(t) -> void:
 	t.note("75° in the air at 25 m/s: assisted %.2f s, raw %s" % [times[0], "never" if times[1] < 0 else "%.2f s" % times[1]])
 	t.check(times[0] > 0.0 and times[0] < 1.6, "assisted: a corner in well under 2 s")
 	t.check(times[1] < 0.0 or times[1] > 3.0, "raw model (bots): unchanged, slow")
+
+func test_hold_to_climb_lifts_a_stationary_hang_and_carries_release(t) -> void:
+	var p := _params(true)
+	var s := _pendulum(p, 40.0, 0.0)
+	var start := s.position.y
+	var c := SwingPhysics.Controls.new()
+	c.human = true
+	for i in 180:
+		c.reel = SwingPhysics.auto_tighten(s, p, 40.0, true)
+		SwingPhysics.step(s, c, p, DT)
+	t.check(s.position.y > start + 10.0, "holding a stationary web climbs at least 10 m in 3 s")
+	t.check(s.velocity.y > 3.0, "climbing has real upward release velocity")
+	var v := s.velocity
+	SwingPhysics.release(s)
+	t.check(s.velocity == v, "releasing preserves the winch's upward momentum")
+
+func test_hold_to_climb_eases_before_anchor_and_stops_on_release(t) -> void:
+	var p := _params(true)
+	var s := _pendulum(p, 30.0, 0.0)
+	var c := SwingPhysics.Controls.new()
+	c.human = true
+	for i in 60 * 20:
+		c.reel = SwingPhysics.auto_tighten(s, p, 30.0, true)
+		SwingPhysics.step(s, c, p, DT)
+	t.check(s.rope_length >= p.auto_climb_stop_distance - 0.1, "automatic climb keeps an anchor standoff")
+	t.check(s.rope_length < p.auto_climb_stop_distance + 1.5, "holding continues beyond the old 60% limit")
+	SwingPhysics.release(s)
+	t.near(SwingPhysics.auto_tighten(s, p, 30.0, true), 0.0, 0.001, "no winch after release")
+
+func test_assisted_upswing_adds_height_without_unbounded_speed(t) -> void:
+	var p := _params(true)
+	var base := _pendulum(p, 40.0, 45.0)
+	var helped := _pendulum(p, 40.0, 45.0)
+	var c := SwingPhysics.Controls.new()
+	var human := SwingPhysics.Controls.new()
+	human.human = true
+	var highest := helped.position.y
+	var old_highest := base.position.y
+	var fastest := 0.0
+	for i in 240:
+		c.reel = SwingPhysics.auto_tighten(base, p, 40.0)
+		human.reel = SwingPhysics.auto_tighten(helped, p, 40.0, true)
+		SwingPhysics.step(base, c, p, DT)
+		SwingPhysics.step(helped, human, p, DT)
+		highest = maxf(highest, helped.position.y)
+		old_highest = maxf(old_highest, base.position.y)
+		fastest = maxf(fastest, helped.velocity.length())
+	t.note("upswing peak %.1f -> %.1f m; speed %.1f m/s" % [old_highest, highest, fastest])
+	t.check(highest > old_highest + 1.0, "extra pull gives a higher upswing")
+	t.check(fastest < p.reel_speed_cap + 5.0, "reeling respects the speed budget")

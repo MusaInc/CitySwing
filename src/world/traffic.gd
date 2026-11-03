@@ -131,6 +131,8 @@ func build_network() -> void:
 		if float(r["w"]) < 14.0:
 			offs = [2.6]
 		for pc: PackedVector2Array in pieces:
+			if not layout.is_mainland and r.get("name", "") == "diagonal" and pc[0].x < 150.0:
+				continue  # replaced by the continuous bridge lane below
 			if CityRoads.length_of(pc) < 12.0:
 				continue
 			var base_line := pc
@@ -143,24 +145,24 @@ func build_network() -> void:
 						ln.reverse()
 					_add_lane(ln, loop, LANE_V.get(kind, 10.0), piece)
 			piece += 1
-	# The suspension bridge and its approach viaduct: two lanes each way from
-	# the tunnel portal in the island's anchorage, over the strait and down
-	# onto Westbank. Both ends turn round out of sight (inside the anchorage;
-	# on the mainland, past the viaduct's foot).
-	if not layout.is_mainland:
-		var x_in := 62.0
-		var x_out := CityLayout.APPROACH_END + 4.0
+	# Continuous roadway: Westbank, suspension span, island ramp, Grand Diagonal junction.
+	if not layout.is_mainland and not layout.bridge_ramp.is_empty():
 		var axis := PackedVector2Array()
-		var nb := int((x_in - x_out) / 6.0)
-		for i in nb + 1:
-			axis.append(Vector2(lerpf(x_in, x_out, float(i) / nb), CityLayout.BRIDGE_Z))
-		for o: float in [2.4, 6.0]:
+		for i in range(layout.bridge_ramp.size() - 1, -1, -1):
+			var p: Vector3 = layout.bridge_ramp[i]
+			axis.append(Vector2(p.x, p.z))
+		var x := 50.0
+		while x > CityLayout.APPROACH_END + 4.0:
+			axis.append(Vector2(x, CityLayout.BRIDGE_Z))
+			x -= 6.0
+		axis.append(Vector2(CityLayout.APPROACH_END + 4.0, CityLayout.BRIDGE_Z))
+		for o: float in [3.2, 7.0]:
 			for sgn: float in [1.0, -1.0]:
-				# (Same side-of-the-road convention as the streets above.)
 				var ln := CityLayout._offset_line(axis, o * sgn)
 				if sgn < 0.0:
 					ln.reverse()
-				_add_lane(ln, false, 14.0, piece, [], func(x: float, _z: float) -> float: return CityLayout.approach_y(x))
+				_add_lane(ln, false, 14.0, piece, [], func(xp: float, _z: float) -> float:
+					return CityInfrastructure.bridge_height(layout, xp))
 		piece += 1
 	# Roundabouts: two lanes, one way (anticlockwise seen from above, north up).
 	for rb in R.roundabouts:

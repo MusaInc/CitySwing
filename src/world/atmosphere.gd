@@ -100,16 +100,16 @@ func _ready() -> void:
 	env.tonemap_white = 8.0
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
-	env.fog_depth_curve = 1.45
+	env.fog_depth_curve = 1.65
 	env.fog_sun_scatter = 0.3
 	env.fog_aerial_perspective = 0.7
 	env.fog_sky_affect = 0.15
 	env.glow_enabled = preset.get("glow", true)
-	env.glow_intensity = 0.4
-	env.glow_bloom = 0.05
+	env.glow_intensity = 0.22
+	env.glow_bloom = 0.015
 	env.glow_hdr_threshold = 1.0
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.1
+	env.adjustment_saturation = 1.02
 	env.adjustment_contrast = 1.12
 	env.adjustment_color_correction = grade_lut()
 	var we := WorldEnvironment.new()
@@ -118,7 +118,7 @@ func _ready() -> void:
 
 	sun = DirectionalLight3D.new()
 	sun.name = "Sun"
-	sun.light_angular_distance = 0.6
+	sun.light_angular_distance = 0.85
 	sun.shadow_enabled = preset.get("shadows", true)
 	sun.shadow_bias = 0.1
 	sun.shadow_normal_bias = 0.8
@@ -247,7 +247,7 @@ func _apply(dt: float, instant: bool) -> void:
 		sun.rotation_degrees = Vector3(-maxf(el, 1.5), ang.y, 0.0)
 		sun.light_color = _ramp(el, [[0.0, Color(1.0, 0.5, 0.26)], [8.0, Color(1.0, 0.72, 0.48)],
 			[25.0, Color(1.0, 0.84, 0.64)], [60.0, Color(1.0, 0.95, 0.88)]])
-		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.3], [10.0, 2.1], [25.0, 2.65], [60.0, 2.85]])
+		sun.light_energy = lerpf(0.0, 1.0, day_light) * _rampf(el, [[0.0, 1.3], [10.0, 1.8], [25.0, 2.1], [60.0, 2.25]])
 		sky_mat.set_shader_parameter("sun_glow", 1.0)
 		sky_mat.set_shader_parameter("disc_size", 0.9993)
 		sky_mat.set_shader_parameter("disc_k", 6.0)
@@ -307,18 +307,19 @@ func _apply(dt: float, instant: bool) -> void:
 	env.ambient_light_color = _ramp(el, [[-10.0, Color(0.42, 0.47, 0.64)], [2.0, Color(0.7, 0.6, 0.62)],
 		[15.0, Color(0.8, 0.76, 0.72)], [40.0, Color(0.8, 0.79, 0.78)]]).lerp(Color(0.74, 0.75, 0.78), overcast * 0.6)
 	env.tonemap_exposure = lerpf(1.0, 1.5, night) * lerpf(1.0, 1.12, overcast)
-	# High up, the haze starts further out (looking down 300 m through a
-	# 130 m fog start turned the whole city grey from the top floors).
+	# Depth fog only: a clear near field, subtle blue-grey middle distance,
+	# and skyline silhouettes merging with the horizon. Rooftop views get a
+	# modest visibility lift; no volume textures, raymarching or extra lights.
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
-	env.fog_depth_begin = lerpf(220.0, 12.0, fog) * (1.0 + 4.0 * alt * (1.0 - fog))
-	env.fog_depth_end = lerpf(2600.0, 520.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_density = lerpf(0.46, 0.97, fog) * (1.0 - 0.35 * alt * (1.0 - fog))
-	env.fog_light_color = hor.lerp(Color(0.68, 0.77, 0.9), 0.35 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
+	env.fog_depth_begin = lerpf(180.0, 12.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(2200.0, 520.0, fog) * (1.0 + 0.35 * alt * (1.0 - fog))
+	env.fog_density = lerpf(0.72, 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
+	env.fog_light_color = hor.lerp(Color(0.67, 0.73, 0.80), 0.28 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
 	env.fog_light_energy = lerpf(1.0, 0.55, night)
 	env.fog_sun_scatter = 0.3 * day_light * (1.0 - overcast)
-	env.glow_intensity = lerpf(0.4, 0.75, night)
-	env.glow_hdr_threshold = lerpf(1.0, 0.8, night)
+	env.glow_intensity = lerpf(0.22, 0.42, night)
+	env.glow_hdr_threshold = lerpf(1.35, 1.0, night)
 
 	# --- shared shader inputs.
 	var top_l := zen.srgb_to_linear()

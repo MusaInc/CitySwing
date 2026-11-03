@@ -33,6 +33,12 @@ extends Resource
 ## The line also tightens to keep the lowest point of the arc this far above
 ## the street.
 @export var swing_ground_clearance: float = 8.0
+## Assisted hold-to-climb: metres/second, without an extra touch button.
+## These assists apply to human controls; recorded autopilot courses retain their model.
+@export var auto_climb_speed: float = 4.5
+@export var auto_climb_upswing_bonus: float = 1.8
+@export var auto_climb_stop_distance: float = 6.0
+@export var auto_climb_accel: float = 36.0
 @export var reel_out_speed: float = 11.0
 ## Constraint sub-steps per physics tick. More = stiffer, more accurate rope.
 @export_range(1, 16) var substeps: int = 4

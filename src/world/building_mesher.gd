@@ -1250,10 +1250,18 @@ func _add_frame(b: Dictionary, detailed: bool) -> void:
 			var z: float = lerpf(t0[1] + 0.5, t0[3] - 0.5, j / float(nz - 1))
 			beam(Vector3(x, base, z), Vector3(x, ytop + 3.0, z), 0.6, 0.6, CONCRETE.darkened(0.12))
 	# Hoarding round the site at street level, safety screens on the top two floors.
-	walls(t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, base, base + 2.6, Color(0.2, 0.36, 0.3), KIND_TRIM, 0, 0)
+	_frame_barrier(t0, 1.5, base, base + 2.6, Color(0.2, 0.36, 0.3))
 	# Edge-protection barrier round the working floor.
-	walls(t0[0] - 0.2, t0[1] - 0.2, t0[2] + 0.2, t0[3] + 0.2, ytop + 0.1, ytop + 1.2,
-		Color(0.95, 0.55, 0.15), KIND_TRIM, 0, 0)
+	_frame_barrier(t0, 0.2, ytop + 0.1, ytop + 1.2, Color(0.95, 0.55, 0.15))
+
+
+func _frame_barrier(t: Array, outset: float, bottom_y: float, top_y: float, color: Color) -> void:
+	# Inner faces and the top cap match the existing 12 cm collision ring.
+	# Single outer quads disappeared when viewed from the working floor.
+	var boxes: Array[AABB] = []
+	_ring(boxes, t[0] - outset, t[1] - outset, t[2] + outset, t[3] + outset, bottom_y, top_y, 0.12)
+	for box in boxes:
+		solid(box.position.x, box.position.z, box.end.x, box.end.z, box.position.y, box.end.y, color)
 
 
 ## Cranes and the bridge. `detailed` = lattice/girder geometry, else solid massing.
@@ -1551,7 +1559,9 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		var level: float = blk["level"]
 		var flat := not is_nan(level)
 		var kind: String = blk["kind"]
-		var col := grass if kind == "park" else pave
+		var district_paving: Color = {"cbd": Color(0.55, 0.57, 0.59), "docks": Color(0.53, 0.52, 0.50),
+			"georgian": Color(0.62, 0.55, 0.51), "waterfront": Color(0.56, 0.57, 0.54)}.get(blk["district"], pave)
+		var col := grass if kind == "park" else district_paving
 		var b_outers: Array = []
 		for q in Geometry2D.intersect_polygons(crect, poly):
 			if not Geometry2D.is_polygon_clockwise(q):

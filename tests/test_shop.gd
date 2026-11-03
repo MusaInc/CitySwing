@@ -49,7 +49,7 @@ func test_buying_and_equipping(t) -> void:
 	t.check(Shop.look({"shoes": "shoes_gum"})["sole"] == Color(0.55, 0.35, 0.18),
 		"shoe try-on retains its own sole colour independently of the jacket")
 	_sd().data["outfit"]["face"] = "face_visor"  # tampered / unowned
-	t.check(Shop.equipped("face") == "face_none", "unowned saved item falls back to the default")
+	t.check(Shop.equipped("face") == "mask_courier", "unowned saved item falls back to the default")
 	_sd().data = before
 
 
@@ -95,12 +95,12 @@ func test_rig_wears_the_look(t) -> void:
 		if c is MeshInstance3D and c.visible and c.name != "head":
 			shown.append(String(c.name).to_lower())
 	t.check(shown.is_empty() and rig.look_state.head == "", "default clears crown and shades")
-	# Default: the long-sleeve top, Kai's face and hair, no mask.
+	# Default: fitted long-sleeve top and the signature full Courier mask.
 	var vis := func(n: String) -> bool:
 		var mi := rig.skeleton.find_child(n, true, false) as MeshInstance3D
 		return mi != null and mi.visible
 	t.check(vis.call("Top_Long") and not vis.call("Top_Short") and not vis.call("Skin_Arms_Short"), "default long-sleeve top")
-	t.check(vis.call("Face_kai") and vis.call("Hair_kai") and not vis.call("Face_ade"), "default face and hair, one at a time")
+	t.check(vis.call("Mask_courier") and not vis.call("Face_kai") and not vis.call("Hair_kai"), "signature mask hides the face and hair without clipping")
 	# Short sleeves bare the forearms; a full mask hides the face beneath it.
 	rig.apply_look(Shop.look({"top": "top_short", "hero": "hero_ade", "face": "mask_courier"}))
 	t.check(vis.call("Top_Short") and vis.call("Skin_Arms_Short") and not vis.call("Top_Long"), "short sleeves show the forearms")
