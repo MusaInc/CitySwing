@@ -228,6 +228,20 @@ jobs:
                   print("  added build to group:", "yes" if r is not None else "FAILED")
               testers = call(f"/v1/betaGroups/{g['id']}/betaTesters?limit=50")
               print(f"  testers: {len(testers['data']) if testers else '?'}")
+              for t in (testers or {}).get("data", []):
+                  ta = t["attributes"]; em = ta.get("email") or ""
+                  masked = em[:3] + "***" + em[em.find("@"):] if "@" in em else "?"
+                  print(f"  tester {masked}: state={ta.get('state')} inviteType={ta.get('inviteType')}")
+          a2 = call(f"/v1/builds/{bid}?fields[builds]=minOsVersion,buildAudienceType,iconAssetToken")
+          if a2:
+              x = a2["data"]["attributes"]
+              print(f"build minOsVersion={x.get('minOsVersion')} audience={x.get('buildAudienceType')}")
+          pre = call(f"/v1/builds/{bid}/preReleaseVersion")
+          if pre:
+              print("platform", pre["data"]["attributes"].get("platform"), "version", pre["data"]["attributes"].get("version"))
+          newer = call(f"/v1/builds?filter[app]={app}&sort=-uploadedDate&limit=3&fields[builds]=version,processingState,expired")
+          for n in (newer or {}).get("data", []):
+              print("recent build", n["attributes"])
           if not groups:
               print("No tester groups exist – create an internal group in TestFlight and add yourself.")
           time.sleep(20)
