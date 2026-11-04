@@ -84,6 +84,8 @@ jobs:
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+          VERSION: ${{ inputs.version }}
+          FIX_BUILD: ${{ inputs.fix_build }}
         run: |
           python3 -m pip install --quiet --break-system-packages pyjwt cryptography
           python3 - <<'PY'
@@ -101,6 +103,19 @@ jobs:
           if not apps:
               sys.exit("No App Store Connect app for com.musastudios.cityswing – create it: My Apps → + → New App.")
           print("App record:", apps[0]["id"], apps[0]["attributes"]["name"])
+          # TestFlight treats the highest marketing version as the current one:
+          # a build with a LOWER version than one already uploaded is never
+          # offered to testers as an update (and sends no email).
+          if not os.environ.get("FIX_BUILD"):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com/v1/preReleaseVersions"
+                                           f"?filter[app]={apps[0]['id']}&limit=200&fields[preReleaseVersions]=version",
+                                           headers={"Authorization": f"Bearer {token}"})
+              seen = [v["attributes"]["version"] for v in json.load(urllib.request.urlopen(req))["data"]]
+              key_of = lambda v: tuple(int(x) for x in v.split("."))
+              top = max(seen, key=key_of) if seen else "0"
+              print("Highest version already on TestFlight:", top)
+              if key_of(os.environ["VERSION"]) < key_of(top):
+                  sys.exit(f"Version {os.environ['VERSION']} is lower than {top} already on TestFlight – testers would never get it. Use a higher version.")
           PY
 
       - name: Archive (unsigned; the export step signs in the cloud)
