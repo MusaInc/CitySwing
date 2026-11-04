@@ -100,13 +100,31 @@ func test_rig_wears_the_look(t) -> void:
 		var mi := rig.skeleton.find_child(n, true, false) as MeshInstance3D
 		return mi != null and mi.visible
 	t.check(vis.call("Top_Long") and not vis.call("Top_Short") and not vis.call("Skin_Arms_Short"), "default long-sleeve top")
-	t.check(vis.call("Mask_courier") and not vis.call("Face_kai") and not vis.call("Hair_kai"), "signature mask hides the face and hair without clipping")
+	t.check(vis.call("Mask_courier") and not vis.call("Face_kai") and not vis.call("Hair_buzz_kai"), "signature mask hides the face and hair without clipping")
 	# Short sleeves bare the forearms; a full mask hides the face beneath it.
 	rig.apply_look(Shop.look({"top": "top_short", "hero": "hero_ade", "face": "mask_courier"}))
 	t.check(vis.call("Top_Short") and vis.call("Skin_Arms_Short") and not vis.call("Top_Long"), "short sleeves show the forearms")
-	t.check(vis.call("Mask_courier") and not vis.call("Face_ade") and not vis.call("Hair_ade"), "the Courier mask covers the face")
+	t.check(vis.call("Mask_courier") and not vis.call("Face_ade") and not vis.call("Hair_crop_ade"), "the Courier mask covers the face")
 	rig.apply_look(Shop.look({"hero": "hero_theo", "face": "mask_domino", "head": "head_beanie"}))
 	t.check(vis.call("Face_theo") and vis.call("Mask_domino") and not vis.call("Hair_theo"), "domino over the face, hair under the beanie")
+	# Hair: Natural = the face's own cut; any cut fits any face; exactly one
+	# hair mesh is drawn, and only when no hood, balaclava or beanie hides it.
+	var hair_shown := func() -> Array:
+		var on := []
+		for mi in rig.skeleton.find_children("Hair_*", "MeshInstance3D", true, false):
+			if mi.visible:
+				on.append(String(mi.name))
+		return on
+	rig.apply_look(Shop.look({"hero": "hero_theo", "face": "face_none"}))
+	t.check(hair_shown.call() == ["Hair_buzz_theo"], "natural hair is the face's own cut (%s)" % [hair_shown.call()])
+	for st: String in ["buzz", "crop", "fade", "curls", "pixie", "bob", "ponytail", "bun"]:
+		rig.apply_look(Shop.look({"hero": "hero_ren", "face": "face_none", "hair": "hair_" + st}))
+		t.check(hair_shown.call() == ["Hair_%s_ren" % st], "%s fits Ren (%s)" % [st, hair_shown.call()])
+	rig.apply_look(Shop.look({"hero": "hero_ren", "face": "mask_balaclava", "hair": "hair_bob"}))
+	t.check(hair_shown.call().is_empty(), "the balaclava hides the hair")
+	# Trying a cut on in the shop takes off what would hide it.
+	t.check(Shop.try_on("hair", "hair_bun")["mask"] == "" and Shop.try_on("top", "top_vest")["mask"] == "courier",
+		"hair try-on drops the hood, other try-ons keep it")
 	var skin_tints := {}
 	for e in rig._hero_materials:
 		if e.region == "skin":

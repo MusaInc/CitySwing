@@ -67,8 +67,8 @@ const MODEL_OFFSET := Vector3(0, -0.9, 0)
 ## further forward and a little lower, and its eyes further forward still.
 const GEAR_FIT := {
 	"cap": Vector3(0, -0.032, -0.068), "beanie": Vector3(0, -0.032, -0.068),
-	"headphones": Vector3(0, -0.032, -0.068), "crown": Vector3(0, -0.032, -0.068),
-	"shades": Vector3(0, -0.021, -0.036), "visor": Vector3(0, -0.026, -0.062), "mask": Vector3(0, -0.012, -0.03),
+	"headphones": Vector3(0, -0.032, -0.068), "crown": Vector3(0, -0.058, -0.066),
+	"shades": Vector3(0, -0.021, -0.036), "visor": Vector3(0, -0.026, -0.062),
 }
 
 var player: Player
@@ -309,10 +309,10 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 				reference = Color(0.22, 0.24, 0.26)
 			# Skin-tight tops, the face and its parts: tints are relative to
 			# the authored colour (the shop colour replaces it exactly).
-			"hero_top", "hero_top_collar":
+			"hero_top", "hero_top_collar", "hero_bandana":
 				region = "suit"
 				reference = source.albedo_color
-			"hero_top_panel":
+			"hero_top_panel", "hero_bandana_knot":
 				region = "suit_panel"
 				reference = source.albedo_color
 			"hero_skin", "hero_skin_body":
@@ -395,6 +395,7 @@ func _show_variants() -> void:
 	if skeleton == null:
 		return
 	var face: String = look_state.get("hero", "kai")
+	var style: String = look_state.get("hair_style", "crop")
 	var cut: String = look_state.get("top", "long")
 	var mask: String = look_state.get("mask", "")
 	var hat: String = look_state.get("head", "")
@@ -407,7 +408,7 @@ func _show_variants() -> void:
 		elif n.begins_with("Face_"):
 			mi.visible = n == "Face_" + face and mask != "courier"
 		elif n.begins_with("Hair_"):
-			mi.visible = n == "Hair_" + face and not mask in ["courier", "balaclava"] and not hat in ["beanie", "crown"]
+			mi.visible = n == "Hair_%s_%s" % [style, face] and not mask in Shop.HAIR_MASKS and hat != "beanie"
 		elif n.begins_with("Mask_"):
 			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
 

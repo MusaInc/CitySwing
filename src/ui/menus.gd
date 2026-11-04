@@ -356,7 +356,7 @@ func show_suits() -> void:
 ## scroll to zoom; the camera frames the category being browsed. Picking an
 ## item only previews it; Wear / Buy (confirmed) commit, leaving restores the
 ## equipped look.
-const SHOP_FOCUS := {"hero": "face", "top": "suit", "suit": "suit", "pants": "pants", "shoes": "shoes", "gloves": "gloves",
+const SHOP_FOCUS := {"hero": "face", "hair": "face", "top": "suit", "suit": "suit", "pants": "pants", "shoes": "shoes", "gloves": "gloves",
 	"head": "head", "face": "face", "web": "web", "gadget": "gadget"}
 var _thumbs: ThumbStudio
 var _thumb_rects := {}     # item id -> TextureRect on the current grid
@@ -473,7 +473,7 @@ func show_shop(tab := "", sel := "", anim := true) -> void:
 		if it["id"] == _shop_sel:
 			focus = t
 	right.add_child(_shop_detail(Shop.item(_shop_sel)))
-	look_changed.emit(Shop.look({_shop_tab: _shop_sel}))
+	look_changed.emit(Shop.try_on(_shop_tab, _shop_sel))
 	preview_focus.emit(SHOP_FOCUS.get(_shop_tab, "full"))
 	if focus:
 		focus.grab_focus.call_deferred()

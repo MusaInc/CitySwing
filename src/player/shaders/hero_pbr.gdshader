@@ -1,6 +1,8 @@
 // Authored UV textures; garment fit and skinning live in the Blender asset.
 shader_type spatial;
-render_mode cull_back, diffuse_burley;
+// Both sides: looking into an opening (waistband, cuff, hem, collar) shows
+// the garment's shaded inside, never the sky through the body.
+render_mode cull_disabled, diffuse_burley;
 uniform vec4 base_color : source_color = vec4(1.0);
 uniform vec3 tint = vec3(1.0);
 uniform vec3 sole_tint = vec3(1.0);
@@ -30,11 +32,14 @@ void vertex() {
 void fragment() {
     vec3 outfit_tint = has_sole ? mix(tint, sole_tint, clamp(UV2.y, 0.0, 1.0)) : tint;
     ALBEDO = texture(albedo_map, UV).rgb * base_color.rgb * outfit_tint;
+    if (!FRONT_FACING) {
+        ALBEDO *= 0.32;  // the inside of the cloth, in its own shadow
+    }
     float surface_roughness = roughness * texture(roughness_map, UV).g;
     ROUGHNESS = mix(surface_roughness, max(0.3, surface_roughness - 0.18), wetness);
     SPECULAR = 0.35;
     EMISSION = surface_emission;
-    AO = texture(ao_map, UV).r;
+    AO = FRONT_FACING ? texture(ao_map, UV).r : 0.35;
     AO_LIGHT_AFFECT = 0.15;
     NORMAL_MAP = texture(normal_map, UV).rgb;
     NORMAL_MAP_DEPTH = normal_strength;
