@@ -9,8 +9,11 @@ extends Node3D
 ##    they persist for over a second – no 180° spins.
 ##  * Pitch is fixed with a gentle, rate-limited tilt for dives.
 ##  * Near the street it tilts up so the buildings to swing from are in view.
-##  * No manual camera on touch. (Controller stick / mouse can still offset the
-##    view; it eases back behind the player 0.8 s after the input stops.)
+##  * Free look (touch drag on the right, mouse, stick): a manual offset that
+##    turns a full 360° (pitch clamped). While the player is looking – and
+##    for LOOK_HOLD s after – every automatic yaw/pitch change is cancelled
+##    out of the view, so the follow never fights the finger. After that it
+##    eases back behind the player, but only while they are moving.
 ##  * Critically damped position follow, speed-based FOV, sphere-cast
 ##    collision that pulls in smoothly and never leaves the camera in a wall.
 ##  * Swing framing: big arcs get a wider shot and the view lifts toward the
@@ -28,7 +31,10 @@ extends Node3D
 @export var steer_follow_rate := 5.5      # 1/s, the same while the player steers in the air
 @export var max_yaw_speed := deg_to_rad(120.0)
 @export var reversal_hold := 1.0          # s a >110° heading change must persist before following
-@export var recenter_delay := 0.8
+@export var recenter_delay := 1.6
+## Total view pitch limits (follow pitch + manual look).
+const LOOK_PITCH_MIN := deg_to_rad(-65.0)
+const LOOK_PITCH_MAX := deg_to_rad(45.0)
 @export var base_pitch := deg_to_rad(-12.0)
 @export var collision_margin := 0.35
 
@@ -48,6 +54,7 @@ var _damp_vel: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _dist := 6.0
 var _height := 1.6
 var _since_look := 10.0
+var _look_pending := Vector2.ZERO  # touch look not yet applied (smoothed in)
 var _reverse_time := 0.0
 var _heading := 0.0       # filtered travel heading
 var _col_dist := -1.0
@@ -142,8 +149,21 @@ func face(heading_yaw: float) -> void:
 
 ## Look input in radians (already sensitivity-scaled). Called by touch/mouse/stick.
 func add_look(delta: Vector2) -> void:
-	look_yaw = clampf(look_yaw - delta.x, -PI * 0.9, PI * 0.9)
-	look_pitch = clampf(look_pitch - delta.y, deg_to_rad(-50.0), deg_to_rad(50.0))
+	look_yaw = wrapf(look_yaw - delta.x, -PI, PI)
+	look_pitch = clampf(pitch + look_pitch - delta.y, LOOK_PITCH_MIN, LOOK_PITCH_MAX) - pitch
+	_since_look = 0.0
+
+
+## Touch look: a finger drag in pixels across a view `width` px wide. Eased
+## in over a few frames (smooth, still tight to the finger).
+func add_touch_look(drag_px: Vector2, width: float) -> void:
+	var k: float = PI * 1.15 / maxf(width, 1.0) * get_node("/root/Settings").look_sensitivity
+	_look_pending += drag_px * Vector2(k, k * 0.8)
+	_since_look = 0.0
+
+
+## A look finger is down (even if still): hold the view where it is.
+func hold_look() -> void:
 	_since_look = 0.0
 
 
@@ -171,7 +191,14 @@ func _process(dt: float) -> void:
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	if stick.length() > 0.05:
 		add_look(stick * dt * 2.6 * get_node("/root/Settings").look_sensitivity)
+	if _look_pending.length_squared() > 1e-8:
+		var take := _look_pending * (1.0 - exp(-32.0 * dt))
+		_look_pending -= take
+		add_look(take)
 	_since_look += dt
+	var manual := _since_look < recenter_delay
+	var yaw_before := yaw
+	var pitch_before := pitch
 
 	var v := target.s.velocity
 	var vh := Vector3(v.x, 0.0, v.z)
@@ -184,8 +211,8 @@ func _process(dt: float) -> void:
 	if not rail_at.is_empty():
 		var rd: Vector3 = rail_at[1]
 		_heading = atan2(-rd.x, -rd.z)
-	elif target.wall_hold > 0.0 and target.wall_run_along < 0.5:
-		pass  # running up a wall (or just off it): keep facing the wall
+	elif target.wall_hold > 0.0 and target.wall_run_along < 0.5 or target.wall_kick:
+		pass  # running up a wall, or drifting back off one: keep facing on
 	elif vh.length() > 3.0 and vh.length() > absf(v.y) * 0.35:
 		var travel := atan2(-vh.x, -vh.z)
 		var diff := wrapf(travel - _heading, -PI, PI)
@@ -224,9 +251,15 @@ func _process(dt: float) -> void:
 	want_pitch -= _look_down
 	pitch = move_toward(pitch, want_pitch, deg_to_rad(55.0 if target.wall_run else 25.0) * dt)
 
-	# Manual look eases back to centre once the player lets go.
-	if _since_look > recenter_delay:
-		var k := 1.0 - exp(-3.0 * dt)
+	if manual:
+		# The player is aiming the view: the follow keeps tracking underneath
+		# but none of it reaches the screen (no fighting the finger).
+		look_yaw = wrapf(look_yaw - wrapf(yaw - yaw_before, -PI, PI), -PI, PI)
+		look_pitch -= pitch - pitch_before
+		look_pitch = clampf(pitch + look_pitch, LOOK_PITCH_MIN, LOOK_PITCH_MAX) - pitch
+	elif vh.length() > 2.0 or not grounded:
+		# Moving again after looking: ease back behind the player, gently.
+		var k := 1.0 - exp(-1.8 * dt)
 		look_yaw = lerpf(look_yaw, 0.0, k)
 		look_pitch = lerpf(look_pitch, 0.0, k)
 
@@ -274,7 +307,7 @@ func _process(dt: float) -> void:
 	_tug_v += (-_tug * 90.0 - _tug_v * 14.0) * dt
 	_tug += _tug_v * dt
 	var focus_goal := target.global_position + Vector3.UP * (_height + _lift) + ahead + _pick_bias
-	var basis := Basis.from_euler(Vector3(clampf(pitch + look_pitch, deg_to_rad(-70.0), deg_to_rad(50.0)), yaw + look_yaw, 0.0))
+	var basis := Basis.from_euler(Vector3(clampf(pitch + look_pitch, deg_to_rad(-70.0), LOOK_PITCH_MAX), yaw + look_yaw, 0.0))
 	var snapped_this_frame := _snapped
 	if _snapped:
 		_bump = 0.0

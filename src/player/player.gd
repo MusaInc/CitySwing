@@ -162,6 +162,9 @@ var wall_normal := Vector3.ZERO
 var wall_run_along := 0.0
 ## > 0 for a moment after a wall run (the camera holds its heading).
 var wall_hold := 0.0
+## Kicked off the end of a wall run and still in the air: the drift away
+## from the wall is not a new heading (body and camera keep facing on).
+var wall_kick := false
 var _wr_t := 0.0
 var _wr_up := 0.0
 var _wr_side := Vector3.ZERO
@@ -350,6 +353,8 @@ func _physics_process(dt: float) -> void:
 		_update_stun(dt)
 	var inp := _read_input(dt)
 	var move: Vector3 = inp.get("move", Vector3.ZERO)
+	if wall_kick and (is_on_floor() or line_state != Line.IDLE or stunned):
+		wall_kick = false
 	stagger_t = maxf(stagger_t - dt, 0.0)
 	_stagger_cool = maxf(_stagger_cool - dt, 0.0)
 	if stagger_t > 0.0:
@@ -911,6 +916,7 @@ func _end_wall_run(strong: bool) -> void:
 	s.velocity = _wr_side + wall_normal * out
 	s.velocity.y = maxf(_wr_up, 0.0) * 0.6 + lift
 	_from_swing = true  # apex hang time to line up the next web
+	wall_kick = true
 	wall_run_launched.emit()
 
 

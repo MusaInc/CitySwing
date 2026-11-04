@@ -5,14 +5,13 @@ extends Control
 ##                the web: pushed, it turns the assisted pick toward its
 ##                direction (see GrappleTargeting).
 ##   JUMP       : button (jump, wall-kick, mid-air flip).
-##   Right side : the web. The big SWING button marks it, but any touch on the
-##                right (outside JUMP / pause) counts – hard to miss mid-swing.
-##                Hold to keep the web, lift that finger to let go; pressing
-##                again with another finger re-attaches immediately.
+##   SWING      : the web. Hold to keep it, lift that finger to let go;
+##                pressing again with another finger re-attaches immediately.
 ##                Aim "assist" (default): fires at the reticle target ahead.
-##                Aim "tap" (setting): touches on the world fire at the exact
-##                surface; SWING remains the assisted fallback.
-## There is no manual camera control: the camera frames the action itself.
+##   Right side : free look. Any other touch on the right (outside the
+##                buttons) drags the camera round the player, 360°. In aim
+##                "tap" mode the touch also fires at the exact surface.
+## Every finger has its own role, so move + jump + swing + look all work at once.
 
 signal home_pressed
 var home_button_rect := Rect2()
@@ -144,12 +143,17 @@ func touch_down(idx: int, pos: Vector2) -> void:
 			_stick_pos = local
 		queue_redraw()
 		return
-	# Everything else on the right is the web.
-	touches[idx] = {"kind": "web", "start": pos, "last": pos}
+	var on_swing: bool = local.distance_to(button_center("grapple")) <= buttons["grapple"]["r"] * 1.3
+	var tap_aim := Settings.aim_mode == "tap" and not on_swing
+	if not on_swing and not tap_aim:
+		# The open right side: free look (one look finger at a time).
+		if not _has_kind("look"):
+			touches[idx] = {"kind": "look", "start": pos, "last": pos}
+		return
+	touches[idx] = {"kind": "web", "start": pos, "last": pos, "look": tap_aim}
 	if player == null:
 		return
-	var on_swing: bool = local.distance_to(button_center("grapple")) <= buttons["grapple"]["r"] * 1.15
-	if Settings.aim_mode == "tap" and not on_swing and camera and camera.cam:
+	if tap_aim and camera and camera.cam:
 		var r := player.screen_target(camera.cam, pos)
 		if r["ok"]:
 			player.fire_at(r["point"], idx)
@@ -169,7 +173,10 @@ func touch_drag(idx: int, pos: Vector2) -> void:
 	if not touches.has(idx):
 		return
 	var t: Dictionary = touches[idx]
+	var moved := pos - (t["last"] as Vector2)
 	t["last"] = pos
+	if (t["kind"] == "look" or t.get("look", false)) and camera:
+		camera.add_touch_look(moved, size.x)
 	if t["kind"] == "stick":
 		_stick_pos = _to_local(pos)
 		_apply_stick()
@@ -200,6 +207,13 @@ func _gadget_shown() -> bool:
 func release_all() -> void:
 	for idx in touches.keys():
 		touch_up(idx)
+
+
+func _look_web_held() -> bool:
+	for t in touches.values():
+		if t.get("look", false) and (t["last"] as Vector2).distance_to(t["start"]) > 12.0:
+			return true
+	return false
 
 
 func _has_kind(kind: String) -> bool:
@@ -237,6 +251,8 @@ func _set_axis(pos_action: String, neg_action: String, value: float) -> void:
 
 
 func _process(_dt: float) -> void:
+	if camera and (_has_kind("look") or _look_web_held()):
+		camera.hold_look()
 	queue_redraw()  # SWING button glows when a target is ready
 
 

@@ -1087,6 +1087,8 @@ func _update_animated(dt: float) -> void:
 		_facing = _facing.slerp(face_to, 1.0 - exp(-14.0 * dt)).normalized()
 	elif _stagger_t > 0.0 and grounded:
 		_facing = _facing.slerp(-_stagger_n, 1.0 - exp(-10.0 * dt)).normalized()  # still facing the wall
+	elif player.wall_kick and not grounded and hs > 1.0 and vh.normalized().dot(_facing) < 0.2:
+		pass  # drifting back off a wall-run kick: keep facing on, no about-turn
 	elif hs > 1.0:
 		# Walking turns follow the path closely (feet and hips stay lined up
 		# with where the body is going); at a run the body swings round more.
@@ -1177,7 +1179,13 @@ func _update_animated(dt: float) -> void:
 		dive = maxf(dive, smoothstep(0.0, 1.0, _swan))
 		if dive > 0.0:
 			up = up.slerp(v.normalized(), dive * 0.85).normalized()
-			fwd_hint = Vector3.DOWN.slerp(_facing, 0.5).normalized()
+			# The chest is wherever a forward pitch from standing puts it for
+			# this "up": belly-down when level, facing back the way you came
+			# head-down. (Aiming it at the travel direction made the body
+			# half-turn about its own axis on the way into a vertical dive.)
+			var pitched := _facing * up.y - Vector3.UP * up.dot(_facing)
+			if pitched.length_squared() > 0.01:
+				fwd_hint = pitched.normalized()
 	var fwd := (fwd_hint - up * fwd_hint.dot(up)).normalized()
 	if fwd.length_squared() < 0.01:
 		fwd = (_facing - up * _facing.dot(up)).normalized()

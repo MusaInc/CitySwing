@@ -74,13 +74,20 @@ func test_jumping_off_a_building_dives_head_first(t) -> void:
 	a.drv.move = Vector3.RIGHT
 	var most_down := 1.0
 	var landed_feet_first := false
+	var last_air_up := -1.0  # body up·world-up on the last airborne frame
+	var was_air := false
 	for i in 60 * 5:
 		await get_tree().process_frame
 		var r: CharacterRig = a.rig
 		if not a.player.is_on_floor():
-			most_down = minf(most_down, r.global_basis.y.dot(Vector3.UP))
-			if r._ground_h < 4.0 and r.global_basis.y.dot(Vector3.UP) > 0.3:
-				landed_feet_first = true
+			last_air_up = r.global_basis.y.dot(Vector3.UP)
+			most_down = minf(most_down, last_air_up)
+			was_air = true
+		elif was_air:
+			# Judged at touchdown (the rig's _ground_h is refreshed only every
+			# few frames, so "< 4 m" could skip straight to the ground).
+			landed_feet_first = landed_feet_first or last_air_up > 0.3
+			was_air = false
 	a.drv.move = Vector3.ZERO
 	t.note("dive: body up·world-up reached %.2f; upright again before the ground: %s" % [most_down, landed_feet_first])
 	t.check(most_down < -0.6, "head-first dive off a tall building")
