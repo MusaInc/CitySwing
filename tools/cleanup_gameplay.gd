@@ -30,7 +30,7 @@ func go() -> void:
 	check(main.player.line_state == Player.Line.IDLE, "home tap does not fire a web")
 	check(main.touch.touches.is_empty(), "teleport releases all touch roles")
 	check(root.get_node("SaveData").data.get("tokens", []).size() == before_tokens, "teleport collects no route tokens")
-	for viewport_size in [Vector2i(1520, 720), Vector2i(1024, 768)]:
+	for viewport_size in [Vector2i(1520, 720), Vector2i(1024, 768), Vector2i(1194, 834)]:
 		root.size = viewport_size
 		for i in 8:
 			await process_frame
