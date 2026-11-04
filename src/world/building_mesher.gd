@@ -1225,6 +1225,37 @@ func _add_sign(b: Dictionary, detailed: bool) -> void:
 	var c := Vector3((t[0] + t[2]) * 0.5, t[4] - 0.1, (t[1] + t[3]) * 0.5)
 	var half := Vector3(length * 0.5, 0, 0) if along_x else Vector3(0, 0, length * 0.5)
 	beam(c - half + o * 0.3, c + half + o * 0.3, 0.9, 0.12, STEEL)
+	# A steel frame round the panel (proud of both faces), braces down to the
+	# roof behind it, and gooseneck floodlights reaching out over the advert.
+	var f2: Vector2 = b.get("face", Vector2(o.x, o.z).normalized())
+	var fwd := Vector3(f2.x, 0, f2.y)
+	var thick := 0.6
+	var mid := Vector3((t[0] + t[2]) * 0.5, 0, (t[1] + t[3]) * 0.5)
+	var ytop: float = t[5]
+	var ybot: float = t[4]
+	var dark := STEEL.darkened(0.35)
+	for side: float in [1.0, -1.0]:
+		var off := fwd * (thick * 0.5 + 0.06) * side
+		var top_c := Vector3(mid.x, ytop - 0.12, mid.z) + off
+		var bot_c := Vector3(mid.x, ybot + 0.12, mid.z) + off
+		beam(top_c - half, top_c + half, 0.24, 0.24, dark)
+		beam(bot_c - half, bot_c + half, 0.24, 0.24, dark)
+		for e: float in [-1.0, 1.0]:
+			var post := Vector3(mid.x, 0, mid.z) + half * e * 0.995 + off
+			beam(Vector3(post.x, ybot, post.z), Vector3(post.x, ytop, post.z), 0.24, 0.24, dark)
+	var back := -fwd
+	var nl := maxi(2, int(length / 4.5))
+	for i in nl:
+		var u := lerpf(-0.42, 0.42, i / float(nl - 1))
+		var at := Vector3(mid.x, 0, mid.z) + half * 2.0 * u
+		if i % 2 == 0:
+			beam(at + back * 0.3 + Vector3(0, ytop - 1.0, 0), at + back * 2.6 + Vector3(0, roof, 0), 0.14, 0.14, STEEL)
+		# Gooseneck: up from the bottom rail, out over the face, a lamp head.
+		var root := at + fwd * (thick * 0.5 + 0.1) + Vector3(0, ybot + 0.1, 0)
+		var elbow := root + fwd * 1.4 + Vector3(0, 0.55, 0)
+		beam(root, elbow, 0.11, 0.11, dark)
+		var head := elbow + fwd * 0.05 + Vector3(0, 0.3, 0)
+		beam(elbow - Vector3(0, 0.05, 0), head, 0.55, 0.3, Color(0.12, 0.12, 0.13))
 
 
 ## Construction frame: open floor slabs, columns, a safety-net band on the top floors.
@@ -2043,3 +2074,4 @@ func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL)
 		var w := a.distance_to(b)
 		quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
 			Vector2(0, y1), Vector2(w, y1), Vector2(w, y0), Vector2(0, y0), col, kind, 3, 0.5)
+

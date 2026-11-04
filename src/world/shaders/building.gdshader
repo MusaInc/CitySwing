@@ -46,7 +46,7 @@ void vertex() {
 // Returns window mask (1 = glass) and cell id, for a style.
 // style: 0 stone office, 1 brick flats, 2 glass curtain, 3 warehouse,
 //        4 modern grid, 5 sandstone, 6 dark glass, 7 deco bands
-void window_layout(float style, vec2 uv, out float glass, out vec2 cell, out float frame, out vec2 wpos,
+void window_layout(float style, float seed, vec2 uv, out float glass, out vec2 cell, out float frame, out vec2 wpos,
 		out vec2 whalf, out vec2 csize) {
 	vec2 size = vec2(3.0, 3.6);
 	vec2 win = vec2(0.55, 0.6);
@@ -57,6 +57,32 @@ void window_layout(float style, vec2 uv, out float glass, out vec2 cell, out flo
 	else if (style == 5.0) { size = vec2(3.6, 4.2); win = vec2(0.4, 0.56); }
 	else if (style == 6.0) { size = vec2(1.5, 3.7); win = vec2(0.94, 0.9); }
 	else if (style == 7.0) { size = vec2(2.2, 3.6); win = vec2(0.5, 0.7); }
+	// Each building its own rhythm (constant per building, from its seed):
+	// bay width, storey height and window proportions, plus a few distinct
+	// patterns, so two towers of one style never share a facade.
+	float h1 = fract(seed * 7.13 + 0.17);
+	float h2 = fract(seed * 13.71 + 0.43);
+	float h3 = fract(seed * 23.37 + 0.61);
+	float h4 = fract(seed * 41.93 + 0.29);
+	bool curtain = style == 2.0 || style == 6.0;
+	if (curtain) {
+		size.x *= mix(0.9, 2.1, h1);               // mullion spacing
+		size.y *= mix(0.94, 1.1, h2);
+		win.y = mix(win.y, 0.62, step(0.55, h3));  // deeper spandrels on some
+	} else {
+		size.x *= mix(0.82, 1.32, h1);
+		size.y *= mix(0.94, 1.1, h2);
+		win *= vec2(mix(0.82, 1.16, h3), mix(0.9, 1.12, h2));
+		if (style == 4.0 && h4 < 0.4) {
+			win = vec2(0.97, mix(0.42, 0.55, h3));  // ribbon windows
+		} else if ((style == 0.0 || style == 7.0 || style == 5.0) && h4 < 0.35) {
+			win = vec2(mix(0.3, 0.38, h3), 0.78);   // tall narrow windows
+		} else if (style == 1.0 && h4 < 0.3) {
+			size.x *= 1.45;                          // wide sash pairs
+			win.x = 0.6;
+		}
+	}
+	win = min(win, vec2(0.97));
 	cell = floor(uv / size);
 	vec2 f = fract(uv / size) - 0.5;
 	vec2 edge = abs(f) - win * 0.5;
@@ -275,12 +301,20 @@ void fragment() {
 		float gap = step(0.18, fract(uv.x / 1.7));
 		float headline = step(2.6, h) * step(h, 4.1) * word * gap;
 		float strap = step(1.3, h) * step(h, 1.8) * step(0.4, hash12(vec2(floor(uv.x / 0.9), seed * 53.0)));
-		float frame = 1.0 - step(0.35, h) * step(h, 6.9 + seed * 0.0);
 		float stripe = step(0.35, h) * step(h, 0.9);
 		albedo = mix(base, ink, max(headline, strap) * detail);
 		albedo = mix(albedo, base * 0.35, stripe);
-		albedo = mix(albedo, vec3(0.16), clamp(frame, 0.0, 1.0) * 0.0);
-		emit = base * mix(0.18, 1.2, night);  // billboards are floodlit at night
+		// Printed vinyl in 1.5 m drops: faint seams and a slight sheen change.
+		float drop = abs(fract(uv.x / 1.5) - 0.5);
+		albedo *= 1.0 - 0.08 * step(0.48, drop) * detail;
+		albedo *= 0.97 + 0.03 * hash12(vec2(floor(uv.x / 1.5), seed * 9.0));
+		// Lit by the goosenecks on the bottom rail (one every ~4.5 m): bright
+		// pools at the foot of the advert fading up the panel, night only.
+		// By day it's just a printed panel in the sun.
+		float lamp_u = fract(uv.x / 4.5) - 0.5;
+		float pool = exp(-lamp_u * lamp_u * 9.0);
+		float wash = 0.28 + 0.75 * exp(-max(h - 0.6, 0.0) / 2.6) * (0.55 + 0.45 * pool);
+		emit = base * night * wash * 0.42 + base * 0.02 * (1.0 - night);
 		rough = 0.55;
 	} else {
 		float glass;
@@ -289,7 +323,7 @@ void fragment() {
 		vec2 wpos;
 		vec2 whalf;
 		vec2 csize;
-		window_layout(style, uv, glass, cell, frame, wpos, whalf, csize);
+		window_layout(style, seed, uv, glass, cell, frame, wpos, whalf, csize);
 		// Ground floor: tall shopfront glazing + fascia band.
 		bool shop = uv.y < 4.6 && style != 3.0;
 		if (shop) {
@@ -299,7 +333,7 @@ void fragment() {
 		}
 		if (v_kind == KIND_GLASS || style == 2.0 || style == 6.0) {
 			// Curtain wall: mostly glass with spandrel bands and mullions.
-			float spandrel = step(fract(uv.y / (style == 6.0 ? 3.7 : 3.8)), 0.16);
+			float spandrel = step(fract(uv.y / csize.y), 0.16);
 			glass = shop ? glass : (1.0 - spandrel) * glass;
 		}
 		// Brick courses / stone joints at close range only.
@@ -357,15 +391,23 @@ void fragment() {
 		}
 		// Blinds half-drawn in some windows (offices and flats, not shops).
 		float blind_h = step(0.86, hash12(cell * 2.7 + seed * 17.0)) * (shop ? 0.0 : 1.0);
-		float in_blind = blind_h * step(1.0 - hash12(cell + 5.1) * 0.6, fract(uv.y / (style == 1.0 ? 3.0 : 3.6)) + 0.3);
+		float in_blind = blind_h * step(1.0 - hash12(cell + 5.1) * 0.6, fract(uv.y / csize.y) + 0.3);
 		// Lit rooms: a few by day; after dusk they come on one by one (each
 		// window has its own threshold) up to a per-building share, in warm
 		// tungsten, cool office white or the odd blue TV glow.
 		// (Offices keep plenty of lights on by day too; homes hardly any.)
 		bool office = style == 0.0 || style == 2.0 || style == 4.0 || style == 6.0 || style == 7.0;
 		float day_share = office ? 0.25 + 0.2 * fract(seed * 5.3) : lit_fraction;
-		float lit_share = mix(day_share, 0.08 + 0.2 * fract(seed * 3.7), night);
+		// At night buildings differ a lot: some nearly dark, some busy
+		// (6-50 % of windows), and offices light whole floors (cleaners,
+		// late shifts) – bands of light instead of an even sprinkle.
+		float night_share = mix(0.06, 0.5, pow(fract(seed * 3.7), 1.4));
+		float lit_share = mix(day_share, night_share, night);
 		float lit = step(1.0 - lit_share, hash12(cell * 1.31 + seed * 7.0)) * (shop ? 1.0 : 0.7);
+		if (office && !shop) {
+			float floors_on = night * (0.04 + 0.22 * fract(seed * 9.1));
+			lit = max(lit, step(1.0 - floors_on, hash12(vec2(cell.y * 1.7, seed * 31.0))) * 0.75);
+		}
 		float lk = hash12(cell * 3.17 + seed * 11.0);
 		vec3 lamp_col = lk < 0.55 ? interior_warm : (lk < 0.88 ? vec3(0.86, 0.9, 1.0) : vec3(0.5, 0.66, 1.0));
 		lamp_col = mix(office ? vec3(0.95, 0.95, 0.9) : interior_warm, lamp_col, night);
@@ -387,6 +429,9 @@ void fragment() {
 		gcol = mix(gcol, mix(gcol, vec3(0.78, 0.76, 0.72), 0.45) * (0.85 + 0.15 * rnd), in_blind * 0.8 * detail);
 		gcol += lamp_col * lit * lit_k * 0.12 * (1.0 - detail * 0.7);
 		emit = (detail > 0.0 ? interior * 0.9 * lit : lamp_col * lit * lit_k * 0.5) * glass;
+		// Night walls never go black: a faint city-glow bounce everywhere and
+		// warm light washing up from the street lamps over the lowest floors.
+		emit += wall * (1.0 - glass) * night * (0.026 + 0.15 * exp(-uv.y / 12.0)) * vec3(1.0, 0.84, 0.66);
 		// Window reveal: slightly darker frame around each opening.
 		vec3 framed = mix(wall, wall * 0.72, (1.0 - glass) * frame * detail);
 		bool punched = !shop && style != 2.0 && style != 6.0 && v_kind != KIND_GLASS;

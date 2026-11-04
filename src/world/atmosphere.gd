@@ -320,8 +320,8 @@ func _apply(dt: float, instant: bool) -> void:
 	var alt := clampf((cam.global_position.y - 40.0) / 200.0, 0.0, 1.0) if cam else 0.0
 	# Blue aerial perspective: distance fades buildings gradually into the
 	# atmosphere (which also takes their contrast), near things stay crisp.
-	env.fog_depth_begin = lerpf(110.0, 12.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
-	env.fog_depth_end = lerpf(2000.0, 520.0, fog) * (1.0 + 0.35 * alt * (1.0 - fog))
+	env.fog_depth_begin = lerpf(70.0, 12.0, fog) * (1.0 + 0.8 * alt * (1.0 - fog))
+	env.fog_depth_end = lerpf(1600.0, 520.0, fog) * (1.0 + 0.35 * alt * (1.0 - fog))
 	env.fog_density = lerpf(0.82, 0.97, fog) * (1.0 - 0.12 * alt * (1.0 - fog))
 	env.fog_light_color = hor.lerp(Color(0.52, 0.66, 0.86), 0.5 * day_light).lerp(grey_c * 1.05, overcast * 0.5)
 	env.fog_light_energy = lerpf(1.0, 0.55, night)

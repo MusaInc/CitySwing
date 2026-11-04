@@ -19,6 +19,12 @@ uniform float cloth_flutter = 0.0;
 uniform float cloth_time = 0.0;
 uniform vec3 cloth_wind_dir = vec3(0.0, 0.0, 1.0);
 global uniform float wetness;
+global uniform float night;
+// Separation from dark streets: a light rim from every light (stronger at
+// night), and at night a faint cool edge where the body turns away from the
+// camera. Edges only – the hero never glows.
+uniform float rim_strength = 0.3;
+uniform float night_edge = 0.07;
 void vertex() {
     float freedom = UV2.x;
     mat3 world = mat3(MODEL_MATRIX);
@@ -39,6 +45,12 @@ void fragment() {
     ROUGHNESS = mix(surface_roughness, max(0.3, surface_roughness - 0.18), wetness);
     SPECULAR = 0.35;
     EMISSION = surface_emission;
+    RIM = rim_strength * (1.0 + night);
+    RIM_TINT = 0.4;
+    if (FRONT_FACING) {
+        float edge = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
+        EMISSION += vec3(0.55, 0.68, 0.9) * edge * night_edge * night;
+    }
     AO = FRONT_FACING ? texture(ao_map, UV).r : 0.35;
     AO_LIGHT_AFFECT = 0.15;
     NORMAL_MAP = texture(normal_map, UV).rgb;

@@ -1312,12 +1312,48 @@ func _style_for(dist: String, h: float, form: String, brng: RandomNumberGenerato
 	if dist == "georgian" and h < 110.0:
 		return [Style.STONE, Style.DECO, Style.SANDSTONE, Style.BRICK][brng.randi() % 4]
 	if h > 115.0:
-		return Style.GLASS if brng.randf() < 0.6 else Style.DARK_GLASS
+		# (one draw, as before: the layout's stream doesn't shift)
+		var g := brng.randf()
+		return Style.GLASS if g < 0.4 else (Style.DARK_GLASS if g < 0.62 else (Style.DECO if g < 0.82 else Style.MODERN))
 	if h > 65.0:
 		return [Style.MODERN, Style.DECO, Style.GLASS, Style.STONE][brng.randi() % 4]
 	if h > 35.0:
 		return [Style.STONE, Style.BRICK, Style.MODERN, Style.DECO][brng.randi() % 4]
 	return [Style.BRICK, Style.STONE, Style.SANDSTONE][brng.randi() % 3]
+
+
+## Silhouettes for plain towers (one tier, 45 m+): about four in five get a
+## stepped top – one setback, two setbacks, or a slimmer crown block above
+## the roof – so the skyline isn't a field of flat-topped boxes. Picked from
+## the lot's position (its own RNG: the layout's streams are untouched); the
+## main body below ~60 % of the height never changes.
+func _stepped_top(tiers: Array, h: float, c: Vector2) -> void:
+	# (Not the very tallest: the penthouse wants one broad top up there.)
+	if tiers.size() != 1 or h < 45.0 or h > 150.0:
+		return
+	var t: Array = tiers[0]
+	var w := minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	if w < 14.0:
+		return
+	var srng := RandomNumberGenerator.new()
+	srng.seed = hash(Vector2i(int(c.x * 3.0), int(c.y * 3.0))) ^ 0x57e9
+	var pick := srng.randf()
+	var cut := func(at: float, si: float) -> void:
+		var last: Array = tiers[-1]
+		# (tops stay 14 m+ across: still a roof to land on and start from)
+		if float(last[2]) - float(last[0]) - si * 2.0 < 14.0 or float(last[3]) - float(last[1]) - si * 2.0 < 14.0:
+			return
+		var top: float = last[5]
+		last[5] = at
+		tiers.append([float(last[0]) + si, float(last[1]) + si, float(last[2]) - si, float(last[3]) - si, at, top])
+	if pick < 0.32 or (pick < 0.52 and h <= 75.0):
+		cut.call(h * srng.randf_range(0.72, 0.84), srng.randf_range(2.0, 4.5))
+	elif pick < 0.52 and h > 75.0:
+		cut.call(h * srng.randf_range(0.6, 0.68), srng.randf_range(2.0, 3.5))
+		cut.call(h * srng.randf_range(0.82, 0.9), srng.randf_range(2.0, 3.5))
+	elif pick < 0.8 and w > 21.0:
+		var si := srng.randf_range(3.5, minf(w * 0.22, (w - 14.0) * 0.5))
+		tiers.append([float(t[0]) + si, float(t[1]) + si, float(t[2]) - si, float(t[3]) - si, h, h + srng.randf_range(6.0, 12.0)])
 
 
 func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void:
@@ -1490,6 +1526,8 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 		var mz := cz + side * 0.5
 		extra.append(_building([[mx - sp, mz - sp, mx + sp, mz + sp, th + 0.5, th + frng.randf_range(9.0, 16.0)]],
 			style, col.lightened(0.15), "spire"))
+	var box_tiers := tiers.duplicate(true)
+	_stepped_top(tiers, h, c)
 	var b := _building(tiers, style, col, "normal")
 	b["seed"] = brng.randf()
 	if not blocked.is_empty():
@@ -1497,7 +1535,30 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	_add(b)
 	for e in extra:
 		_add(e)
-	_roof_furniture(b, tiers, style, h, col, brng, blocked)
+	if tiers.size() == box_tiers.size():
+		_roof_furniture(b, tiers, style, h, col, brng, blocked)
+	else:
+		# A stepped top: dress the real roof, but advance the layout's random
+		# streams exactly as the plain box would have (a dry run, thrown
+		# away), so every building after this one stays where it was.
+		var b_state := brng.state
+		var r_state := rng.state
+		var sizes := [props.size(), buildings.size(), _plant_candidates.size(), reserved.size()]
+		var dry := b.duplicate()
+		dry["tiers"] = box_tiers
+		_roof_furniture(dry, box_tiers, style, h, col, brng, blocked)
+		props.resize(sizes[0])
+		buildings.resize(sizes[1])
+		_plant_candidates.resize(sizes[2])
+		reserved.resize(sizes[3])
+		var b_after := brng.state
+		var r_after := rng.state
+		var real := RandomNumberGenerator.new()
+		real.state = b_state
+		rng.state = r_state
+		_roof_furniture(b, tiers, style, h, col, real, blocked)
+		brng.state = b_after
+		rng.state = r_after
 	for e in extra:
 		if e["kind"] == "normal" and form == "twin":
 			_roof_furniture(e, e["tiers"], style, float(e["tiers"][-1][5]), col, frng, [])
@@ -1727,6 +1788,7 @@ func _billboard(t: Array, roof: float, brng: RandomNumberGenerator) -> void:
 	var b := _building([[r[0], r[1], r[2], r[3], y0, y1]], Style.MODERN, cols[brng.randi() % cols.size()], "sign")
 	b["roof"] = roof
 	b["seed"] = brng.randf()
+	b["face"] = [Vector2(0, -1), Vector2(0, 1), Vector2(-1, 0), Vector2(1, 0)][side]  # outward (the advert side)
 	_add(b)
 
 
