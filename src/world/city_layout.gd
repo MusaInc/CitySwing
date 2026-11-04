@@ -143,6 +143,13 @@ func generate(p_seed := 1207) -> CityLayout:
 	CityInfrastructure.public_spaces(self)
 	_place_plant()
 	apartments = Apartments.place(self)
+	# Last: plazas and parks on both shores, clear of the City Loop.
+	var rail_lines: Array = []
+	for ln in rail.lines:
+		rail_lines.append(ln["pts"])
+	CityInfrastructure.open_ground(self, rail_lines)
+	if mainland != null:
+		CityInfrastructure.open_ground(mainland, rail_lines)
 	return self
 
 
