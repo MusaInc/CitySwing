@@ -248,7 +248,19 @@ jobs:
           d = call(f"/v1/builds/{bid}/buildBetaDetail")
           if d:
               da = d["data"]["attributes"]
-              print("INTERNAL_STATE", da.get("internalBuildState"), "EXTERNAL_STATE", da.get("externalBuildState"))
+              print("INTERNAL_STATE", da.get("internalBuildState"), "EXTERNAL_STATE", da.get("externalBuildState"),
+                    "AUTO_NOTIFY", da.get("autoNotifyEnabled"))
+              if da.get("autoNotifyEnabled") is False:
+                  ok = call(f"/v1/buildBetaDetails/{d['data']['id']}", "PATCH",
+                            {"data": {"type": "buildBetaDetails", "id": d["data"]["id"], "attributes": {"autoNotifyEnabled": True}}})
+                  print("auto-notify turned on:", "yes" if ok is not None else "FAILED")
+          for g in groups:
+              gb = call(f"/v1/betaGroups/{g['id']}/builds?limit=5&fields[builds]=version")
+              print(f"group '{g['attributes']['name']}' builds:", [x["attributes"]["version"] for x in (gb or {}).get("data", [])])
+          # Emails every tester who can see this build ("a new build is ready to test").
+          n = call("/v1/buildBetaNotifications", "POST",
+                   {"data": {"type": "buildBetaNotifications", "relationships": {"build": {"data": {"type": "builds", "id": bid}}}}})
+          print("TESTER_EMAIL_SENT", "yes" if n is not None else "no")
           PY
 
       - name: Remove the key
