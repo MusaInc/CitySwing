@@ -47,6 +47,11 @@ signal staggered(speed: float, normal: Vector3)
 ## Let go inside the sweet spot (see SwingParams "Release"). streak counts
 ## consecutive perfect releases without touching the ground.
 signal perfect_release(streak: int)
+## A player hit a facade at speed and is running on it (wall_run) / pushed
+## off it back into the air / scrambled over a roof edge.
+signal wall_run_started(normal: Vector3)
+signal wall_run_launched
+signal wall_topped
 
 enum Line { IDLE, FLYING, ATTACHED }
 
@@ -146,6 +151,22 @@ var _stagger_cool := 0.0
 ## further a web reaches (m added to grapple_range), so a long drop off a
 ## supertall still finds a facade to catch. Bots and recorded courses keep
 ## the plain range.
+## Wall running (players only): hit a facade at speed and the feet carry
+## on over its surface – up it head-on, along it at an angle – for about a
+## second, then push off back into the air with the speed kept. Not a climb:
+## the run decelerates and always ends in a launch (JUMP: a bigger one).
+## Near a roof edge the hands catch it and scramble over (_top_out).
+var wall_run := false
+var wall_normal := Vector3.ZERO
+## 0 straight up the wall .. 1 running along it (animation, camera).
+var wall_run_along := 0.0
+## > 0 for a moment after a wall run (the camera holds its heading).
+var wall_hold := 0.0
+var _wr_t := 0.0
+var _wr_up := 0.0
+var _wr_side := Vector3.ZERO
+var _wr_lost := 0.0
+var _wr_cool := 0.0
 var reach_extra := 0.0
 const REACH_MAX_EXTRA := 50.0
 var _rp: SwingParams  # params with the extended reach (see p_eff)
@@ -392,10 +413,15 @@ func _physics_process(dt: float) -> void:
 			var n := get_wall_normal()
 			s.velocity += Vector3(n.x, 0.0, n.z).normalized() * params.wall_kick_speed
 			s.velocity.y = maxf(s.velocity.y, 0.0) + params.wall_kick_up
+			if wall_run:
+				# Springing off a wall run: the run's speed carries on.
+				_end_wall_run(true)
 			wall_kicked.emit()
 		elif line_state != Line.ATTACHED:
 			trick.emit()  # purely visual acrobatics; no physics effect
 		controls.jump = false
+
+	_update_wall_run(dt, move)
 
 	# Integrate the model from the body's real position.
 	s.position = global_position
@@ -536,7 +562,7 @@ func _resolve_contacts(dt: float) -> void:
 				worst_into = maxf(worst_into, into)
 			elif not was_on_floor:
 				worst_into = maxf(worst_into, into * 0.5)
-		if into > 1.5 and n.y < 0.6 and _bump_cool <= 0.0:
+		if into > 1.5 and n.y < 0.6 and _bump_cool <= 0.0 and not wall_run:
 			bumped.emit(into, n)
 			_bump_cool = 0.15
 		if absf(n.y) < 0.6:
@@ -569,6 +595,16 @@ func _resolve_contacts(dt: float) -> void:
 			_slam(maxf(-pre_hit.y, speed_in), pre_hit)
 	elif on_floor:
 		on_street = floor_street
+	# Players: a facade hit at speed (not a head-on knockout) becomes a wall
+	# run that keeps the momentum, as long as the stick isn't pulling away.
+	if controls.human and not stunned and not wall_run and _wr_cool <= 0.0 and wall_n != Vector3.ZERO \
+			and absf(wall_n.y) < 0.3 and worst_into >= params.wall_run_min_speed \
+			and not (worst_into >= params.wall_run_max_speed and wall_ratio >= params.wall_glance_ratio) \
+			and controls.move.length() > 0.3 \
+			and controls.move.normalized().dot(Vector3(wall_n.x, 0.0, wall_n.z).normalized()) < 0.2:
+		_start_wall_run(wall_n, pre_hit, worst_into)
+		was_on_floor = on_floor
+		return
 	var facade := wall_n != Vector3.ZERO and worst_into > params.hard_impact_speed and not stunned
 	if facade and wall_ratio < params.wall_glance_ratio:
 		# A glancing hit is a wall tap, not a crash: kick off the facade and
@@ -818,7 +854,13 @@ func _range_tolerant() -> SwingParams:
 func _let_go() -> void:
 	if line_state == Line.ATTACHED:
 		var perfect := is_perfect_release()
+		var fling := controls.human and s.taut and not stunned and s.velocity.y > 0.0 and s.velocity.length() > 10.0 \
+			and s.velocity.length() < params.flow_cruise_speed
 		SwingPhysics.release(s)
+		if fling:
+			# Players: letting go on the way up throws you on out of the arc.
+			s.velocity *= params.flow_release_boost
+			s.velocity.y += params.flow_release_lift
 		if perfect:
 			s.velocity *= params.perfect_release_boost
 			s.velocity.y += params.perfect_release_lift
@@ -837,6 +879,122 @@ func _let_go() -> void:
 	web_touch_id = -1
 	wraps.clear()
 	_zip = false
+
+
+func _start_wall_run(n: Vector3, pre: Vector3, into: float) -> void:
+	if line_state != Line.IDLE:
+		_let_go()
+	wall_normal = Vector3(n.x, 0.0, n.z).normalized()
+	var side := pre - wall_normal * pre.dot(wall_normal)
+	side.y = 0.0
+	# The speed going into the wall turns upward (a head-on hit runs up it),
+	# the speed along it carries on (a glancing one runs across it).
+	_wr_side = side * 0.92
+	_wr_up = clampf(into * 0.7 + maxf(pre.y, 0.0) * 0.5, 7.0, 17.0)
+	wall_run_along = clampf(_wr_side.length() / maxf(_wr_side.length() + _wr_up, 0.1), 0.0, 1.0)
+	_wr_t = 0.0
+	_wr_lost = 0.0
+	wall_run = true
+	wall_hold = 0.8
+	wall_run_started.emit(wall_normal)
+
+
+## Push off the wall back into the air: along-speed kept, out and up.
+## JUMP (strong) throws further and higher than running out of wall.
+func _end_wall_run(strong: bool) -> void:
+	if not wall_run:
+		return
+	wall_run = false
+	_wr_cool = 0.45
+	var out := params.wall_run_launch_out * (1.4 if strong else 1.0)
+	var lift := params.wall_run_launch_up * (1.35 if strong else 1.0)
+	s.velocity = _wr_side + wall_normal * out
+	s.velocity.y = maxf(_wr_up, 0.0) * 0.6 + lift
+	_from_swing = true  # apex hang time to line up the next web
+	wall_run_launched.emit()
+
+
+## Wall runs in progress, and the ledge scramble. Bots and courses never
+## wall-run.
+func _update_wall_run(dt: float, move: Vector3) -> void:
+	_wr_cool = maxf(_wr_cool - dt, 0.0)
+	wall_hold = maxf(wall_hold - dt, 0.0)
+	if not controls.human or stunned or line_state == Line.ATTACHED:
+		wall_run = false
+		return
+	var n := Vector3.ZERO
+	if is_on_wall():
+		var wn := get_wall_normal()
+		if absf(wn.y) < 0.3:
+			n = Vector3(wn.x, 0.0, wn.z).normalized()
+	if not wall_run:
+		# Scramble: slow, in the air at a wall with its top just above.
+		if n != Vector3.ZERO and not is_on_floor() and s.velocity.y < 5.0 and move.length() > 0.4 \
+				and move.dot(-n) > 0.45:
+			wall_normal = n
+			_top_out()
+		return
+	wall_hold = 0.8
+	_wr_t += dt
+	if n != Vector3.ZERO:
+		wall_normal = wall_normal.slerp(n, 0.3).normalized()
+		_wr_lost = 0.0
+	else:
+		# Off the top (scramble over the lip), or past the wall's end.
+		if _top_out():
+			wall_run = false
+			_wr_cool = 0.3
+			return
+		_wr_lost += dt
+		if _wr_lost > 0.12:
+			_end_wall_run(false)
+			return
+	if is_on_ceiling() or _wr_t > params.wall_run_time or move.length() > 0.3 and move.dot(wall_normal) > 0.5:
+		_end_wall_run(false)  # out of run (or steering away): push off
+		return
+	_wr_up -= params.wall_run_up_decel * dt
+	_wr_side = _wr_side.move_toward(Vector3.ZERO, params.wall_run_side_decel * dt)
+	if _wr_up < -2.0 and _wr_side.length() < 4.0:
+		_end_wall_run(false)
+		return
+	wall_run_along = lerpf(wall_run_along, clampf(_wr_side.length() / maxf(_wr_side.length() + absf(_wr_up), 0.1), 0.0, 1.0), 1.0 - exp(-6.0 * dt))
+	s.velocity = _wr_side - wall_normal * 2.0
+	s.velocity.y = _wr_up + params.gravity * dt  # the step's gravity takes this back off
+	_launch_pending = true  # off the ground: no ground move this tick
+
+
+## Climbing past the top edge of a wall: find the roof just over the lip
+## (feet up to 5 m higher, up to a metre in) and scramble onto it. A cornice
+## overhanging the top is reached round: out from the wall first (≤1.5 m).
+func _top_out() -> bool:
+	for out: float in [0.0, 0.5, 1.0, 1.5]:
+		var base := global_transform
+		if out > 0.0:
+			if test_move(base, wall_normal * out):
+				return false
+			base = base.translated(wall_normal * out)
+		var inward := -wall_normal * (0.9 + out)
+		for i in range(1, 14):
+			var lift := i * 0.4
+			if test_move(base, Vector3.UP * lift):
+				break  # no headroom here: try further out
+			var up_xf := base.translated(Vector3.UP * lift)
+			if test_move(up_xf, inward):
+				continue
+			var over := up_xf.translated(inward)
+			var hit := KinematicCollision3D.new()
+			if not test_move(over, Vector3.DOWN * (lift + 0.5), hit) or hit.get_normal().y < 0.7:
+				return false
+			var rise := over.origin.y + hit.get_travel().y - global_position.y
+			global_position = over.origin + hit.get_travel() + Vector3.UP * 0.02
+			s.position = global_position
+			s.velocity = -wall_normal * 4.5 + _wr_side * 0.5
+			velocity = Vector3.ZERO
+			wall_topped.emit()
+			if rise > 0.05:
+				stepped_up.emit(rise)
+			return true
+	return false
 
 
 ## True when letting go now would be a perfect release: taut, rising,
@@ -973,6 +1131,9 @@ func respawn(at: Variant = null) -> void:
 	stunned = false
 	knocked_out = false
 	_grapple_held = true  # require a fresh press
+	wall_run = false
+	wall_hold = 0.0
+	_wr_cool = 0.0
 	_first_swing_grace = true
 	global_position = at if at is Vector3 else last_safe_position
 	s.velocity = Vector3.ZERO

@@ -78,12 +78,15 @@ static func _substep(s: State, c: Controls, p: SwingParams, h: float) -> void:
 		v.y -= p.gravity * c.gravity_scale * h
 		if s.attached and s.taut:
 			v = _swing_steer(s, v, c, p, h)
+			if c.human:
+				v = _flow(v, p, h)
 		else:
 			v = _air_steer(v, c, p, h)
 
 	var spd := v.length()
 	if spd > 0.0001:
-		var dec := (p.air_drag * spd * spd + p.linear_drag * spd) * h
+		var drag := p.air_drag * (p.flow_drag_scale if c.human else 1.0)
+		var dec := (drag * spd * spd + p.linear_drag * spd) * h
 		v -= v / spd * minf(dec, spd)
 	v.y = maxf(v.y, -p.max_fall_speed)
 
@@ -172,6 +175,20 @@ static func _reel(s: State, v: Vector3, reel: float, p: SwingParams, h: float, c
 			v = vt + nrm * radial
 	s.rope_length = new_len
 	return v
+
+
+## Player flow assist on a taut web: a push along the direction of travel,
+## strongest through the low, fast part of the arc and fading on a steep climb
+## (so it carries you through the swing without winching you up the wall),
+## easing off towards the cruise speed.
+static func _flow(v: Vector3, p: SwingParams, h: float) -> Vector3:
+	var spd := v.length()
+	if spd < 2.0 or p.flow_accel <= 0.0:
+		return v
+	var dir := v / spd
+	var climb := clampf(dir.y / 0.55, 0.0, 1.0)  # 0 level/descending .. 1 at ~33° up
+	var ease := clampf(1.0 - (spd / p.flow_cruise_speed) * (spd / p.flow_cruise_speed), 0.0, 1.0)
+	return v + dir * p.flow_accel * ease * (1.0 - climb) * h
 
 
 static func _swing_steer(s: State, v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:

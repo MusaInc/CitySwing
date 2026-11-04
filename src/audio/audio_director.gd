@@ -102,6 +102,10 @@ func attach_player(p: Player) -> void:
 	if rig and rig.has_signal("footstep"):
 		rig.footstep.connect(_on_footstep)
 		_rig_steps = true
+	p.wall_run_started.connect(func(_n: Vector3):
+		play("wall_kick", -5.0, 0.9)
+		Settings.haptic(18, 0.45))
+	p.wall_run_launched.connect(func(): play("release_whoosh", -7.0, 1.1))
 	p.wall_kicked.connect(func():
 		play("wall_kick", -2.0)
 		Settings.haptic(25, 0.6))

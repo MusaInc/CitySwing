@@ -20,7 +20,7 @@ extends Node3D
 ##    gentle bank (max 4°) leans into sustained turns at speed.
 
 @export var base_fov := 70.0
-@export var max_fov := 82.0  # restrained: wide enough to sell speed, no fish-eye
+@export var max_fov := 86.0  # restrained: wide enough to sell speed, no fish-eye
 @export var fov_speed_full := 50.0
 @export var follow_smooth := 0.12
 @export var aim_smooth := 0.08
@@ -184,6 +184,8 @@ func _process(dt: float) -> void:
 	if not rail_at.is_empty():
 		var rd: Vector3 = rail_at[1]
 		_heading = atan2(-rd.x, -rd.z)
+	elif target.wall_hold > 0.0 and target.wall_run_along < 0.5:
+		pass  # running up a wall (or just off it): keep facing the wall
 	elif vh.length() > 3.0 and vh.length() > absf(v.y) * 0.35:
 		var travel := atan2(-vh.x, -vh.z)
 		var diff := wrapf(travel - _heading, -PI, PI)
@@ -215,9 +217,12 @@ func _process(dt: float) -> void:
 	if target.height_above_ground() < 15.0 and not target.s.attached:
 		# Down at street level: look up at the facades you can swing from.
 		want_pitch = deg_to_rad(6.0)
+	if target.wall_run:
+		# Running up a facade: look up the wall.
+		want_pitch = lerpf(deg_to_rad(20.0), want_pitch, target.wall_run_along)
 	_look_down = lerpf(_look_down, look_down, 1.0 - exp(-2.5 * dt))
 	want_pitch -= _look_down
-	pitch = move_toward(pitch, want_pitch, deg_to_rad(25.0) * dt)
+	pitch = move_toward(pitch, want_pitch, deg_to_rad(55.0 if target.wall_run else 25.0) * dt)
 
 	# Manual look eases back to centre once the player lets go.
 	if _since_look > recenter_delay:
@@ -229,6 +234,12 @@ func _process(dt: float) -> void:
 	# Tighter in flight than it used to be (8 m + 2.2 for long ropes left the
 	# hero ~10% of the screen): the hero is the show; the FOV sells the speed.
 	var want_dist := lerpf(5.0, 6.6, t) if not grounded else lerpf(4.8, 6.2, clampf(vh.length() / 11.0, 0.0, 1.0))
+	if not grounded:
+		# Real speed (well past a jog through the air): ease the lens back so
+		# the city streams past around the hero instead of the hero filling it.
+		want_dist += 1.6 * smoothstep(24.0, 45.0, spd)
+	if target.wall_run:
+		want_dist += 1.0
 	var indoors := indoor_ceiling < INF
 	_indoor = move_toward(_indoor, 1.0 if indoors else 0.0, dt * 1.5)
 	_mask = 1 | (1 << 1) | (CityWorld.HUMAN_LAYER if indoors else 0)
@@ -354,7 +365,7 @@ func _process(dt: float) -> void:
 	# Bank into sustained turns at speed (never during reversals).
 	_turn_rate = lerpf(_turn_rate, wrapf(_heading - _prev_heading, -PI, PI) / maxf(dt, 1e-4), 1.0 - exp(-3.0 * dt))
 	_prev_heading = _heading
-	var roll_goal := clampf(-_turn_rate * vh.length() * 0.004, -deg_to_rad(4.0), deg_to_rad(4.0)) if not grounded else 0.0
+	var roll_goal := clampf(-_turn_rate * vh.length() * 0.006, -deg_to_rad(7.0), deg_to_rad(7.0)) if not grounded else 0.0
 	_roll = lerpf(_roll, roll_goal, 1.0 - exp(-2.5 * dt))
 	rotate_object_local(Vector3.FORWARD, _roll)
 

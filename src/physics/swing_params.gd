@@ -55,6 +55,29 @@ extends Resource
 ## mid-flight carries you on rather than braking you.
 @export_range(0.0, 1.0) var snap_redirect: float = 0.7
 
+@export_group("Flow (human players)")
+## Player-only feel layer (bots, recorded courses and the model tests keep the
+## plain model): a taut web carries you on through the bottom of the arc,
+## building speed towards flow_cruise_speed instead of bleeding it.
+@export var flow_accel: float = 7.0
+@export var flow_cruise_speed: float = 38.0
+## Air drag multiplier for players (momentum carries between webs).
+@export_range(0.2, 1.0) var flow_drag_scale: float = 0.75
+## Any release while rising at speed flings you on: × this along the travel,
+## plus flow_release_lift m/s upward (a perfect release adds its own on top).
+@export var flow_release_boost: float = 1.05
+@export var flow_release_lift: float = 3.0
+## Wall runs: a facade hit at this speed or more (short of a head-on
+## knockout) runs on over the wall for up to wall_run_time seconds – up it at
+## the into-wall speed (decelerating), along it at the along-wall speed – then
+## pushes off (launch out / up, m/s; JUMP throws harder).
+@export var wall_run_min_speed: float = 8.0
+@export var wall_run_time: float = 1.1
+@export var wall_run_up_decel: float = 11.0
+@export var wall_run_side_decel: float = 3.0
+@export var wall_run_launch_out: float = 6.0
+@export var wall_run_launch_up: float = 6.5
+
 @export_group("Release")
 ## Letting go on the upswing inside the sweet spot (flight path this many
 ## degrees above horizontal, at speed) is a perfect release: speed × boost.

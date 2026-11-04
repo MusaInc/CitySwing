@@ -442,6 +442,7 @@ func _connect_player() -> void:
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)
+	player.wall_topped.connect(func(): _takeoff_t = 0.3; _jump_t = 0.0)
 	player.bumped.connect(_on_bumped)
 	player.staggered.connect(_on_staggered)
 	player.attached.connect(func(_a) -> void:
@@ -1022,7 +1023,10 @@ func _update_animated(dt: float) -> void:
 	var attached := player.line_state == Player.Line.ATTACHED
 	# Rope load 0..1: taut + tension. Slack line = 0 (body relaxes into flight).
 	_load = move_toward(_load, clampf(s.tension / 40.0, 0.0, 1.0) if attached and s.taut else 0.0, dt * 4.0)
-	var wall_run := _wall_time > 0.0 and v.y > 1.5 and not on_rope
+	if player.wall_run:
+		_wall_time = maxf(_wall_time, 0.15)
+		_wall_n = player.wall_normal
+	var wall_run := (_wall_time > 0.0 and v.y > 1.5 or player.wall_run) and not on_rope
 	_wall_time = maxf(_wall_time - dt, 0.0)
 	_takeoff_t = maxf(_takeoff_t - dt, 0.0)
 	_release_t = maxf(_release_t - dt, 0.0)
@@ -1075,7 +1079,12 @@ func _update_animated(dt: float) -> void:
 	# --- facing & turn rate -----------------------------------------------
 	_stagger_t = maxf(_stagger_t - dt, 0.0)
 	if wall_run:
-		_facing = _facing.slerp(-_wall_n, 1.0 - exp(-14.0 * dt)).normalized()
+		# Up the wall: chest to it. Along it: facing the run, side to the wall.
+		var face_to := -_wall_n
+		var al := player.wall_run_along if player.wall_run else 0.0
+		if al > 0.05 and hs > 1.0:
+			face_to = (-_wall_n).slerp(vh.normalized(), al).normalized()
+		_facing = _facing.slerp(face_to, 1.0 - exp(-14.0 * dt)).normalized()
 	elif _stagger_t > 0.0 and grounded:
 		_facing = _facing.slerp(-_stagger_n, 1.0 - exp(-10.0 * dt)).normalized()  # still facing the wall
 	elif hs > 1.0:
@@ -1128,7 +1137,10 @@ func _update_animated(dt: float) -> void:
 			var gp := _getup_pitch(_getup_u())
 			up = (Vector3.UP * cos(gp) + _facing * sin(gp)).normalized()
 	elif wall_run:
-		up = (Vector3.UP + _wall_n * 0.12).normalized()  # chest to the wall, hips just off it
+		# Chest to the wall, hips just off it; running along it the body tips
+		# out from the wall, feet on its face.
+		var al := player.wall_run_along if player.wall_run else 0.0
+		up = (Vector3.UP + _wall_n * (0.12 + 0.75 * al)).normalized()
 	elif on_rope:
 		var target := s.anchor if attached else player.line_tip
 		var rope_dir := (target - player.global_position).normalized()
@@ -2299,7 +2311,7 @@ func _pose_trick(q: Dictionary, name: String, u: float) -> void:
 ## Running up a facade after a head-on hit: quick high-knee steps against the
 ## wall, arms reaching up alternately.
 func _pose_wall_run(q: Dictionary, dt: float) -> void:
-	_run_phase += dt * 15.0
+	_run_phase += dt * clampf(8.0 + player.s.velocity.y * 0.65, 11.0, 17.0)
 	var ph := _run_phase
 	q["spine"] = _rx(0.15)
 	q["chest"] = _rx(0.05)
