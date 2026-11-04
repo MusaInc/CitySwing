@@ -61,6 +61,7 @@ const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var furniture_mat: StandardMaterial3D
 var trains: Trains
+var ads: AdScreens
 var _lamp_mat: BaseMaterial3D   # the streetlight head's emissive material (brightened at night)
 var _lamp_base := 1.0
 var _glow_mats: Array[ShaderMaterial] = []  # [pool, halo]
@@ -126,6 +127,11 @@ func _ready() -> void:
 	_build_landmarks()
 	_build_structures()
 	_build_homes()
+	if not secondary:
+		ads = AdScreens.new()
+		ads.name = "Ads"
+		add_child(ads)
+		ads.build(layout)
 	if traffic_density > 0.0 and not car_meshes.is_empty():
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
@@ -574,6 +580,8 @@ func set_sky_colors(_top: Color, _horizon: Color) -> void:
 func set_night(n: float) -> void:
 	if trains:
 		trains.set_night(n)
+	if ads:
+		ads.set_night(n)
 	if mainland:
 		mainland.set_night(n)
 	if _lamp_mat:
