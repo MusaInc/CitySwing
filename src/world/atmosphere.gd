@@ -137,6 +137,11 @@ func _ready() -> void:
 
 
 ## Main calls this once settings and command-line overrides are known.
+## Set by --time: captures keep that hour (the title camera's shots don't
+## replace it).
+var fixed_hour := false
+
+
 func configure(args: Dictionary, world: Node) -> void:
 	_world = world
 	var capture := args.has("shot") or args.has("cam")
@@ -144,6 +149,7 @@ func configure(args: Dictionary, world: Node) -> void:
 	if args.has("time"):
 		hour = fposmod(float(args["time"]), 24.0)
 		live = false
+		fixed_hour = true
 	if args.has("weather") and args["weather"] in WEATHERS:
 		set_weather(args["weather"], true)
 	elif live:

@@ -188,7 +188,8 @@ func cut_to(i: int) -> void:
 	shot = posmod(i, SHOTS.size())
 	shot_t = 0.0
 	var s: Dictionary = SHOTS[shot]
-	atmosphere.hour = s["hour"]
+	if not atmosphere.fixed_hour:
+		atmosphere.hour = s["hour"]
 	atmosphere.set_weather("clear", true)
 	var leg: int = s["leg"]
 	if leg < 0:
