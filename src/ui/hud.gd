@@ -299,7 +299,7 @@ func _draw() -> void:
 		var bw := _font_black.get_string_size(banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44).x
 		draw_string(_font_black, Vector2(size.x / 2.0 - bw / 2.0 + 2, size.y * 0.32 + 3), banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(0, 0, 0, 0.4 * a))
 		draw_string(_font_black, Vector2(size.x / 2.0 - bw / 2.0, size.y * 0.32), banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(1, 1, 1, a))
-	if Settings.show_perf:
+	if Settings.show_perf and OS.is_debug_build():
 		var fps := Engine.get_frames_per_second()
 		var lines := [
 			"FPS %d  (%.1f ms avg, %.1f worst/2s)" % [fps, _frame_ms, _worst_ms],

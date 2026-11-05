@@ -789,12 +789,12 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_row("Music", _slider(Settings.music_volume, 0.0, 1.0, 0.05, func(v): Settings.music_volume = v; Settings.save())))
 	box.add_child(_row("Effects", _slider(Settings.sfx_volume, 0.0, 1.0, 0.05, func(v): Settings.sfx_volume = v; Settings.save())))
 	box.add_child(_section("Device"))
-	var bench := _card("Run benchmark", "45 s scripted flight  ·  saves benchmark.json", "bench",
+	var bench := _card("Performance test", "A 45 s flight  ·  how smoothly this device runs CitySwing", "bench",
 		func(): start_mode.emit("benchmark", ""))
 	_reg("benchmark", bench)
 	box.add_child(bench)
 	box.add_child(_gap(6))
-	box.add_child(_label("City Swing v%s  ·  Musa Studios  ·  Outfit font (SIL OFL)" %
+	box.add_child(_label("CitySwing v%s  ·  Musa Studios  ·  Outfit font (SIL OFL)" %
 		ProjectSettings.get_setting("application/config/version", "1.0"), 14, FAINT, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 	box.add_child(_menu_row("Character credits", "", func(): show_character_credits(back), 16))
 	q.grab_focus.call_deferred()
@@ -1032,7 +1032,7 @@ func show_homes(back: Callable, in_game := false) -> void:
 # ================================================================= results
 func show_results(r: Dictionary) -> void:
 	var mode: String = r.get("mode", "")
-	var titles := {"trial": "COURSE COMPLETE", "endurance": "RUN OVER", "benchmark": "BENCHMARK",
+	var titles := {"trial": "COURSE COMPLETE", "endurance": "RUN OVER", "benchmark": "PERFORMANCE TEST",
 		"training": "TRAINING COMPLETE"}
 	var box := _page("results", titles.get(mode, "SESSION"), Callable(), 640, 0.2)
 	if mode == "benchmark":
@@ -1048,7 +1048,7 @@ func show_results(r: Dictionary) -> void:
 				["%d" % int(r["avg_draw_calls"]), "Draw calls"], ["%dk" % int(r["avg_prims"] / 1000.0), "Primitives"]]:
 			g.add_child(_tile(e[0], e[1], 190))
 		box.add_child(g)
-		box.add_child(_label("CPU %.1f ms process + %.1f ms physics  ·  saved to benchmark.json" % [r["cpu_process_ms"],
+		box.add_child(_label("CPU %.1f ms process + %.1f ms physics" % [r["cpu_process_ms"],
 			r["cpu_physics_ms"]], 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 		var bb := _card("Title", "", "home", func(): quit_to_title.emit(), "", true)
 		_reg("title", bb)

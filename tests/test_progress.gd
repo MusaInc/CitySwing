@@ -82,3 +82,34 @@ func test_perfect_release_window(t) -> void:
 		pl.s.velocity = Vector3(0, sin(a), -cos(a)) * cs[1]
 		t.check(pl.is_perfect_release() == cs[2], "%.0f° at %.0f m/s → perfect=%s" % [cs[0], cs[1], cs[2]])
 	pl.free()
+
+
+func test_save_survives_a_corrupt_file(t) -> void:
+	# Saves are atomic with a backup: a truncated save.json (app killed
+	# mid-write) recovers the last good progress instead of resetting it.
+	var sd: Node = Engine.get_main_loop().root.get_node("/root/SaveData")
+	var old_path: String = sd.path
+	var p := "user://test_save_atomic.json"
+	for f in [p, p + ".bak", p + ".tmp"]:
+		if FileAccess.file_exists(f):
+			DirAccess.remove_absolute(f)
+	sd.use_file(p)
+	sd.data["coins"] = 1234
+	sd.save()
+	sd.data["coins"] = 5678
+	sd.save()
+	t.check(not FileAccess.file_exists(p + ".tmp"), "no temp file left behind")
+	var f := FileAccess.open(p, FileAccess.WRITE)
+	f.store_string("{\"coins\": 56")  # truncated mid-write
+	f.close()
+	sd.load_data()
+	t.check(int(sd.data.get("coins", 0)) == 1234, "recovered from the backup (%s)" % str(sd.data.get("coins")))
+	f = FileAccess.open(p, FileAccess.WRITE)
+	f.close()  # empty file
+	DirAccess.remove_absolute(p + ".bak")
+	sd.load_data()
+	t.check(sd.data.has("best_trial_times"), "an unreadable save with no backup falls back to safe defaults")
+	for g in [p, p + ".bak", p + ".tmp"]:
+		if FileAccess.file_exists(g):
+			DirAccess.remove_absolute(g)
+	sd.use_file(old_path)
