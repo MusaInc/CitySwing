@@ -115,6 +115,11 @@ def main():
     info = next((i for i in infos if i["attributes"].get("appStoreState") != "READY_FOR_SALE"), infos[0])
     for loc in get(f"/v1/appInfos/{info['id']}/appInfoLocalizations")["data"]:
         patch("appInfoLocalizations", loc["id"], {"subtitle": SUBTITLE, "privacyPolicyUrl": PRIVACY})
+        try:
+            patch("appInfoLocalizations", loc["id"], {"name": "CitySwing"})
+            print("APP NAME CitySwing")
+        except urllib.error.HTTPError:
+            print("APP NAME kept (CitySwing not accepted – taken or locked)")
         print("APP INFO", loc["attributes"]["locale"], "subtitle + privacy URL set")
     try:
         patch("appInfos", info["id"], {}, {
@@ -126,14 +131,22 @@ def main():
         print("CATEGORIES not set (set them in App Store Connect)")
 
     # --- App Review notes -------------------------------------------------
-    rd = get(f"/v1/appStoreVersions/{vid}/appStoreReviewDetail").get("data")
+    try:
+        rd = get(f"/v1/appStoreVersions/{vid}/appStoreReviewDetail").get("data")
+    except urllib.error.HTTPError:
+        rd = None
     attrs = {"notes": NOTES, "demoAccountRequired": False, "contactEmail": "support@musastudios.co.uk"}
-    if rd:
-        patch("appStoreReviewDetails", rd["id"], attrs)
-    else:
-        call("POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": attrs,
-             "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}})
-    print("REVIEW NOTES set")
+    try:
+        if rd:
+            patch("appStoreReviewDetails", rd["id"], attrs)
+        else:
+            call("POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": attrs,
+                 "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}})
+        print("REVIEW NOTES set")
+    except urllib.error.HTTPError:
+        # Apple won't create it without the contact's name and phone.
+        print("REVIEW NOTES not set: App Review needs contact first/last name + phone first "
+              "(paste store/review_notes.txt into Notes)")
 
     # --- build --------------------------------------------------------------
     build = os.environ.get("BUILD", "").strip()
@@ -268,7 +281,10 @@ def main():
             print("AVAILABILITY not set (Pricing and Availability page)")
 
     # --- what Apple still needs ---------------------------------------------------
-    rd = get(f"/v1/appStoreVersions/{vid}/appStoreReviewDetail").get("data") or {}
+    try:
+        rd = get(f"/v1/appStoreVersions/{vid}/appStoreReviewDetail").get("data") or {}
+    except urllib.error.HTTPError:
+        rd = {}
     ra = rd.get("attributes", {})
     missing = [k for k in ("contactFirstName", "contactLastName", "contactPhone") if not ra.get(k)]
     print("STILL NEEDED: App Privacy questionnaire (not in the API)" + (", review contact " + ", ".join(missing) if missing else ""))
