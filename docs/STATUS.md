@@ -1,3 +1,30 @@
+# Status: 2026-11-05 (1.0.0 release pass)
+
+- **Version 1.0.0**, display name **CitySwing** (iOS keeps saves in the app's
+  Documents folder whatever the name is). App Store pack: `store/APP_STORE.md`
+  (metadata, reviewer notes, privacy label, age-rating answers), privacy page
+  source `store/privacy-cityswing.html`, screenshots `store/screenshots/`
+  (`tools/store_shots.sh` renders genuine captures at store sizes).
+- **Sound v2:** `tools/audio/gen_audio.py` rebuilt as layered foley synthesis
+  (transients, resonant noise, Karplus-Strong cable twang, bubbles, synthetic
+  room/city reverb) – needs numpy + scipy. Still no samples, no licences.
+  AudioDirector randomises pitch on repeated one-shots.
+- **Speed flight pose:** `CharacterRig._speedfly` – flying fast (13→24 m/s) the
+  wings fold: arms swept back, legs together and trailing with wind flutter,
+  body pitched ~60° into the air; dives keep the arms back. pose_lab `fastfly`.
+- **Homes:** Go/Visit from the in-game Homes menu left the touch controls hidden
+  (fixed). Indoors (`Player.indoors`) walking is a capped 4.6 m/s jog with
+  immediate turns and a quick stop.
+- **Saves are atomic** (temp file → verify → .bak → rename) and recover from
+  the backup if save.json is unreadable.
+- Retaining walls: coursed stone in ground.gdshader (were flat grey slabs up
+  to ~13 m tall). Free-roam tip moved to the lower centre (ran under the
+  minimap). Release builds: perf overlay off, "Performance test" wording.
+- Courses re-recorded for the shaped-building layout. Suite 159 + 2 known
+  flakes (expert street touches, ledge_dive ankle).
+- Not done on a device: no iPhone/iPad play-test or frame-rate measurement
+  has been possible from the VPS.
+
 # Status: 2026-11-03 (City Loop, coast, crashes, web reach, look)
 
 - **City Loop replaces the edge railways.** The coastal Loop Line viaduct,
