@@ -1,6 +1,6 @@
 class_name CinematicDirector
 extends Node
-## Title-screen cinematography: cycles five composed shots of the real game
+## Title-screen cinematography: cycles nine composed 12 s shots of the real game
 ## (real city, lighting and hero, flown by the ShowcasePilot) behind the menu.
 ##
 ##   1 Golden hour   – chase from the side at sunset, towers lit warm.
@@ -12,18 +12,25 @@ extends Node
 ##                     at speed, slowed a little.
 ##   5 Rooftops      – morning, just over the roofline, looking out along the
 ##                     travel to the skyline and the sea.
+##   Orbit (a slow arc round the hero), Blue hour (dusk chase over the lit
+##   streets), Crane (rises from the street to above the roofs), Drone (high
+##   overhead down the avenue).
 ## Each shot sets its own time of day, starts the hero on a chosen avenue leg
 ## and hands SwingCamera a transform each frame (camera.cine). The subject is
 ## kept left of centre, clear of the menu's top-right controls. Cuts dip
 ## through Night Ink (main's curtain). Leaving the title restores the clock,
 ## weather and time scale.
 
-const SHOT_LEN := 7.5
+const SHOT_LEN := 12.0  # long, unhurried shots (was 7.5 s: cut before a swing could play out)
 const SHOTS := [
 	{"name": "golden", "hour": 18.35, "leg": 0, "frac": 0.12, "h": 52.0, "speed": 22.0, "slow": 1.0},
 	{"name": "canyon", "hour": 15.2, "leg": 2, "frac": 0.08, "h": 60.0, "speed": 18.0, "slow": 0.55},
+	{"name": "orbit", "hour": 17.8, "leg": 1, "frac": 0.3, "h": 58.0, "speed": 21.0, "slow": 1.0},
 	{"name": "skyline", "hour": 16.6, "leg": 1, "frac": 0.1, "h": 70.0, "speed": 22.0, "slow": 1.0},
+	{"name": "bluehour", "hour": 20.4, "leg": 3, "frac": 0.15, "h": 55.0, "speed": 22.0, "slow": 1.0},
 	{"name": "momentum", "hour": 17.4, "leg": 0, "frac": 0.45, "h": 50.0, "speed": 24.0, "slow": 0.7},
+	{"name": "crane", "hour": 9.2, "leg": 2, "frac": 0.4, "h": 40.0, "speed": 19.0, "slow": 1.0},
+	{"name": "drone", "hour": 13.0, "leg": 3, "frac": 0.5, "h": 62.0, "speed": 22.0, "slow": 1.0},
 	{"name": "rooftops", "hour": 10.4, "leg": -1, "frac": 0.12, "h": 44.0, "speed": 20.0, "slow": 1.0},
 ]
 
@@ -225,7 +232,7 @@ func _process(dt: float) -> void:
 	# Slow motion: eased in and out over the middle of the shot.
 	var slow: float = s["slow"]
 	if slow < 1.0:
-		var k := smoothstep(1.6, 2.6, shot_t) * (1.0 - smoothstep(4.6, 5.6, shot_t))
+		var k := smoothstep(2.0, 3.2, shot_t) * (1.0 - smoothstep(7.5, 8.8, shot_t))
 		Engine.time_scale = lerpf(1.0, slow, k)
 	else:
 		Engine.time_scale = 1.0
@@ -275,6 +282,34 @@ func camera_xf(dt: float) -> Array:
 			off = -f * 3.4 + sd * 2.1 + up * 0.7
 			look = f * 2.0 + up * 0.2
 			fov = 50.0
+		"orbit":
+			# A slow arc round the hero (~100° over the shot), level with
+			# them, always looking back at the body.
+			var u := clampf(shot_t / SHOT_LEN, 0.0, 1.0)
+			var a := lerpf(-0.55, 1.2, u * u * (3.0 - 2.0 * u)) * _side
+			off = (-f * cos(a) + r * sin(a)) * 6.5 + up * 0.8
+			look = f * 1.5
+			fov = 52.0
+		"bluehour":
+			# Dusk, lights coming on: a longer chase from behind and above so
+			# the lit streets fill the frame below the hero.
+			off = -f * 9.0 + sd * 3.0 + up * 4.0
+			look = f * 12.0 - up * 4.0
+			fov = 60.0
+		"crane":
+			# Starts low behind the hero and rises past roof height as the
+			# shot goes on, tilting from the towers to the city ahead.
+			var u := clampf(shot_t / SHOT_LEN, 0.0, 1.0)
+			var e := u * u * (3.0 - 2.0 * u)
+			off = -f * lerpf(5.0, 10.0, e) + sd * 2.5 + up * lerpf(-2.5, 9.0, e)
+			look = f * lerpf(2.0, 18.0, e) + up * lerpf(2.0, -4.0, e)
+			fov = lerpf(64.0, 56.0, e)
+		"drone":
+			# High overhead and a little behind: the hero swinging over the
+			# avenue, traffic and crossings far below.
+			off = -f * 9.0 + sd * 5.0 + up * 20.0
+			look = f * 6.0 - up * 6.0
+			fov = 55.0
 		_:
 			off = -f * 7.5 + sd * 3.5 + up * 3.2
 			look = f * 30.0 - up * 3.0
