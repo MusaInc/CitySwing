@@ -1,23 +1,25 @@
 class_name FreeSwingMode
 extends GameMode
-## Explore, and hunt the tokens hidden over the city (collection persists).
-## The HUD points at the nearest uncollected token.
+## Explore, hunt the tokens hidden over the city (collection persists) and
+## take contracts for coins and reputation (JobBoard). The minimap shows
+## tokens and job beacons; the route pointer follows the active contract.
 
 var tokens: TokenField
+var jobs: JobBoard
 var _prev := Vector3.ZERO
 var _suits_before := []
 var _session_tokens := 0
 
 
 func mode_name() -> String:
-	return "Free Swing"
+	return "Open City"
 
 
 func start() -> void:
 	super.start()
 	hud.mode_text = ""
 	hud.mode_sub = ""
-	hud.flash("FREE SWING", 1.6)
+	hud.flash("OPEN CITY", 1.6)
 	_suits_before = Progress.unlocked_ids()
 	if world is CityWorld:
 		tokens = TokenField.new()
@@ -25,6 +27,11 @@ func start() -> void:
 		world.add_child(tokens)
 		tokens.setup((world as CityWorld).layout)
 		tokens.collected.connect(_on_token)
+		jobs = JobBoard.new()
+		jobs.name = "Jobs"
+		world.add_child(jobs)
+		jobs.setup(player, hud, audio, world, int(world.get_meta("job_seed", -1)))
+		hud.jobs = jobs
 	_prev = player.global_position
 
 
@@ -36,9 +43,19 @@ func _physics_process(dt: float) -> void:
 		_prev = p
 
 
-func _process(_dt: float) -> void:
+var _tip_t := 0.0
+
+
+func _process(dt: float) -> void:
 	if not running:
 		return
+	# First sessions: point out the job beacons once you've had a swing.
+	if jobs and int(SaveData.data.get("jobs_done", 0)) == 0 and jobs.active.is_empty():
+		_tip_t += dt
+		hud.hint = "Land on a glowing beacon to take a job" if _tip_t > 8.0 and _tip_t < 16.0 else ""
+	elif hud.hint != "" and _tip_t > 0.0:
+		hud.hint = ""
+		_tip_t = 0.0
 	# No banner: the minimap shows the tokens (the nearest one pinned to its
 	# rim when it's off the map); totals live in pause / results / stats.
 	if tokens and hud.minimap:
@@ -46,10 +63,17 @@ func _process(_dt: float) -> void:
 		var list: Array = []
 		for t in tokens.near(p, 400.0):
 			list.append([t, "token"])
-		var nt := tokens.nearest(p)
-		if nt != Vector3.INF:
-			list.append([nt, "next"])
+		var goal := jobs.objective() if jobs else Vector3.INF
+		if goal != Vector3.INF:
+			list.append_array(jobs.markers())
+		else:
+			if jobs:
+				list.append_array(jobs.markers())
+			var nt := tokens.nearest(p)
+			if nt != Vector3.INF:
+				list.append([nt, "next"])
 		hud.minimap.markers = list
+		hud.pointer = goal
 
 
 func _on_token(_id: int, left: int) -> void:
@@ -70,16 +94,24 @@ func _on_token(_id: int, left: int) -> void:
 
 
 func stop() -> void:
+	if jobs:
+		jobs.abandon()
 	var found := SaveData.token_count()
 	end_run({"mode": "free", "distance": player.distance_travelled, "swings": player.swings,
 		"tokens_session": _session_tokens, "tokens_total": found,
+		"jobs_session": jobs.session_done if jobs else 0, "job_coins": jobs.session_coins if jobs else 0,
 		"chain": player.best_chain, "top_speed": player.top_speed, "time": elapsed})
 
 
 func _exit_tree() -> void:
 	if is_instance_valid(hud):
 		hud.pointer = Vector3.INF
+		hud.hint = ""
 		if hud.minimap:
 			hud.minimap.markers = []
 	if tokens:
 		tokens.queue_free()
+	if jobs:
+		if is_instance_valid(hud):
+			hud.jobs = null
+		jobs.queue_free()

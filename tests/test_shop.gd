@@ -23,13 +23,13 @@ func test_catalogue_is_consistent(t) -> void:
 		t.check(Shop.item(d).get("slot", "") == sl[0], "default for %s is in its slot" % sl[0])
 		t.check(Shop.in_slot(sl[0]).size() >= 4, "%s has a real choice" % sl[1])
 	for it in Shop.items():
-		if it.has("model") and it["model"] != "" and it["model"] != "hood":
+		if it.has("model") and it["model"] != "":
 			t.check(ResourceLoader.exists(CharacterRig.GEAR_PATH), "gear model file exists")
 
 
 func test_buying_and_equipping(t) -> void:
 	var before := _fresh()
-	t.check(Shop.owns("pants_navy") and Shop.owns("head_hood"), "free items are owned")
+	t.check(Shop.owns("pants_navy") and Shop.owns("head_bare") and Shop.owns("hero_ren"), "free items are owned")
 	t.check(not Shop.owns("head_cap"), "paid items start locked")
 	t.check(not Shop.buy("head_cap"), "can't buy without coins")
 	t.check(not Shop.equip("head_cap"), "can't wear what you don't own")
@@ -49,7 +49,7 @@ func test_buying_and_equipping(t) -> void:
 	t.check(Shop.look({"shoes": "shoes_gum"})["sole"] == Color(0.55, 0.35, 0.18),
 		"shoe try-on retains its own sole colour independently of the jacket")
 	_sd().data["outfit"]["face"] = "face_visor"  # tampered / unowned
-	t.check(Shop.equipped("face") == "face_none", "unowned saved item falls back to the default")
+	t.check(Shop.equipped("face") == "mask_courier", "unowned saved item falls back to the default")
 	_sd().data = before
 
 
@@ -88,17 +88,53 @@ func test_rig_wears_the_look(t) -> void:
 		if c is MeshInstance3D and c.visible and c.name != "head":
 			shown.append(String(c.name).to_lower())
 	shown.sort()
-	t.check(shown == ["crown", "shades"], "crown + shades on, hood off (%s)" % [shown])
+	t.check(shown == ["crown", "shades"], "crown + shades on (%s)" % [shown])
 	rig.apply_look(Shop.look())
 	shown.clear()
 	for c in head.get_children():
 		if c is MeshInstance3D and c.visible and c.name != "head":
 			shown.append(String(c.name).to_lower())
-	# The courier's lowered hood is sewn into the skinned jacket. Returning
-	# to the default must hide purchased head/face gear and retain that garment.
-	t.check(shown.is_empty() and rig.look_state.head == "hood", "default clears crown and shades")
-	var jacket := rig.skeleton.find_child("Courier_Jacket", true, false) as MeshInstance3D
-	t.check(jacket != null and jacket.visible, "default keeps the authored hooded jacket")
+	t.check(shown.is_empty() and rig.look_state.head == "", "default clears crown and shades")
+	# Default: fitted long-sleeve top and the signature full Courier mask.
+	var vis := func(n: String) -> bool:
+		var mi := rig.skeleton.find_child(n, true, false) as MeshInstance3D
+		return mi != null and mi.visible
+	t.check(vis.call("Top_Long") and not vis.call("Top_Short") and not vis.call("Skin_Arms_Short"), "default long-sleeve top")
+	t.check(vis.call("Mask_courier") and not vis.call("Face_kai") and not vis.call("Hair_buzz_kai"), "signature mask hides the face and hair without clipping")
+	# Short sleeves bare the forearms; a full mask hides the face beneath it.
+	rig.apply_look(Shop.look({"top": "top_short", "hero": "hero_ade", "face": "mask_courier"}))
+	t.check(vis.call("Top_Short") and vis.call("Skin_Arms_Short") and not vis.call("Top_Long"), "short sleeves show the forearms")
+	t.check(vis.call("Mask_courier") and not vis.call("Face_ade") and not vis.call("Hair_crop_ade"), "the Courier mask covers the face")
+	rig.apply_look(Shop.look({"hero": "hero_theo", "face": "mask_domino", "head": "head_beanie"}))
+	t.check(vis.call("Face_theo") and vis.call("Mask_domino") and not vis.call("Hair_theo"), "domino over the face, hair under the beanie")
+	# Hair: Natural = the face's own cut; any cut fits any face; exactly one
+	# hair mesh is drawn, and only when no hood, balaclava or beanie hides it.
+	var hair_shown := func() -> Array:
+		var on := []
+		for mi in rig.skeleton.find_children("Hair_*", "MeshInstance3D", true, false):
+			if mi.visible:
+				on.append(String(mi.name))
+		return on
+	rig.apply_look(Shop.look({"hero": "hero_theo", "face": "face_none"}))
+	t.check(hair_shown.call() == ["Hair_buzz_theo"], "natural hair is the face's own cut (%s)" % [hair_shown.call()])
+	for st: String in ["buzz", "crop", "fade", "curls", "pixie", "bob", "ponytail", "bun"]:
+		rig.apply_look(Shop.look({"hero": "hero_ren", "face": "face_none", "hair": "hair_" + st}))
+		t.check(hair_shown.call() == ["Hair_%s_ren" % st], "%s fits Ren (%s)" % [st, hair_shown.call()])
+	rig.apply_look(Shop.look({"hero": "hero_ren", "face": "mask_balaclava", "hair": "hair_bob"}))
+	t.check(hair_shown.call().is_empty(), "the balaclava hides the hair")
+	# Trying a cut on in the shop takes off what would hide it.
+	t.check(Shop.try_on("hair", "hair_bun")["mask"] == "" and Shop.try_on("top", "top_vest")["mask"] == "courier",
+		"hair try-on drops the hood, other try-ons keep it")
+	var skin_tints := {}
+	for e in rig._hero_materials:
+		if e.region == "skin":
+			skin_tints[str(e.material.get_shader_parameter("tint"))] = true
+	rig.apply_look(Shop.look({"hero": "hero_ade"}))
+	var changed := false
+	for e in rig._hero_materials:
+		if e.region == "skin" and not skin_tints.has(str(e.material.get_shader_parameter("tint"))):
+			changed = true
+	t.check(changed, "each face brings its own skin tone")
 	rig.queue_free()
 
 

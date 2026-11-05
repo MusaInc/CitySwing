@@ -7,7 +7,7 @@ func _initialize() -> void:
 	print("APT layout+homes %d ms" % (Time.get_ticks_msec() - t0))
 	for h in l.apartments.homes:
 		var w := Apartments.window_center(h)
-		print("APT %-10s floor %.1f m above street, building top %.0f m, window %s, out %s" % [h["id"],
+		print("APT %-10s %.1fx%.1f m, %d side windows, floor %.1f m above street, building top %.0f m, window %s, out %s" % [h["id"], float(h["a1"]) - float(h["a0"]), float(h["depth"]), (h["wins"] as Array).size(),
 			Apartments.floor_height(h), float(h["b"]["tiers"][-1][5]) - BuildingMesher.base_of(h["b"]), w.snapped(Vector3.ONE * 0.1),
 			Apartments.outward(h).snapped(Vector3.ONE * 0.01)])
 		var n := Apartments.outward(h)

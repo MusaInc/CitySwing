@@ -16,14 +16,12 @@ extends RefCounted
 ## collision – what you see is exactly what you hit. Each piece has its own
 ## random stream, so adding one never reshuffles the city.
 
-const STADIUM_AT := Vector2(867, 219)
+const STADIUM_AT := Vector2(843, 219)
 const GASHOLDER_AT := Vector2(800, -555)
 const WHEEL_AT := Vector2(135, 219)
 const YARDS_AT := [Vector2(135, 505), Vector2(135, 300)]
 const SHIP_AT := Vector2(240, 423)
 const LIGHTHOUSE_AT := Vector2(8, 560)
-const EL_FROM_X := 440.0      # the elevated railway runs along Valley Road from here east
-const EL_DECK := 14.0
 
 const RED := Color(0.72, 0.12, 0.1)
 const WHITE := Color(0.9, 0.9, 0.87)
@@ -44,7 +42,7 @@ func _init(layout: CityLayout) -> void:
 func rects() -> Dictionary:
 	if _rects.is_empty():
 		_rects = {
-			"stadium": Rect2(STADIUM_AT - Vector2(48, 41), Vector2(96, 82)),
+			"stadium": Rect2(STADIUM_AT - Vector2(75, 65), Vector2(150, 130)),
 			"gasholder": Rect2(GASHOLDER_AT - Vector2(46, 41), Vector2(92, 82)),
 			"wheel": Rect2(WHEEL_AT - Vector2(40, 40), Vector2(80, 80)),
 			"yard": Rect2(YARDS_AT[0] - Vector2(40, 40), Vector2(80, 80)),
@@ -71,52 +69,123 @@ func build(piece: String, rect: Rect2) -> void:
 
 
 # ------------------------------------------------------------- stadium
-## A football ground filling the block: red stands on all four sides, a
-## roof over each, and a floodlight pylon at every corner (66 m, lamp heads
-## angled at the pitch – the anchors that make the east swingable).
+## The Heights Ground: a modern bowl on its own plaza. Two tiers of stepped
+## stands round a rounded-rectangle (superellipse) plan, alternating club
+## red and white sections with darker gangways, a concourse between the
+## tiers, a back wall, and a continuous ring roof held by four cable-stayed
+## masts (80 m) at the diagonals – floodlight banks on their heads and a
+## lamp band round the roof's inner edge. The masts, the stays and the roof
+## rim are anchors (the east's tallest), the roof ring is walkable. Forecourt:
+## a big screen on a pylon and ticket kiosks.
+const STAND_SECTORS := 32
+const BOWL_INNER := Vector2(42.0, 30.0)   # half-sizes of the pitch-side edge
+const BOWL_DEPTH := 26.0
+const SUPER_N := 4.0
+
+
+## Point on the bowl's ring `d` metres out from the pitch edge, at angle t.
+static func _bowl(c: Vector2, t: float, d: float) -> Vector2:
+	var e := 2.0 / SUPER_N
+	var cx := cos(t)
+	var sz := sin(t)
+	var x := signf(cx) * pow(absf(cx), e)
+	var z := signf(sz) * pow(absf(sz), e)
+	return c + Vector2(x * (BOWL_INNER.x + d), z * (BOWL_INNER.y + d))
+
+
 func _stadium(r: Rect2, rng: RandomNumberGenerator) -> void:
 	var k := L._kit("stadium")
-	var inner := r.grow(-2.0)
-	var depth := 15.0
-	var pitch := inner.grow(-depth)
-	# Stands: three stepped tiers rising away from the pitch, then a back wall.
-	for side in 4:
-		for step in 3:
-			var d0 := depth * step / 3.0
-			var d1 := depth * (step + 1) / 3.0
-			var y1 := 3.0 + step * 4.0
-			var col := RED if (step + side) % 2 == 0 else RED.darkened(0.12)
-			_band(k, pitch, side, d0, d1, 0.0, y1, col)
-		_band(k, pitch, side, depth - 1.0, depth, 11.0, 19.0, WHITE.darkened(0.1))  # back wall
-		# Roof: a slab cantilevered over the stand on slim columns at the back.
-		_band(k, pitch, side, 3.0, depth, 21.0, 21.8, WHITE)
-		for f: float in [0.2, 0.5, 0.8]:
-			var p := _side_point(pitch, side, f, depth - 0.5)
-			L._ksolid(k, p.x - 0.35, p.y - 0.35, p.x + 0.35, p.y + 0.35, 19.0, 21.0, STEEL)
-		var a := _side_point(pitch, side, 0.0, 3.0)
-		var b := _side_point(pitch, side, 1.0, 3.0)
-		L._anchor(Vector3(a.x, 20.9, a.y), Vector3(b.x, 20.9, b.y))  # roof front edge
-	# Floodlight pylons in the open corners.
-	var corners := [inner.position + Vector2(5, 5), Vector2(inner.end.x - 5, inner.position.y + 5),
-		inner.end - Vector2(5, 5), Vector2(inner.position.x + 5, inner.end.y - 5)]
-	for c: Vector2 in corners:
-		var h := 66.0
-		_lattice_tower(k, Vector3(c.x, 0.0, c.y), h, 3.2, STEEL.lightened(0.25))
-		var to_pitch := (pitch.get_center() - c).normalized()
+	var c := r.get_center()
+	var pitch := Rect2(c - Vector2(36, 23.5), Vector2(72, 47))
+	# Stands: [d0, d1, top] radial bands, lower tier, concourse, upper tier.
+	var bands := [[0.0, 3.0, 1.2], [3.0, 6.0, 3.4], [6.0, 9.0, 5.6], [9.0, 12.0, 7.8], [12.0, 14.5, 9.0],
+		[14.5, 17.5, 13.0], [17.5, 20.5, 16.0], [20.5, 23.5, 19.0], [23.5, 25.5, 22.0], [25.5, BOWL_DEPTH, 27.0]]
+	var n := STAND_SECTORS
+	for i in n:
+		var t0 := TAU * i / n
+		var t1 := TAU * (i + 1) / n
+		var gangway := i % 4 == 0
+		for bi in bands.size():
+			var bd: Array = bands[bi]
+			var col: Color
+			if bi == 4:
+				col = Color(0.55, 0.55, 0.57)                          # concourse
+			elif bi == bands.size() - 1:
+				col = WHITE.darkened(0.12)                             # back wall
+			elif gangway:
+				col = Color(0.3, 0.3, 0.32)
+			else:
+				col = (RED if (i / 4 + bi) % 2 == 0 else WHITE).darkened(0.06 * (bi % 2))
+			var q := PackedVector2Array([_bowl(c, t0, bd[0]), _bowl(c, t1, bd[0]), _bowl(c, t1, bd[1]), _bowl(c, t0, bd[1])])
+			L._kprism(k, q, 0.0, bd[2], col)
+		# Ring roof: a slab from over the upper tier to past the back wall,
+		# its inner edge lit.
+		var roof := PackedVector2Array([_bowl(c, t0, 9.0), _bowl(c, t1, 9.0), _bowl(c, t1, BOWL_DEPTH + 2.5),
+			_bowl(c, t0, BOWL_DEPTH + 2.5)])
+		L._kprism(k, roof, 30.0, 31.0, WHITE)
+		var lamp := PackedVector2Array([_bowl(c, t0, 9.0), _bowl(c, t1, 9.0), _bowl(c, t1, 10.2), _bowl(c, t0, 10.2)])
+		L._kprism(k, lamp, 29.3, 30.0, Color(0.98, 0.96, 0.85))
+		var ea := _bowl(c, t0, 9.0)
+		var eb := _bowl(c, t1, 9.0)
+		L._anchor(Vector3(ea.x, 29.6, ea.y), Vector3(eb.x, 29.6, eb.y))       # roof rim
+		# Outside: red fins on every sector, a glazed concourse band.
+		var fp := _bowl(c, t0, BOWL_DEPTH + 0.35)
+		var fo := (fp - c).normalized() * 0.35
+		L._kbeam(k, Vector3(fp.x + fo.x, 1.5, fp.y + fo.y), Vector3(fp.x + fo.x, 27.5, fp.y + fo.y), 0.7, 0.7,
+			RED.darkened(0.1), false)
+		var ga := _bowl(c, t0, BOWL_DEPTH + 0.15)
+		var gb := _bowl(c, t1, BOWL_DEPTH + 0.15)
+		L._kbeam(k, Vector3(ga.x, 10.5, ga.y), Vector3(gb.x, 10.5, gb.y), 0.3, 2.4, Color(0.16, 0.22, 0.27), false)
+		# Roof columns behind the back wall every other sector.
+		if i % 2 == 0:
+			var cp := _bowl(c, t0, BOWL_DEPTH + 1.2)
+			L._kbeam(k, Vector3(cp.x, 0.0, cp.y), Vector3(cp.x, 30.0, cp.y), 0.8, 0.8, STEEL.lightened(0.3))
+	# Four cable-stayed masts at the diagonals, floodlights on their heads.
+	for di in 4:
+		var t := PI * 0.25 + PI * 0.5 * di
+		var base := _bowl(c, t, BOWL_DEPTH + 9.0)
+		var top := Vector3(base.x, 80.0, base.y)
+		L._kbeam(k, Vector3(base.x, 0.0, base.y), top, 2.4, 2.4, Color(0.9, 0.9, 0.88))
+		L._ksolid(k, base.x - 2.6, base.y - 2.6, base.x + 2.6, base.y + 2.6, 0.0, 1.2, Color(0.6, 0.59, 0.56))
+		for o: float in [-0.35, 0.0, 0.35]:
+			var rp := _bowl(c, t + o, BOWL_DEPTH + 1.0)
+			var to := Vector3(rp.x, 31.0, rp.y)
+			L._kbeam(k, top + Vector3.DOWN * 3.0, to, 0.22, 0.22, STEEL.lightened(0.35), false)
+			L._anchor(top + Vector3.DOWN * 3.0 + (to - top) * 0.3, top + Vector3.DOWN * 3.0 + (to - top) * 0.7)
+		var to_pitch := (c - base).normalized()
 		var side := Vector2(-to_pitch.y, to_pitch.x)
-		var hc := Vector3(c.x, h + 2.5, c.y) + Vector3(to_pitch.x, 0.0, to_pitch.y) * 1.5
-		var hs := Vector3(side.x, 0.0, side.y) * 5.0
-		L._kbeam(k, hc - hs, hc + hs, 1.0, 4.5, Color(0.92, 0.92, 0.85))  # lamp bank
-		L._kbeam(k, hc - hs + Vector3.UP * 2.6, hc + hs + Vector3.UP * 2.6, 0.5, 0.5, STEEL)
-		L._anchor(hc - hs + Vector3.DOWN * 2.4, hc + hs + Vector3.DOWN * 2.4)
-	# Goals (posts and crossbars) on the pitch – something to land beside.
+		var hc := top + Vector3(to_pitch.x, 0.0, to_pitch.y) * 2.0 + Vector3.DOWN * 1.5
+		var hs := Vector3(side.x, 0.0, side.y) * 5.5
+		L._kbeam(k, hc - hs, hc + hs, 1.0, 4.0, Color(0.95, 0.95, 0.88))  # lamp bank
+		L._kbeam(k, hc - hs + Vector3.UP * 2.4, hc + hs + Vector3.UP * 2.4, 0.5, 0.5, STEEL)
+		L._anchor(hc - hs + Vector3.DOWN * 2.2, hc + hs + Vector3.DOWN * 2.2)
+	# Goals.
 	for e: float in [-1.0, 1.0]:
-		var gx := pitch.get_center().x + e * (pitch.size.x * 0.5 - 3.0)
-		var gz := pitch.get_center().y
-		for s: float in [-1.0, 1.0]:
-			L._kbeam(k, Vector3(gx, 0.15, gz + s * 3.7), Vector3(gx, 2.6, gz + s * 3.7), 0.14, 0.14, WHITE, false)
-		L._kbeam(k, Vector3(gx, 2.6, gz - 3.8), Vector3(gx, 2.6, gz + 3.8), 0.14, 0.14, WHITE, false)
-	L.greens.append(r)  # grass pitch
+		var gx := c.x + e * (pitch.size.x * 0.5 - 1.0)
+		for s2: float in [-1.0, 1.0]:
+			L._kbeam(k, Vector3(gx, 0.15, c.y + s2 * 3.7), Vector3(gx, 2.6, c.y + s2 * 3.7), 0.14, 0.14, WHITE, false)
+		L._kbeam(k, Vector3(gx, 2.6, c.y - 3.8), Vector3(gx, 2.6, c.y + 3.8), 0.14, 0.14, WHITE, false)
+	# Forecourt: a big screen on a pylon at the south-west corner of the
+	# plaza, ticket kiosks by the gates.
+	var sc := Vector2(r.position.x + 9.0, r.end.y - 9.0)
+	L._kbeam(k, Vector3(sc.x, 0.0, sc.y), Vector3(sc.x, 14.0, sc.y), 1.2, 1.2, STEEL)
+	var face := (c - sc).normalized()
+	var fs := Vector3(-face.y, 0.0, face.x) * 5.0
+	var sp := Vector3(sc.x, 17.0, sc.y)
+	L._kbeam(k, sp - fs, sp + fs, 0.6, 6.0, Color(0.08, 0.08, 0.1))
+	L._kbeam(k, sp - fs * 0.92 + Vector3(face.x, 0, face.y) * 0.32, sp + fs * 0.92 + Vector3(face.x, 0, face.y) * 0.32,
+		0.05, 5.2, RED.lightened(0.15), false)
+	L._anchor(sp - fs + Vector3.UP * 3.0, sp + fs + Vector3.UP * 3.0)
+	for g in 4:
+		var gt := PI * 0.5 * g
+		var kp := _bowl(c, gt, BOWL_DEPTH + 6.0)
+		var kd := (kp - c).normalized()
+		var ks := Vector2(-kd.y, kd.x)
+		for s3: float in [-1.0, 1.0]:
+			var kc := kp + ks * s3 * 7.0
+			L._ksolid(k, kc.x - 1.6, kc.y - 1.6, kc.x + 1.6, kc.y + 1.6, 0.0, 2.8, Color(0.75, 0.16, 0.12))
+			L._ksolid(k, kc.x - 1.9, kc.y - 1.9, kc.x + 1.9, kc.y + 1.9, 2.8, 3.1, WHITE)
+	L.greens.append(pitch)  # the grass pitch (the forecourt is paved)
 	L.reserved.append(r)
 
 
@@ -358,67 +427,6 @@ func ship(basin: Rect2) -> void:
 		L._anchor(foot + Vector3.UP * 2.0 + (tip - foot - Vector3.UP * 2.0) * 0.3, tip)
 	# Bow mast with a light.
 	L._kbeam(k, Vector3(bow + 2.0, deck, c.y), Vector3(bow + 2.0, deck + 8.0, c.y), 0.3, 0.3, WHITE)
-
-
-# -------------------------------------------------------- elevated rail
-## Elevated railway along Valley Road (curving with it): deck segments on
-## steel bents at the kerbs (never in a traffic lane or a junction), side
-## girders and rails; a three-car shuttle runs on it (RailNetwork/Trains).
-## Run along it, swing under it, land on the train.
-func elevated_rail() -> void:
-	var k := L._kit("el")
-	var road: Dictionary = L.roads.by_name.get("valley", {})
-	if road.is_empty():
-		return
-	var keep: PackedVector2Array = Geometry2D.offset_polygon(L.coast, -60.0)[0]
-	var path := PackedVector2Array()
-	for q in CityRoads._simplify(road["pts"], 0.4):
-		if q.x >= EL_FROM_X and Geometry2D.is_point_in_polygon(q, keep):
-			path.append(q)
-	if path.size() < 2:
-		return
-	var deck := EL_DECK
-	var half := 5.0
-	var green := Color(0.3, 0.4, 0.38)
-	for i in path.size() - 1:
-		var a := Vector3(path[i].x, deck - 0.5, path[i].y)
-		var b := Vector3(path[i + 1].x, deck - 0.5, path[i + 1].y)
-		var d := (b - a).normalized()
-		var side := Vector3(-d.z, 0.0, d.x)
-		var ext := d * 0.6  # overlap the joints
-		L._kbeam(k, a - ext, b + ext, half * 2.0, 1.0, Color(0.36, 0.37, 0.38))
-		for s: float in [-1.0, 1.0]:
-			var o: Vector3 = side * s * (half + 0.25)
-			L._kbeam(k, a - ext + o + Vector3(0, -0.6, 0), b + ext + o + Vector3(0, -0.6, 0), 0.5, 2.45, green)
-			for r: float in [-0.75, 0.75]:
-				var ro: Vector3 = side * (s * 2.0 + r) + Vector3(0, 0.58, 0)
-				L._kbeam(k, a + ro, b + ro, 0.12, 0.16, STEEL, false)
-			L._anchor(a + o * 1.06 + Vector3(0, -1.9, 0), b + o * 1.06 + Vector3(0, -1.9, 0))
-	# Bents every ~24 m, skipping junctions.
-	var total := CityRoads.length_of(path)
-	var t := 6.0
-	while t < total - 4.0:
-		var p := _at(path, t)
-		var dir := (_at(path, t + 1.0) - _at(path, t - 1.0)).normalized()
-		var sd := Vector2(-dir.y, dir.x)
-		var ok := true
-		for s: float in [-1.0, 1.0]:
-			var f: Vector4 = L.roads.field_at(p + sd * s * 11.8)
-			if f.w < 4.0:
-				ok = false
-		if ok:
-			for s: float in [-1.0, 1.0]:
-				var c: Vector2 = p + sd * s * 11.8
-				var gy := L.terrain.road_y(c.x, c.y)
-				L._kbeam(k, Vector3(c.x, gy - 0.3, c.y), Vector3(c.x, deck - 2.2, c.y), 0.9, 0.9, green)
-			var e0 := p - sd * 12.0
-			var e1 := p + sd * 12.0
-			L._kbeam(k, Vector3(e0.x, deck - 2.8, e0.y), Vector3(e1.x, deck - 2.8, e1.y), 1.2, 1.2, green)
-			t += 24.0
-		else:
-			t += 4.0
-	# The trains themselves move (Trains): register the line.
-	L.rail.add_valley(path, deck)
 
 
 ## Point `t` metres along a polyline (clamped).

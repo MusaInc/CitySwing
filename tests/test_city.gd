@@ -34,7 +34,7 @@ func test_layout_has_districts_landmarks_and_swing_heights(t) -> void:
 	var kinds := {}
 	for lm in l.landmarks:
 		kinds[lm[0]] = true
-	for k in ["clock_crown", "harbour_dome", "beacon", "cathedral_top", "viaduct"]:
+	for k in ["clock_crown", "harbour_dome", "beacon", "cathedral_top"]:
 		t.check(kinds.has(k), "landmark %s placed" % k)
 	t.check(l.blocks.filter(func(bk): return bk["kind"] in ["park", "plaza"]).size() > 3,
 		"parks / plazas give wide launch gaps")
@@ -260,7 +260,7 @@ func test_expert_swings_through_generated_city(t) -> void:
 	var w := CityWorld.new()
 	add_child(w)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 21
+	rng.seed = int(OS.get_environment("CITY_SEED")) if OS.get_environment("CITY_SEED") != "" else 21
 	var dists: Array[float] = []
 	var touches: Array[int] = []
 	var swings: Array[int] = []

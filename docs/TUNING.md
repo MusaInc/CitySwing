@@ -23,6 +23,26 @@ device (saved per device in `user://settings.cfg`, "Reset defaults" clears them)
 | `wall_kick_speed`, `wall_kick_up` | 11, 8 m/s | Recovery when pinned against a facade. |
 | `substeps` | 4 | Rope solver substeps per 60 Hz tick. |
 
+### Player flow layer (people only)
+
+These apply only when a person is playing (`Controls.human`). The autopilot,
+the recorded courses and the model tests keep the plain model above.
+
+| Parameter | Default | Feel |
+|---|---|---|
+| `flow_accel` / `flow_cruise_speed` | 7 m/s² / 38 m/s | A taut web carries you through the low part of the arc, easing off towards the cruise speed (none on a steep climb). |
+| `flow_drag_scale` | 0.75 | Air drag multiplier: momentum carries between webs. |
+| `flow_release_boost` / `flow_release_lift` | 1.05 / 3 m/s | Letting go on the way up (below cruise) throws you on out of the arc. |
+| `wall_run_min_speed` | 8 m/s | Hitting a facade this fast (short of a head-on knockout) starts a wall run, unless the stick pulls away. |
+| `wall_run_time` | 1.1 s | Longest wall run: up the wall head-on, along it at an angle, then a push-off into the air (JUMP pushes harder). Not a climb. |
+| `wall_run_up_decel` / `wall_run_side_decel` | 11 / 3 m/s² | How quickly the run up / along the wall runs out. |
+| `wall_run_launch_out` / `wall_run_launch_up` | 6 / 6.5 m/s | Push-off off the wall. |
+
+Near a roof edge (feet within about 5 m of it), pushing at the wall scrambles
+over the lip, round a cornice if there is one (`Player._top_out`).
+`tools/flow_probe.gd` plays with human input and reports swing speeds
+(`--plain` turns the flow layer off) and the wall moves at real facades.
+
 ## Checking a change
 
 1. `tools/build.sh`. The physics tests pin the model's behaviour (period,

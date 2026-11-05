@@ -13,7 +13,8 @@ const SIZE := 192
 ## Framing per slot: [look-at height above the feet, camera distance, yaw].
 const FRAME := {
 	"suit": [1.28, 1.25, 0.35], "pants": [0.62, 1.55, 0.3], "shoes": [0.12, 0.85, 0.75],
-	"gloves": [0.98, 0.7, -1.25], "head": [1.66, 0.72, 0.3], "face": [1.68, 0.6, 0.15],
+	"gloves": [0.98, 0.7, -1.25], "head": [1.66, 0.72, 0.3], "face": [1.68, 0.6, 0.15], "hero": [1.68, 0.58, 0.25], "hair": [1.7, 0.62, 0.9],
+	"top": [1.28, 1.25, 0.35],
 	"web": [1.0, 0.62, -1.4], "gadget": [1.05, 2.1, 2.5],
 }
 
@@ -108,7 +109,7 @@ func _run() -> void:
 		if it.is_empty():
 			continue
 		var slot: String = it["slot"]
-		var lk := Shop.look({slot: id})
+		var lk := Shop.try_on(slot, id)
 		_rig.apply_look(lk)
 		_web.visible = slot == "web"
 		if _web.visible:

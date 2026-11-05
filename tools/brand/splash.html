@@ -1,9 +1,14 @@
 <!doctype html><meta charset="utf-8"><link rel="stylesheet" href="brand.css"><script src="wordmark.js"></script>
 <style>
 body{width:100vw;height:100vh;overflow:hidden;background:var(--ink);color:var(--web)}
+/* The real downtown towers at sunset (a game render), deep in shadow. */
+#city{position:absolute;inset:-4%;background:url(art/sky_canyon.png) center 30%/cover no-repeat;filter:brightness(.34) saturate(.8) blur(5px)}
+#tone{position:absolute;inset:0;background:radial-gradient(ellipse 34% 46% at 40% 47%,rgba(255,170,60,.34),rgba(255,120,50,.08) 60%,rgba(17,13,38,0) 100%),
+  radial-gradient(ellipse at 50% 50%,rgba(17,13,38,.15) 30%,rgba(17,13,38,.9) 85%)}
 #wm{position:absolute;width:36%;height:28%;left:32%;top:32%}
 .studio{position:absolute;top:65%;left:0;right:0;text-align:center;font:600 1.5vh Outfit;letter-spacing:.24em;opacity:.46}
 </style>
-<svg id="wm" role="img" aria-label="City Swing"></svg>
+<div id="city"></div><div id="tone"></div>
+<svg id="wm" role="img" aria-label="CitySwing"></svg>
 <div class="studio">A MUSA STUDIOS GAME</div>
 <script>document.fonts.load("900 100px Outfit").then(() => drawWordmark(document.getElementById("wm")));</script>

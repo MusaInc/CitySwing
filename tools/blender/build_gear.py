@@ -20,10 +20,54 @@ from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(__file__))
 import build_kit as K  # noqa: E402
-import build_character as C  # noqa: E402  (J, tube; its build() only runs as __main__)
 
 OUT = K.OUT
-HC = C.J["head"]
+# The head joint of the character's bind pose (build_character.py J["head"]).
+# That builder exports the whole character at import time, so the two
+# helpers gear needs live here instead of being imported from it.
+HC = Vector((0, 0, 1.64))
+
+
+def tube(name, rings, segs=20, cap=True, front=Vector((0, 1, 0))):
+    """Loft along a polyline. rings: [(centre, rx, ry)] (rx across, ry front-back)."""
+    bm = bmesh.new()
+    loops = []
+    pts = [Vector(r[0]) for r in rings]
+    for i, (c, rx, ry, *_rest) in enumerate(rings):
+        c = Vector(c)
+        t = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+        f = (front - t * front.dot(t)).normalized()
+        sd = f.cross(t).normalized()
+        loops.append([bm.verts.new(c + sd * math.cos(k / segs * math.tau) * rx + f * math.sin(k / segs * math.tau) * ry)
+                      for k in range(segs)])
+    for r0, r1 in zip(loops, loops[1:]):
+        for k in range(segs):
+            j = (k + 1) % segs
+            bm.faces.new((r0[k], r0[j], r1[j], r1[k]))
+    if cap:
+        for ring_ in (loops[0], loops[-1]):
+            bm.faces.new(ring_)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return K.new_obj(name, bm)
+
+
+def smooth_path(pts, n):
+    """Catmull-Rom through pts, n points out."""
+    pts = [Vector(p) for p in pts]
+    out = []
+    for k in range(n):
+        u = k / (n - 1) * (len(pts) - 1)
+        i = min(int(u), len(pts) - 2)
+        t = u - i
+        p0, p1, p2, p3 = pts[max(i - 1, 0)], pts[i], pts[i + 1], pts[min(i + 2, len(pts) - 1)]
+        out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t
+                          + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t))
+    return out
+
+
+class C:  # what the gear used from the old character builder
+    J = {"head": HC}
+    tube = staticmethod(tube)
 
 
 def o(x, y, z):
@@ -138,14 +182,27 @@ def build():
 
     # ---- Headphones: padded band over the crown, big cups on the ears,
     # glowing rings (web colour).
-    band = C.tube("hp_band", [(o(sx * 0.11 * math.cos(a), -0.012, 0.118 + 0.13 * math.sin(a)), 0.008, 0.014)
-                              for sx, a in [(-1, 0.25), (-1, 0.8), (-1, 1.3), (1, 1.3), (1, 0.8), (1, 0.25)]], segs=10)
+    # The band follows the measured hair profile (CharacterRig.GEAR_FIT
+    # moves this frame 6.8 cm forward and 3.2 cm down onto the real head):
+    # ~1 cm off the hair all the way over, from cup to cup.
+    prof = [(0.122, 0.112), (0.112, 0.16), (0.104, 0.2), (0.088, 0.236), (0.058, 0.262), (0.0, 0.274)]
+    half = [o(x, -0.012, z) for x, z in prof]
+    path = smooth_path(half + [o(-x, -0.012, z) for x, z in reversed(prof[:-1])], 33)
+    band = C.tube("hp_band", [(p, 0.011, 0.016) for p in path], segs=10, front=Vector((0, 1, 0)))
+    for pl in band.data.polygons:
+        pl.use_smooth = True
     K.paint(band, strap)
     parts = [band]
     for sx in (-1, 1):
-        cup = placed(K.cyl("hp_cup", 0.042, 0.03, (0, 0, -0.015), gear, 20), o(sx * 0.112, -0.008, 0.112), (0, math.pi / 2, 0))
-        pad = placed(K.cyl("hp_pad", 0.038, 0.016, (0, 0, -0.008), strap, 20), o(sx * 0.094, -0.008, 0.112), (0, math.pi / 2, 0))
-        parts += [cup, pad, ring("hp_glow", o(sx * 0.1275, -0.008, 0.112), 0.028, 0.0045, glow, axis="X")]
+        # Cups sit outside the ear (the faces' ears reach x 0.13).
+        cup = placed(K.cyl("hp_cup", 0.045, 0.032, (0, 0, -0.016), gear, 28), o(sx * 0.13, -0.008, 0.112), (0, math.pi / 2, 0))
+        pad = placed(K.cyl("hp_pad", 0.041, 0.018, (0, 0, -0.009), strap, 28), o(sx * 0.112, -0.008, 0.112), (0, math.pi / 2, 0))
+        yoke = C.tube("hp_yoke", [(o(sx * 0.124, -0.012, 0.15), 0.006, 0.006), (o(sx * 0.13, -0.012, 0.125), 0.006, 0.006)], segs=8)
+        K.paint(yoke, gear)
+        parts += [cup, pad, yoke, ring("hp_glow", o(sx * 0.147, -0.008, 0.112), 0.03, 0.0045, glow, axis="X")]
+        for ob_ in (cup, pad):
+            for pl in ob_.data.polygons:
+                pl.use_smooth = True
     item("headphones", parts)
 
     # ---- Crown: a gold band with points and jewels, sat on the hair.
@@ -196,14 +253,7 @@ def build():
                 lambda d: d.y > -0.3 and abs(d.z) < 0.5, gear, 0.006, 40, 12)
     item("visor", [vis, line, rim])
 
-    # ---- Mask: a bandana over the nose and mouth, knotted behind.
-    mask = shell("mask_cloth", o(0, 0.0, 0.07), Vector((0.094, 0.122, 0.07)),
-                 lambda d: d.y > -0.55 and d.z < 0.62 and d.z > -0.75, jacket, 0.006, 36, 20)
-    knot = K.sphere("mask_knot", 0.018, o(0, -0.112, 0.09), jacket_dk, 10, 8, (1.2, 0.8, 1.0))
-    tails = [K.paint(C.tube("mask_tail", [(o(sx * 0.01, -0.118, 0.085), 0.01, 0.004),
-                                          (o(sx * 0.03, -0.14, 0.02), 0.012, 0.003)], segs=6), jacket_dk) for sx in (-1, 1)]
-    seam = K.box("mask_seam", (0.004, 0.004, 0.04), o(0, 0.123, 0.07), white)  # a light stitch line down the front
-    item("mask", [mask, knot, seam] + tails)
+    # (The bandana is a fitted mask in build_character.py: Mask_bandana.)
 
     # ================================================================ gadgets
     # Built in their bone's local frame (origin at the joint, Blender +Y =
@@ -217,64 +267,78 @@ def build():
         ob.location = (0, 0, 0)
         items.append(ob)
 
-    # ---- Jet boots: a thruster pod behind each heel (foot pivot: ankle
-    # origin, toes +Y, sole bottom at z -0.13), and its flame.
+    # ---- Jet boots: a thruster pod against the back of each heel (foot
+    # pivot = ankle; toes +Y; the trainer's heel is at y -0.056, its sole at
+    # z -0.056, its collar at z +0.047), held by a strap round the ankle just above it.
     for side in ("l", "r"):
-        # Up the back of the ankle, nozzle just above the heel.
-        pod = K.cyl("jet_pod", 0.03, 0.09, (0, -0.1, -0.06), gear, 16)
-        cap = K.sphere("jet_cap", 0.03, (0, -0.1, 0.03), gear, 14, 8, (1, 1, 0.7))
-        nozzle = K.cyl("jet_nozzle", 0.026, 0.02, (0, -0.1, -0.08), metal, 16, r2=0.033)
-        band = K.cyl("jet_band", 0.0315, 0.008, (0, -0.1, -0.03), glow, 16)
-        strap_ = K.box("jet_strap", (0.11, 0.035, 0.014), (0, -0.07, -0.01), strap)
+        pod = K.cyl("jet_pod", 0.024, 0.075, (0, -0.074, -0.025), gear, 18)
+        cap = K.sphere("jet_cap", 0.024, (0, -0.074, 0.05), gear, 16, 8, (1, 1, 0.6))
+        nozzle = K.cyl("jet_nozzle", 0.027, 0.018, (0, -0.074, -0.043), metal, 18, r2=0.02)
+        band = K.cyl("jet_band", 0.0255, 0.007, (0, -0.074, 0.02), glow, 18)
+        strap_ = ring("jet_strap", (0, 0.0, 0.062), 0.05, 0.007, strap, segs=32, scale=(0.96, 1.5, 1.0))
+        for ob_ in (pod, nozzle, band):
+            for pl in ob_.data.polygons:
+                pl.use_smooth = True
         gadget("jet_" + side, [pod, cap, nozzle, band, strap_])
-        # Cones wide at the nozzle (z -0.135), tips pointing down.
-        f1 = K.cyl("jet_flame", 0.006, 0.26, (0, -0.1, -0.34), flame, 14, r2=0.036)
-        f2 = K.cyl("jet_core", 0.003, 0.16, (0, -0.1, -0.24), glow, 10, r2=0.018)
+        # Cones wide at the nozzle (z -0.043), tips pointing down.
+        f1 = K.cyl("jet_flame", 0.005, 0.24, (0, -0.074, -0.283), flame, 14, r2=0.03)
+        f2 = K.cyl("jet_core", 0.003, 0.15, (0, -0.074, -0.193), glow, 10, r2=0.015)
         gadget("jet_%s_fire" % side, [f1, f2])
 
     # ---- Glider pack on the back (chest pivot; the spool housing reaches
     # y -0.19): two folded wing slats, and the open wings shown in a glide.
-    folded = [K.box("glider_case", (0.2, 0.035, 0.07), (0, -0.215, 0.22), gear, bevel=0.012)]
+    folded = [K.box("glider_case", (0.2, 0.035, 0.07), (0, -0.11, 0.22), gear, bevel=0.012)]
     for sx in (-1, 1):
         slat = placed(K.box("glider_slat", (0.05, 0.016, 0.32), (0, 0, 0), jacket, bevel=0.008),
-                      (sx * 0.1, -0.215, 0.07), (0, sx * math.radians(28), 0))
+                      (sx * 0.1, -0.11, 0.07), (0, sx * math.radians(28), 0))
         folded.append(slat)
+    # Harness: a strap from the pack over each shoulder to the chest.
+    for sx in (-1, 1):
+        hp = [(sx * 0.085, -0.1, 0.2), (sx * 0.09, -0.075, 0.27), (sx * 0.09, -0.01, 0.305), (sx * 0.088, 0.065, 0.28),
+              (sx * 0.085, 0.11, 0.2)]
+        folded.append(K.paint(C.tube("glider_harness", [(Vector(p), 0.012, 0.004) for p in smooth_path(hp, 12)], segs=8,
+                                     front=Vector((sx, 0, 0))), strap))
     gadget("glider", folded)
-    wings = [K.box("glider_case", (0.2, 0.035, 0.07), (0, -0.215, 0.22), gear, bevel=0.012)]
+    wings = [K.box("glider_case", (0.2, 0.035, 0.07), (0, -0.11, 0.22), gear, bevel=0.012)]
     for sx in (-1, 1):
         bm = bmesh.new()
         outline = [(0.06, 0.24), (0.45, 0.2), (0.86, 0.08), (0.8, 0.0), (0.55, -0.06), (0.3, -0.12), (0.08, -0.08)]
-        vs = [bm.verts.new(Vector((sx * x, -0.215 - 0.12 * x * x, z))) for x, z in outline]
+        vs = [bm.verts.new(Vector((sx * x, -0.11 - 0.12 * x * x, z))) for x, z in outline]
         bm.faces.new(vs if sx > 0 else list(reversed(vs)))
         bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.012)
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         wings.append(K.paint(K.new_obj("glider_wing", bm), jacket))
-        spar = C.tube("glider_spar", [(Vector((sx * 0.06, -0.216, 0.24)), 0.008, 0.008),
-                                      (Vector((sx * 0.45, -0.24, 0.205)), 0.007, 0.007),
-                                      (Vector((sx * 0.86, -0.305, 0.085)), 0.005, 0.005)], segs=6)
+        spar = C.tube("glider_spar", [(Vector((sx * 0.06, -0.111, 0.24)), 0.008, 0.008),
+                                      (Vector((sx * 0.45, -0.135, 0.205)), 0.007, 0.007),
+                                      (Vector((sx * 0.86, -0.2, 0.085)), 0.005, 0.005)], segs=6)
         wings.append(K.paint(spar, gear))
-        wings.append(K.sphere("glider_tip", 0.012, (sx * 0.86, -0.305, 0.085), glow, 8, 6))
+        wings.append(K.sphere("glider_tip", 0.012, (sx * 0.86, -0.2, 0.085), glow, 8, 6))
     gadget("glider_open", wings)
 
     # ---- Chrono watch on the left wrist (forearm pivot: elbow origin, arm
     # along -Z, back of the forearm +Y).
-    watch = [K.paint(C.tube("chrono_strap", [(Vector((0, 0.005, -0.198)), 0.046, 0.047),
-                                             (Vector((0, 0.005, -0.232)), 0.046, 0.047)], segs=16), strap),
-             K.box("chrono_case", (0.062, 0.024, 0.06), (0, 0.052, -0.215), metal, bevel=0.008),
-             K.box("chrono_face", (0.048, 0.006, 0.046), (0, 0.066, -0.215), glow),
-             K.box("chrono_crown", (0.012, 0.012, 0.01), (0.036, 0.052, -0.215), metal)]
+    watch = [K.paint(C.tube("chrono_strap", [(Vector((0, 0.002, -0.2)), 0.034, 0.035),
+                                             (Vector((0, 0.002, -0.224)), 0.034, 0.035)], segs=20), strap),
+             K.box("chrono_case", (0.04, 0.012, 0.04), (0, 0.04, -0.212), metal, bevel=0.005),
+             K.box("chrono_face", (0.032, 0.004, 0.032), (0, 0.0465, -0.212), glow),
+             K.box("chrono_crown", (0.008, 0.008, 0.007), (0.023, 0.04, -0.212), metal)]
     gadget("chrono", watch)
 
-    # ---- Coin magnet clipped to the right hip (hips pivot; belt at z ~0,
-    # radius ~0.176 to the side): a horseshoe hanging prongs-down.
-    arc = [(Vector((0.198, -0.02 + 0.05 * math.cos(a), -0.04 + 0.05 * math.sin(a))), 0.016, 0.016)
-           for a in [i * math.pi / 8 for i in range(9)]]
-    shoe = K.paint(C.tube("magnet_arc", arc, segs=10, front=Vector((1, 0, 0))), ruby)
+    # ---- Coin magnet clipped to the belt at the back of the right hip
+    # (hips pivot; belt at z ~0, the seat's surface at y ~-0.1), hanging
+    # prongs-down and facing back, where the chase camera sees it.
+    cx, cy = 0.1, -0.118
+    arc = [(Vector((cx + 0.034 * math.cos(a), cy, -0.045 + 0.034 * math.sin(a))), 0.013, 0.013)
+           for a in [i * math.pi / 10 for i in range(11)]]
+    shoe = K.paint(C.tube("magnet_arc", arc, segs=12, front=Vector((0, -1, 0))), ruby)
     mag = [shoe]
-    for sy in (-1, 1):
-        mag.append(K.cyl("magnet_prong", 0.016, 0.05, (0.198, -0.02 + sy * 0.05, -0.09), ruby, 10))
-        mag.append(K.cyl("magnet_tip", 0.0165, 0.022, (0.198, -0.02 + sy * 0.05, -0.112), glow, 10))
-    mag.append(K.box("magnet_clip", (0.012, 0.03, 0.04), (0.183, -0.02, 0.005), metal))
+    for sx in (-1, 1):
+        mag.append(K.cyl("magnet_prong", 0.013, 0.04, (cx + sx * 0.034, cy, -0.085), ruby, 12))
+        mag.append(K.cyl("magnet_tip", 0.0135, 0.016, (cx + sx * 0.034, cy, -0.101), glow, 12))
+    mag.append(K.box("magnet_clip", (0.016, 0.012, 0.05), (cx, cy + 0.008, -0.006), metal, bevel=0.003))
+    for ob_ in mag:
+        for pl in ob_.data.polygons:
+            pl.use_smooth = True
     gadget("magnet", mag)
 
     bpy.ops.object.select_all(action="DESELECT")

@@ -77,14 +77,14 @@ func attach_player(p: Player) -> void:
 	player = p
 	p.grapple_fired.connect(func(_t, _hit): play("grapple_fire", -4.0, randf_range(0.95, 1.08)))
 	p.attached.connect(func(_a):
-		play("grapple_attach", -3.0)
+		play("grapple_attach", -3.0, randf_range(0.93, 1.07))
 		Settings.haptic(12, 0.35))
-	p.grapple_missed.connect(func(): play("grapple_miss", -8.0))
+	p.grapple_missed.connect(func(): play("grapple_miss", -8.0, randf_range(0.92, 1.08)))
 	p.released.connect(func(v: Vector3):
 		play("release_whoosh", linear_to_db(clampf(v.length() / 35.0, 0.2, 1.0)), 0.9 + v.length() / 120.0)
 		Settings.haptic(8, 0.2))
 	p.rope_snapped.connect(func(spd: float):
-		play("rope_snap", linear_to_db(clampf(spd / 12.0, 0.2, 1.0)))
+		play("rope_snap", linear_to_db(clampf(spd / 12.0, 0.2, 1.0)), randf_range(0.94, 1.06))
 		Settings.haptic(20, clampf(spd / 15.0, 0.2, 0.8)))
 	p.perfect_release.connect(func(streak: int):
 		# A rising chime: each perfect in a row climbs a semitone (max an octave).
@@ -92,9 +92,9 @@ func attach_player(p: Player) -> void:
 		Settings.haptic(18, 0.55))
 	p.landed.connect(_on_landed)
 	p.impact.connect(func(spd: float):
-		play("impact", linear_to_db(clampf(spd / 30.0, 0.3, 1.0)))
+		play("impact", linear_to_db(clampf(spd / 30.0, 0.3, 1.0)), randf_range(0.92, 1.05))
 		Settings.haptic(int(clampf(spd * 3.0, 40.0, 120.0)), 1.0))
-	p.launched.connect(func(): play("wall_kick", -4.0, 1.2))
+	p.launched.connect(func(): play("wall_kick", -4.0, randf_range(1.12, 1.25)))
 	p.bumped.connect(func(spd: float, _n: Vector3):
 		play("bump", linear_to_db(clampf(spd / 10.0, 0.25, 0.9)), randf_range(0.9, 1.1))
 		Settings.haptic(int(clampf(spd * 2.5, 8.0, 30.0)), 0.35))
@@ -102,6 +102,10 @@ func attach_player(p: Player) -> void:
 	if rig and rig.has_signal("footstep"):
 		rig.footstep.connect(_on_footstep)
 		_rig_steps = true
+	p.wall_run_started.connect(func(_n: Vector3):
+		play("wall_kick", -5.0, 0.9)
+		Settings.haptic(18, 0.45))
+	p.wall_run_launched.connect(func(): play("release_whoosh", -7.0, 1.1))
 	p.wall_kicked.connect(func():
 		play("wall_kick", -2.0)
 		Settings.haptic(25, 0.6))
@@ -122,10 +126,10 @@ func attach_weather(a: Atmosphere) -> void:
 
 func _on_landed(speed: float, _street: bool) -> void:
 	if player and player.params and speed > player.params.roll_landing_speed:
-		play("roll", -2.0)
+		play("roll", -2.0, randf_range(0.94, 1.06))
 		Settings.haptic(45, 0.7)
 	elif speed > 3.0:
-		play("land", linear_to_db(clampf(speed / 15.0, 0.25, 1.0)))
+		play("land", linear_to_db(clampf(speed / 15.0, 0.25, 1.0)), randf_range(0.93, 1.07) - clampf(speed / 200.0, 0.0, 0.08))
 		Settings.haptic(int(clampf(speed * 2.0, 10.0, 40.0)), 0.5)
 
 

@@ -108,20 +108,44 @@ func walls(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, col
 		var a: Vector2 = corners[k]
 		var b: Vector2 = corners[(k + 1) % 4]
 		var w := a.distance_to(b)
-		if not hole.is_empty() and int(hole["face"]) == k:
-			# A home's window: the face drawn round the opening (left, right,
-			# below the sill, above the lintel), UVs continuous with the rest.
-			var A := [0.0, float(hole["oa0"]), float(hole["oa1"]), w]
-			var Y := [y0, float(hole["oy0"]), float(hole["oy1"]), y1]
-			for ia in 3:
-				for iy in 3:
-					if ia == 1 and iy == 1:
-						continue  # the opening
-					var p0: float = A[ia]
-					var p1: float = A[ia + 1]
-					var h0: float = Y[iy]
-					var h1: float = Y[iy + 1]
-					if p1 - p0 < 0.001 or h1 - h0 < 0.001:
+		var cuts: Array = []
+		if not hole.is_empty():
+			if int(hole["face"]) == k:
+				cuts.append([float(hole["oa0"]), float(hole["oa1"]), float(hole["oy0"]), float(hole["oy1"])])
+			for wn in hole.get("wins", []):
+				if int(wn[0]) == k:
+					cuts.append([float(wn[1]), float(wn[2]), float(wn[3]), float(wn[4])])
+		if not cuts.is_empty():
+			# A home's windows: the face drawn round its openings (columns
+			# between the openings' edges, each minus the openings it crosses),
+			# UVs continuous with the rest.
+			var xs := [0.0, w]
+			for c in cuts:
+				xs.append(clampf(c[0], 0.0, w))
+				xs.append(clampf(c[1], 0.0, w))
+			xs.sort()
+			for ci in xs.size() - 1:
+				var p0: float = xs[ci]
+				var p1: float = xs[ci + 1]
+				if p1 - p0 < 0.001:
+					continue
+				var ys := [[y0, y1]]
+				for c in cuts:
+					if c[0] <= p0 + 0.001 and c[1] >= p1 - 0.001:
+						var nys := []
+						for iv in ys:
+							if c[3] <= iv[0] or c[2] >= iv[1]:
+								nys.append(iv)
+								continue
+							if c[2] > iv[0]:
+								nys.append([iv[0], c[2]])
+							if c[3] < iv[1]:
+								nys.append([c[3], iv[1]])
+						ys = nys
+				for iv in ys:
+					var h0: float = iv[0]
+					var h1: float = iv[1]
+					if h1 - h0 < 0.001:
 						continue
 					var pa := a.lerp(b, p0 / w)
 					var pb := a.lerp(b, p1 / w)
@@ -312,6 +336,9 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		# building stands on a dressed-stone base course to the street.
 		var stone := Color(0.56, 0.53, 0.48) if _glassy(b) else trim.darkened(0.18)
 		solid(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_WALL)
+	if shaped(b):
+		_add_shaped(b, detailed, style, seed, col, wall_kind, trim, roof, base, glassy)
+		return
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var x0: float = t[0]
@@ -497,7 +524,7 @@ static func crown_h(b: Dictionary) -> float:
 	if b.has("_crown"):
 		return b["_crown"]
 	var h := 0.0
-	if b["kind"] == "normal" and _glassy(b) and float(b["tiers"][-1][5]) > 100.0:
+	if b["kind"] == "normal" and _glassy(b) and float(b["tiers"][-1][5]) > 100.0 and not b.has("shape"):
 		var r := RandomNumberGenerator.new()
 		r.seed = int(float(b["seed"]) * 6151.0 * 1000.0) ^ 0xc20
 		if r.randf() < 0.7:
@@ -550,6 +577,10 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 	if bc.has_volume():
 		out.append(bc)
 	var apt: Dictionary = b.get("apt", {})
+	if shaped(b):
+		# (the walls themselves collide as convex prisms: collision_hulls)
+		out.append_array(features(b)["col"])
+		return out
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var y1: float = t[5]
@@ -581,9 +612,10 @@ static func _clear_of_apt(b: Dictionary, out: Dictionary) -> Dictionary:
 	var apt: Dictionary = b.get("apt", {})
 	if apt.is_empty():
 		return out
-	var f := Apartments.face_of(apt)
-	var keep := _fbox(f, float(apt["oa0"]) - 1.5, float(apt["oa1"]) + 1.5, -1.0, 4.0, float(apt["y0"]) - 3.0,
-		float(apt["y1"]) + 1.0)
+	# Glass all round: nothing stuck on any face of the home's storey.
+	var t: Array = (b["tiers"] as Array)[int(apt["t"])]
+	var keep := AABB(Vector3(float(t[0]) - 4.0, float(apt["y0"]) - 3.0, float(t[1]) - 4.0),
+		Vector3(float(t[2]) - float(t[0]) + 8.0, float(apt["y1"]) - float(apt["y0"]) + 4.0, float(t[3]) - float(t[1]) + 8.0))
 	var res := {"draw": [], "col": [], "col_human": [], "beams": []}
 	for d in out["draw"]:
 		if not (d[0] as AABB).intersects(keep):
@@ -651,8 +683,8 @@ static func _features(b: Dictionary) -> Dictionary:
 	# (CityWorld.HUMAN_LAYER) – detail added after the courses were recorded,
 	# so bots and recorded flights don't depend on it.
 	var out := {"draw": [], "beams": [], "col": [], "col_human": []}
-	if not _parapeted(b) or b["kind"] != "normal":
-		return out
+	if not _parapeted(b) or b["kind"] != "normal" or b.has("shape"):
+		return out  # (shaped plans: the form is the feature; nothing hangs off a cut corner)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(float(b["seed"]) * 7919.0 * 1000.0) ^ 0x5f3
 	var style := int(b["style"])
@@ -754,7 +786,8 @@ static func _features(b: Dictionary) -> Dictionary:
 		for r in caps:
 			out["draw"].append([r, trim.lightened(0.25), "far"])
 			out["col"].append(r)
-	# Crowns: corner and mid piers rising over the parapet of deco/stone towers.
+	# Crowns: tall corner piers and low mid-edge finials over the parapet of
+	# deco/stone towers.
 	if style in [CityLayout.Style.DECO, CityLayout.Style.STONE] and float(tt[5]) > 70.0 \
 			and float(tt[2]) - float(tt[0]) > 14.0 and float(tt[3]) - float(tt[1]) > 14.0:
 		var ph := rng.randf_range(3.5, 6.0)
@@ -764,9 +797,12 @@ static func _features(b: Dictionary) -> Dictionary:
 			var L: float = f[3]
 			for a in [-o + 0.0, L * 0.5 - 0.6]:
 				var w := 1.6 if a < 0.0 else 1.2
-				var bx := _fbox(f, a, a + w, -w + o, o, ry, ry + (ph if a < 0.0 else ph * 0.7))
+				# Mid-edge finials stay low (≤ 1.1 m): they stood where you land
+				# and blocked the roof; the mantle carries you over this height.
+				var bx := _fbox(f, a, a + w, -w + o, o, ry, ry + (ph if a < 0.0 else 1.1))
 				out["draw"].append([bx, pc])
 				out["col"].append(bx)
+	_roof_crowns(out, b, tt, ry, style, trim)
 	# Facade depth follows the architectural family: paired slender bronze
 	# blades on office towers; stone piers on tall masonry. Shared collision
 	# and opening filtering keep apartments and climbing geometry aligned.
@@ -785,6 +821,113 @@ static func _features(b: Dictionary) -> Dictionary:
 					out["draw"].append([rib, Color(0.32, 0.29, 0.23) if _glassy(b) else trim])
 					out["col_human"].append(rib)
 	return out
+
+
+## Roof tops with character (own random stream, so nothing else moves):
+## supertall towers (> 150 m – no tokens, spawns or jobs up there) get a
+## spire, a helipad or a louvred plant crown with a mast, drawn at every LOD
+## for the skyline; mid-rise masonry and modern blocks may get a roof garden
+## (low planters inside the parapet, trees, a pergola) – all kept to the
+## edges so the middle of the roof stays clear to land on.
+static func _roof_crowns(out: Dictionary, b: Dictionary, tt: Array, ry: float, style: int, trim: Color) -> void:
+	if crown_h(b) > 0.0 or b.has("apt"):
+		return
+	var crng := RandomNumberGenerator.new()
+	crng.seed = int(float(b["seed"]) * 2753.0 * 1000.0) ^ 0xc70
+	var x0: float = tt[0]
+	var z0: float = tt[1]
+	var x1: float = tt[2]
+	var z1: float = tt[3]
+	var w := x1 - x0
+	var d := z1 - z0
+	var cx := (x0 + x1) * 0.5
+	var cz := (z0 + z1) * 0.5
+	var hgt: float = float(tt[5]) - base_of(b)
+	var red := Color(0.95, 0.15, 0.12)
+	if hgt > 150.0 and w > 18.0 and d > 18.0:
+		match crng.randi() % 3:
+			0:
+				# Spire: a plinth, a shaft and a needle with an aviation light.
+				var pb := _aabb(cx - 2.2, cz - 2.2, cx + 2.2, cz + 2.2, ry, ry + 5.0)
+				var sh := _aabb(cx - 1.0, cz - 1.0, cx + 1.0, cz + 1.0, ry + 5.0, ry + 17.0)
+				var nd := _aabb(cx - 0.35, cz - 0.35, cx + 0.35, cz + 0.35, ry + 17.0, ry + 17.0 + crng.randf_range(16.0, 30.0))
+				for bx in [pb, sh, nd]:
+					out["draw"].append([bx, trim.lightened(0.15), "far"])
+				out["col"].append(pb)
+				out["col"].append(sh)
+				out["draw"].append([AABB(Vector3(cx - 0.45, nd.end.y, cz - 0.45), Vector3(0.9, 0.7, 0.9)), red, "far"])
+			1:
+				# Helipad: a raised deck with a square marking and an H.
+				var hw := minf(minf(w, d) * 0.32, 8.5)
+				var pad := _aabb(cx - hw, cz - hw, cx + hw, cz + hw, ry, ry + 0.6)
+				out["draw"].append([pad, Color(0.22, 0.23, 0.25), "far", "roof"])
+				out["col"].append(pad)
+				var mk: Array[AABB] = []
+				_ring(mk, cx - hw * 0.8, cz - hw * 0.8, cx + hw * 0.8, cz + hw * 0.8, ry + 0.6, ry + 0.63, 0.35)
+				for r in mk:
+					out["draw"].append([r, Color(0.95, 0.8, 0.15)])
+				var hs := hw * 0.42
+				out["draw"].append([_aabb(cx - hs, cz - hs, cx - hs + 0.6, cz + hs, ry + 0.6, ry + 0.63), Color.WHITE])
+				out["draw"].append([_aabb(cx + hs - 0.6, cz - hs, cx + hs, cz + hs, ry + 0.6, ry + 0.63), Color.WHITE])
+				out["draw"].append([_aabb(cx - hs, cz - 0.3, cx + hs, cz + 0.3, ry + 0.6, ry + 0.63), Color.WHITE])
+				for p in [Vector2(cx - hw, cz - hw), Vector2(cx + hw, cz - hw), Vector2(cx + hw, cz + hw), Vector2(cx - hw, cz + hw)]:
+					out["draw"].append([_aabb(p.x - 0.2, p.y - 0.2, p.x + 0.2, p.y + 0.2, ry + 0.6, ry + 0.9), Color(0.4, 1.0, 0.5)])
+			_:
+				# Plant crown: a louvred box set back from the edges, a mast.
+				var ix := w * 0.24
+				var iz := d * 0.24
+				var bx := _aabb(x0 + ix, z0 + iz, x1 - ix, z1 - iz, ry, ry + 6.0)
+				out["draw"].append([bx, trim.darkened(0.45), "far"])
+				out["col"].append(bx)
+				for k in 4:
+					var y := ry + 1.0 + k * 1.3
+					var lv := _aabb(x0 + ix - 0.08, z0 + iz - 0.08, x1 - ix + 0.08, z1 - iz + 0.08, y, y + 0.25)
+					out["draw"].append([lv, trim.lightened(0.1), "far"])
+				var mx := x1 - ix - 1.2
+				var mz := z1 - iz - 1.2
+				var mast := _aabb(mx - 0.3, mz - 0.3, mx + 0.3, mz + 0.3, ry + 6.0, ry + 6.0 + crng.randf_range(12.0, 22.0))
+				out["draw"].append([mast, Color(0.75, 0.75, 0.77), "far"])
+				out["draw"].append([AABB(Vector3(mx - 0.4, mast.end.y, mz - 0.4), Vector3(0.8, 0.6, 0.8)), red, "far"])
+		return
+	if hgt > 40.0 and hgt <= 150.0 and w > 16.0 and d > 16.0 and style in [CityLayout.Style.BRICK,
+			CityLayout.Style.MODERN, CityLayout.Style.SANDSTONE, CityLayout.Style.STONE] and crng.randf() < 0.3:
+		# Roof garden along two opposite edges, inside the parapet.
+		var soil := Color(0.36, 0.27, 0.2)
+		var leaf := [Color(0.22, 0.42, 0.2), Color(0.3, 0.5, 0.24), Color(0.5, 0.6, 0.25)]
+		var along_x := w >= d
+		for e: float in [0.0, 1.0]:
+			var pl: AABB
+			if along_x:
+				var zz := z0 + 0.45 if e == 0.0 else z1 - 1.45
+				pl = _aabb(x0 + 1.5, zz, x1 - 1.5, zz + 1.0, ry, ry + 0.34)
+			else:
+				var xx := x0 + 0.45 if e == 0.0 else x1 - 1.45
+				pl = _aabb(xx, z0 + 1.5, xx + 1.0, z1 - 1.5, ry, ry + 0.34)
+			out["draw"].append([pl, trim])
+			out["col"].append(pl)
+			var top := pl
+			top.position.y = ry + 0.34
+			top.size.y = 0.3
+			out["draw"].append([top.grow(-0.08), leaf[crng.randi() % 3]])
+			# A few small trees along it.
+			var n := 2 + crng.randi() % 3
+			for i in n:
+				var t := (i + 0.5) / n
+				var p := Vector3(lerpf(pl.position.x, pl.end.x, t), ry, lerpf(pl.position.z, pl.end.z, t))
+				out["draw"].append([AABB(p + Vector3(-0.1, 0.34, -0.1), Vector3(0.2, 1.4, 0.2)), Color(0.35, 0.25, 0.18)])
+				var cs := crng.randf_range(1.1, 1.7)
+				out["draw"].append([AABB(p + Vector3(-cs * 0.5, 1.5, -cs * 0.5), Vector3(cs, cs * 0.9, cs)), leaf[crng.randi() % 3]])
+		# Pergola in a corner of the other edge.
+		var px := x0 + 1.0 if crng.randf() < 0.5 else x1 - 5.0
+		var pz := z0 + 1.0 if not along_x else (z0 + d * 0.5 - 2.0)
+		if along_x:
+			px = x0 + 1.0 if crng.randf() < 0.5 else x1 - 5.0
+		var wood := Color(0.48, 0.34, 0.22)
+		for q in [Vector2(px, pz), Vector2(px + 4.0, pz), Vector2(px, pz + 4.0), Vector2(px + 4.0, pz + 4.0)]:
+			out["draw"].append([_aabb(q.x, q.y, q.x + 0.18, q.y + 0.18, ry, ry + 2.5), wood])
+		for i in 6:
+			var sx := px + i * 0.8
+			out["draw"].append([_aabb(sx, pz - 0.2, sx + 0.12, pz + 4.4, ry + 2.5, ry + 2.65), wood])
 
 
 ## Appends `part`'s pieces to `out`, raised by dy (pieces built from 0).
@@ -1005,7 +1148,7 @@ func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, c
 ## Solid: collision_boxes() makes a slab of each, so you can land on them.
 static func awning_runs(b: Dictionary) -> Array:
 	var out_runs: Array = []
-	if not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
+	if b.has("shape") or not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
 			CityLayout.Style.STONE, CityLayout.Style.SANDSTONE, CityLayout.Style.DECO]:
 		return out_runs
 	var t: Array = b["tiers"][0]
@@ -1089,6 +1232,37 @@ func _add_sign(b: Dictionary, detailed: bool) -> void:
 	var c := Vector3((t[0] + t[2]) * 0.5, t[4] - 0.1, (t[1] + t[3]) * 0.5)
 	var half := Vector3(length * 0.5, 0, 0) if along_x else Vector3(0, 0, length * 0.5)
 	beam(c - half + o * 0.3, c + half + o * 0.3, 0.9, 0.12, STEEL)
+	# A steel frame round the panel (proud of both faces), braces down to the
+	# roof behind it, and gooseneck floodlights reaching out over the advert.
+	var f2: Vector2 = b.get("face", Vector2(o.x, o.z).normalized())
+	var fwd := Vector3(f2.x, 0, f2.y)
+	var thick := 0.6
+	var mid := Vector3((t[0] + t[2]) * 0.5, 0, (t[1] + t[3]) * 0.5)
+	var ytop: float = t[5]
+	var ybot: float = t[4]
+	var dark := STEEL.darkened(0.35)
+	for side: float in [1.0, -1.0]:
+		var off := fwd * (thick * 0.5 + 0.06) * side
+		var top_c := Vector3(mid.x, ytop - 0.12, mid.z) + off
+		var bot_c := Vector3(mid.x, ybot + 0.12, mid.z) + off
+		beam(top_c - half, top_c + half, 0.24, 0.24, dark)
+		beam(bot_c - half, bot_c + half, 0.24, 0.24, dark)
+		for e: float in [-1.0, 1.0]:
+			var post := Vector3(mid.x, 0, mid.z) + half * e * 0.995 + off
+			beam(Vector3(post.x, ybot, post.z), Vector3(post.x, ytop, post.z), 0.24, 0.24, dark)
+	var back := -fwd
+	var nl := maxi(2, int(length / 4.5))
+	for i in nl:
+		var u := lerpf(-0.42, 0.42, i / float(nl - 1))
+		var at := Vector3(mid.x, 0, mid.z) + half * 2.0 * u
+		if i % 2 == 0:
+			beam(at + back * 0.3 + Vector3(0, ytop - 1.0, 0), at + back * 2.6 + Vector3(0, roof, 0), 0.14, 0.14, STEEL)
+		# Gooseneck: up from the bottom rail, out over the face, a lamp head.
+		var root := at + fwd * (thick * 0.5 + 0.1) + Vector3(0, ybot + 0.1, 0)
+		var elbow := root + fwd * 1.4 + Vector3(0, 0.55, 0)
+		beam(root, elbow, 0.11, 0.11, dark)
+		var head := elbow + fwd * 0.05 + Vector3(0, 0.3, 0)
+		beam(elbow - Vector3(0, 0.05, 0), head, 0.55, 0.3, Color(0.12, 0.12, 0.13))
 
 
 ## Construction frame: open floor slabs, columns, a safety-net band on the top floors.
@@ -1114,10 +1288,18 @@ func _add_frame(b: Dictionary, detailed: bool) -> void:
 			var z: float = lerpf(t0[1] + 0.5, t0[3] - 0.5, j / float(nz - 1))
 			beam(Vector3(x, base, z), Vector3(x, ytop + 3.0, z), 0.6, 0.6, CONCRETE.darkened(0.12))
 	# Hoarding round the site at street level, safety screens on the top two floors.
-	walls(t0[0] - 1.5, t0[1] - 1.5, t0[2] + 1.5, t0[3] + 1.5, base, base + 2.6, Color(0.2, 0.36, 0.3), KIND_TRIM, 0, 0)
+	_frame_barrier(t0, 1.5, base, base + 2.6, Color(0.2, 0.36, 0.3))
 	# Edge-protection barrier round the working floor.
-	walls(t0[0] - 0.2, t0[1] - 0.2, t0[2] + 0.2, t0[3] + 0.2, ytop + 0.1, ytop + 1.2,
-		Color(0.95, 0.55, 0.15), KIND_TRIM, 0, 0)
+	_frame_barrier(t0, 0.2, ytop + 0.1, ytop + 1.2, Color(0.95, 0.55, 0.15))
+
+
+func _frame_barrier(t: Array, outset: float, bottom_y: float, top_y: float, color: Color) -> void:
+	# Inner faces and the top cap match the existing 12 cm collision ring.
+	# Single outer quads disappeared when viewed from the working floor.
+	var boxes: Array[AABB] = []
+	_ring(boxes, t[0] - outset, t[1] - outset, t[2] + outset, t[3] + outset, bottom_y, top_y, 0.12)
+	for box in boxes:
+		solid(box.position.x, box.position.z, box.end.x, box.end.z, box.position.y, box.end.y, color)
 
 
 ## Cranes and the bridge. `detailed` = lattice/girder geometry, else solid massing.
@@ -1415,7 +1597,9 @@ func add_ground(layout: CityLayout, chunk_rect: Rect2) -> void:
 		var level: float = blk["level"]
 		var flat := not is_nan(level)
 		var kind: String = blk["kind"]
-		var col := grass if kind == "park" else pave
+		var district_paving: Color = {"cbd": Color(0.55, 0.57, 0.59), "docks": Color(0.53, 0.52, 0.50),
+			"georgian": Color(0.62, 0.55, 0.51), "waterfront": Color(0.56, 0.57, 0.54)}.get(blk["district"], pave)
+		var col := grass if kind == "park" else district_paving
 		var b_outers: Array = []
 		for q in Geometry2D.intersect_polygons(crect, poly):
 			if not Geometry2D.is_polygon_clockwise(q):
@@ -1747,6 +1931,11 @@ static func shore_profile(layout: CityLayout, smp: Array) -> Array:
 	var amt := x_taper * (1.0 - dock)
 	var r := smoothstep(4.0, 9.0, H)
 	var w := lerpf(16.0 + 30.0 * n1 + 6.0 * n2, 14.0 + H * 0.9 + 46.0 * pow(n1, 1.6) + 9.0 * n2, r) * amt
+	# North Beach (CoastLife): a long, wide, shallow sand beach.
+	var bk := 0.0 if layout.is_mainland else CoastLife.beach_k(p)
+	if bk > 0.0:
+		r *= 1.0 - bk
+		w = lerpf(w, CoastLife.BEACH_W + 6.0 * n2, bk)
 	var j := func(k: int) -> float: return (_snoise(s / 32.0 + k * 17.3) - 0.5) * r
 	var rock := [[0.0, H - 0.5], [w * 0.07 + 2.0 * j.call(1), H * 0.66 + H * 0.14 * j.call(2)],
 		[w * 0.3 + 6.0 * j.call(3), H * 0.32 + H * 0.2 * j.call(4)],
@@ -1892,3 +2081,399 @@ func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL)
 		var w := a.distance_to(b)
 		quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
 			Vector2(0, y1), Vector2(w, y1), Vector2(w, y0), Vector2(0, y0), col, kind, 3, 0.5)
+
+
+func _add_shaped(b: Dictionary, detailed: bool, style: float, seed: float, col: Color, wall_kind: float,
+		trim: Color, roof: Color, base: float, glassy: bool) -> void:
+	var tiers: Array = b["tiers"]
+	var light := int(b["shape"].get("segs", 0)) > 8  # curved plans: no stone courses (vertex cost)
+	for i in tiers.size():
+		var t: Array = tiers[i]
+		var y0: float = t[4]
+		var y1: float = t[5]
+		var fp := footprint(b, t)
+		walls_poly(fp, y0, y1, col, wall_kind, style, seed, y0 - base)
+		if _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
+			cap_poly(fp, y0, col.darkened(0.25), KIND_TRIM, style, seed, false)
+		if not detailed:
+			cap_poly(fp, y1, roof, KIND_ROOF, style, seed, true, true)
+			continue
+		var o := cornice_out(b)
+		var ch := cornice_h(b)
+		var co := footprint(b, t, o)
+		walls_poly(co, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
+		cap_poly(co, y1 - ch * 0.5, trim, KIND_TRIM, style, seed, false)
+		var ry := y1 + ch * 0.5
+		cap_poly(co, ry, roof, KIND_ROOF, style, seed, true, true)
+		# Parapet: outer face, inner face, top ring.
+		var inner := offset_poly(co, -PARAPET_T)
+		walls_poly(co, ry, ry + PARAPET, trim, KIND_TRIM, 0, 0)
+		walls_poly(inner, ry, ry + PARAPET, trim.darkened(0.15), KIND_TRIM, 0, 0, -1.0, true)
+		ring_poly(co, inner, ry + PARAPET, trim)
+		if not glassy and not light:
+			var ly := base + (floorf((y0 - base) / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
+			var lo := offset_poly(fp, LEDGE_OUT)
+			while ly < y1 - 4.0:
+				walls_poly(lo, ly, ly + 0.32, trim, KIND_TRIM, style, seed)
+				ring_poly(lo, fp, ly, trim.darkened(0.25), false)
+				ring_poly(lo, fp, ly + 0.32, trim.lightened(0.1))
+				ly += LEDGE_EVERY
+		if _has_plinth(b, i):
+			var pp := offset_poly(fp, PLINTH_OUT)
+			walls_poly(pp, base, base + PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+			ring_poly(pp, fp, base + PLINTH_H, col.darkened(0.3))
+
+
+# ------------------------------------------------------------ shaped towers
+## Buildings with b["shape"] (CityLayout._shape_for) are not boxes: each
+## tier's rect is the bounding box of a footprint with chamfered, rounded or
+## notched corners, round drums or a flatiron prow. shape = {"c": [corner
+## treatments for corners 0..3]}, corner = [kind, size as a fraction of the
+## tier's short side]: kind 0 sharp, 1 chamfer, 2 round, 3 notch.
+## Corners run (x0,z1) → (x1,z1) → (x1,z0) → (x0,z0), the order walls() uses
+## (negative shoelace area; outward normal of edge d is (-d.y, d.x)).
+const SHAPE_SHARP := 0
+const SHAPE_CHAMFER := 1
+const SHAPE_ROUND := 2
+const SHAPE_NOTCH := 3
+const ARC_SEGS := 5          # per quarter circle (18° steps: smooth-shaded)
+const SMOOTH_TURN := 0.55    # rad: vertices turning less than this shade smooth
+
+
+static func shaped(b: Dictionary) -> bool:
+	return b.has("shape") and b["kind"] == "normal"
+
+
+## The footprint of one tier (building-local xz), in walls() order.
+static func footprint(b: Dictionary, t: Array, grow := 0.0) -> PackedVector2Array:
+	var x0: float = float(t[0]) - grow
+	var z0: float = float(t[1]) - grow
+	var x1: float = float(t[2]) + grow
+	var z1: float = float(t[3]) + grow
+	var cs := [Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0), Vector2(x0, z0)]
+	var short := minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	var spec: Array = b["shape"]["c"]
+	var out := PackedVector2Array()
+	for k in 4:
+		var p: Vector2 = cs[k]
+		var din: Vector2 = (p - (cs[(k + 3) % 4] as Vector2)).normalized()
+		var dout: Vector2 = ((cs[(k + 1) % 4] as Vector2) - p).normalized()
+		var kind: int = spec[k][0]
+		var s: float = float(spec[k][1]) * short
+		if kind == SHAPE_ROUND:
+			s = minf(s + grow, short * 0.5 + grow - 0.001)
+		elif kind == SHAPE_CHAMFER:
+			s += grow * 0.414  # (keeps an outset chamfer parallel)
+		match kind:
+			SHAPE_CHAMFER:
+				out.append(p - din * s)
+				out.append(p + dout * s)
+			SHAPE_ROUND:
+				var c := p - din * s + dout * s
+				var a0 := (-dout).angle()  # from the centre back to the incoming edge
+				var a1 := din.angle()
+				var da := wrapf(a1 - a0, -PI, PI)
+				for i in ARC_SEGS + 1:
+					var a := a0 + da * i / float(ARC_SEGS)
+					out.append(c + Vector2.from_angle(a) * s)
+			SHAPE_NOTCH:
+				# A square bite out of the corner (an L / stepped plan); the
+				# inner corner moves with the outset, so cornices follow it.
+				var sn := s - grow * 2.0
+				out.append(p - din * sn)
+				out.append(p - din * sn + dout * sn)
+				out.append(p + dout * sn)
+			_:
+				out.append(p)
+	# Drop doubled points (a drum's arcs meet mid-face).
+	var clean := PackedVector2Array()
+	for q in out:
+		if clean.is_empty() or q.distance_to(clean[-1]) > 0.02:
+			clean.append(q)
+	if clean.size() > 2 and clean[0].distance_to(clean[-1]) < 0.02:
+		clean.remove_at(clean.size() - 1)
+	return clean
+
+
+## Mitre offset (d > 0 outward) keeping the vertex count (rings pair up).
+static func offset_poly(pts: PackedVector2Array, d: float) -> PackedVector2Array:
+	var n := pts.size()
+	var out := PackedVector2Array()
+	out.resize(n)
+	for i in n:
+		var a := pts[(i + n - 1) % n]
+		var p := pts[i]
+		var c := pts[(i + 1) % n]
+		var e0 := (p - a).normalized()
+		var e1 := (c - p).normalized()
+		var n0 := Vector2(-e0.y, e0.x)
+		var n1 := Vector2(-e1.y, e1.x)
+		var m := (n0 + n1)
+		if m.length_squared() < 1e-6:
+			m = n0
+		m = m.normalized()
+		var k := maxf(m.dot(n0), 0.35)
+		out[i] = p + m * (d / k)
+	return out
+
+
+## Walls round a footprint. Straight runs between sharp turns are faces
+## (UV2 0..1 across each, like walls()); curved runs shade smooth.
+func walls_poly(pts: PackedVector2Array, y0: float, y1: float, col: Color, kind: float, style: float,
+		seed: float, uv_y0 := -1.0, inward := false) -> void:
+	var n := pts.size()
+	if n < 3:
+		return
+	var vy0 := y0 if uv_y0 < 0.0 else uv_y0
+	var vy1 := vy0 + (y1 - y0)
+	var en: Array[Vector2] = []  # outward normal of edge i (pts[i] → pts[i+1])
+	var el: Array[float] = []
+	for i in n:
+		var d := pts[(i + 1) % n] - pts[i]
+		el.append(d.length())
+		var nn := Vector2(-d.y, d.x).normalized()
+		en.append(-nn if inward else nn)
+	# A vertex is a crease when the edges either side turn sharply there.
+	var crease: Array[bool] = []
+	var any := false
+	for i in n:
+		var turn := absf(en[(i + n - 1) % n].angle_to(en[i]))
+		crease.append(turn > SMOOTH_TURN)
+		any = any or crease[i]
+	var start := 0
+	if any:
+		while not crease[start]:
+			start += 1
+	var u := 0.0
+	var i := start
+	var done := 0
+	while done < n:
+		# One face: edges from a crease to the next crease.
+		var run: Array[int] = []
+		var j := i
+		while true:
+			run.append(j)
+			j = (j + 1) % n
+			if crease[j] or j == start or run.size() >= n:
+				break
+		var L := 0.0
+		for e in run:
+			L += el[e]
+		var acc := 0.0
+		for e in run:
+			var a := pts[e]
+			var b := pts[(e + 1) % n]
+			var na := en[e]
+			var nb := en[e]
+			if not crease[e]:
+				na = (en[(e + n - 1) % n] + en[e]).normalized()
+			if not crease[(e + 1) % n]:
+				nb = (en[e] + en[(e + 1) % n]).normalized()
+			var w := el[e]
+			var t0 := acc / maxf(L, 0.001)
+			var t1 := (acc + w) / maxf(L, 0.001)
+			var A := Vector3(a.x, y1, a.y)
+			var B := Vector3(b.x, y1, b.y)
+			var C := Vector3(b.x, y0, b.y)
+			var D := Vector3(a.x, y0, a.y)
+			if inward:
+				_quad_n(B, A, D, C, Vector3(nb.x, 0, nb.y), Vector3(na.x, 0, na.y),
+					Vector2(u + w, vy1), Vector2(u, vy1), Vector2(u, vy0), Vector2(u + w, vy0), col, kind, style, seed)
+			else:
+				_quad_n(A, B, C, D, Vector3(na.x, 0, na.y), Vector3(nb.x, 0, nb.y),
+					Vector2(u, vy1), Vector2(u + w, vy1), Vector2(u + w, vy0), Vector2(u, vy0), col, kind, style, seed)
+			var wy := floorf(L * 4.0) + (floorf(seed * 256.0) + 0.5) / 256.0
+			var m := uv2s.size()
+			var ta := minf(t0, 0.999)
+			var tb := minf(t1, 0.999)
+			if inward:
+				uv2s[m - 4] = Vector2(style + tb, wy)
+				uv2s[m - 3] = Vector2(style + ta, wy)
+				uv2s[m - 2] = Vector2(style + ta, wy)
+				uv2s[m - 1] = Vector2(style + tb, wy)
+			else:
+				uv2s[m - 4] = Vector2(style + ta, wy)
+				uv2s[m - 3] = Vector2(style + tb, wy)
+				uv2s[m - 2] = Vector2(style + tb, wy)
+				uv2s[m - 1] = Vector2(style + ta, wy)
+			acc += w
+			u += w
+		done += run.size()
+		i = j
+
+
+## A quad whose left edge (a, d) and right edge (b, c) carry their own normals.
+func _quad_n(a: Vector3, b: Vector3, c: Vector3, d: Vector3, na: Vector3, nb: Vector3, ua: Vector2, ub: Vector2,
+		uc: Vector2, ud: Vector2, col: Color, kind: float, style: float, seed: float) -> void:
+	if _xf_on:
+		a = xf * a
+		b = xf * b
+		c = xf * c
+		d = xf * d
+		na = xf.basis * na
+		nb = xf.basis * nb
+	var i := verts.size()
+	verts.append_array([a, b, c, d])
+	normals.append_array([na, nb, nb, na])
+	var cc := Color(col.r, col.g, col.b, kind / 8.0)
+	colors.append_array([cc, cc, cc, cc])
+	uvs.append_array([ua, ub, uc, ud])
+	var s2 := Vector2(style, seed)
+	uv2s.append_array([s2, s2, s2, s2])
+	indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
+
+
+## Flat cap over (up) or under (down) a footprint, triangulated (L plans are
+## concave). Roofs pack the bounding half-extents like roof_top().
+func cap_poly(pts: PackedVector2Array, y: float, col: Color, kind: float, style: float, seed: float, up := true,
+		roof := false) -> void:
+	var tri := Geometry2D.triangulate_polygon(pts)
+	if tri.is_empty():
+		return
+	var lo := pts[0]
+	var hi := pts[0]
+	for p in pts:
+		lo = Vector2(minf(lo.x, p.x), minf(lo.y, p.y))
+		hi = Vector2(maxf(hi.x, p.x), maxf(hi.y, p.y))
+	var c := (lo + hi) * 0.5
+	var s2 := Vector2(style, seed)
+	if roof:
+		var hx := minf(floorf((hi.x - lo.x) * 2.0), 4095.0)
+		var hz := minf(floorf((hi.y - lo.y) * 2.0), 4095.0)
+		s2 = Vector2(-(1.0 + hx + hz * 4096.0), seed)
+		kind = KIND_ROOF
+	var nrm := Vector3.UP if up else Vector3.DOWN
+	var nw := xf.basis * nrm if _xf_on else nrm
+	var cc := Color(col.r, col.g, col.b, kind / 8.0)
+	var base := verts.size()
+	for p in pts:
+		var v := Vector3(p.x, y, p.y)
+		verts.append(xf * v if _xf_on else v)
+		normals.append(nw)
+		colors.append(cc)
+		uvs.append(p - c if roof else p)
+		uv2s.append(s2)
+	for k in range(0, tri.size(), 3):
+		var ia := tri[k]
+		var ib := tri[k + 1]
+		var ic := tri[k + 2]
+		var pa := Vector3(pts[ia].x, y, pts[ia].y)
+		var pb := Vector3(pts[ib].x, y, pts[ib].y)
+		var pc := Vector3(pts[ic].x, y, pts[ic].y)
+		# Godot's front faces wind clockwise: pick the order that faces nrm.
+		if (pb - pa).cross(pc - pa).dot(nrm) > 0.0:
+			indices.append_array([base + ia, base + ic, base + ib])
+		else:
+			indices.append_array([base + ia, base + ib, base + ic])
+
+
+## Horizontal ring between two footprints with the same vertex count.
+func ring_poly(outer: PackedVector2Array, inner: PackedVector2Array, y: float, col: Color, up := true) -> void:
+	var n := outer.size()
+	var nrm := Vector3.UP if up else Vector3.DOWN
+	for i in n:
+		var j := (i + 1) % n
+		var a := Vector3(outer[i].x, y, outer[i].y)
+		var b := Vector3(outer[j].x, y, outer[j].y)
+		var c := Vector3(inner[j].x, y, inner[j].y)
+		var d := Vector3(inner[i].x, y, inner[i].y)
+		_tri(a, b, c, nrm, col)
+		_tri(a, c, d, nrm, col)
+
+
+## Collision for shaped buildings: one convex prism per convex piece of each
+## tier's footprint (walls, the cornice/roof slab, the plinth), exactly the
+## drawn faces – no stair-steps for the rope to catch on. Points are in the
+## building's frame (CityWorld applies its rotation).
+static func collision_hulls(b: Dictionary) -> Array[PackedVector3Array]:
+	var out: Array[PackedVector3Array] = []
+	if not shaped(b):
+		return out
+	var o := cornice_out(b)
+	var ch := cornice_h(b)
+	var tiers: Array = b["tiers"]
+	for i in tiers.size():
+		var t: Array = tiers[i]
+		var y1: float = t[5]
+		_hulls_of(footprint(b, t), t[4], y1 - ch * 0.5, out)
+		_hulls_of(footprint(b, t, o), y1 - ch * 0.5, y1 + ch * 0.5, out)
+		if _has_plinth(b, i):
+			_hulls_of(footprint(b, t, PLINTH_OUT), base_of(b), base_of(b) + PLINTH_H, out)
+	return out
+
+
+static func _hulls_of(fp: PackedVector2Array, y0: float, y1: float, out: Array[PackedVector3Array]) -> void:
+	var parts: Array = [fp]
+	if not _convex(fp):
+		parts = Geometry2D.decompose_polygon_in_convex(fp)
+	for part: PackedVector2Array in parts:
+		var pts := PackedVector3Array()
+		for v in part:
+			pts.append(Vector3(v.x, y0, v.y))
+			pts.append(Vector3(v.x, y1, v.y))
+		out.append(pts)
+
+
+static func _convex(p: PackedVector2Array) -> bool:
+	var n := p.size()
+	var sgn := 0.0
+	for i in n:
+		var a := p[(i + 1) % n] - p[i]
+		var b := p[(i + 2) % n] - p[(i + 1) % n]
+		var c := a.cross(b)
+		if absf(c) < 1e-6:
+			continue
+		if sgn == 0.0:
+			sgn = signf(c)
+		elif signf(c) != sgn:
+			return false
+	return true
+
+
+## (Old) collision for a shaped tier: vertical slices along x, each the footprint's
+## z-extent there (exact on straight runs, within ~0.4 m on curves and
+## chamfers). Notched plans give two intervals in a slice.
+static func shape_boxes(pts: PackedVector2Array, y0: float, y1: float) -> Array[AABB]:
+	var out: Array[AABB] = []
+	var xs: Array[float] = []
+	for p in pts:
+		xs.append(p.x)
+	xs.sort()
+	var cuts: Array[float] = [xs[0]]
+	for x in xs:
+		if x - cuts[-1] > 0.05:
+			cuts.append(x)
+	var edges: Array[float] = []
+	for k in cuts.size() - 1:
+		var a: float = cuts[k]
+		var b: float = cuts[k + 1]
+		var za := _span_at(pts, a + 0.01)
+		var zb := _span_at(pts, b - 0.01)
+		var flat := za.size() == zb.size()
+		if flat:
+			for q in za.size():
+				flat = flat and absf(za[q] - zb[q]) < 0.05
+		var steps := 1 if flat else maxi(1, ceili((b - a) / 1.6))
+		for s in steps:
+			edges.append(lerpf(a, b, s / float(steps)))
+	edges.append(cuts[-1])
+	for k in edges.size() - 1:
+		var a := edges[k]
+		var b := edges[k + 1]
+		var zs := _span_at(pts, (a + b) * 0.5)
+		for q in range(0, zs.size() - 1, 2):
+			out.append(AABB(Vector3(a, y0, zs[q]), Vector3(b - a, y1 - y0, zs[q + 1] - zs[q])))
+	return out
+
+
+## Sorted z where the vertical line x crosses the footprint's edges.
+static func _span_at(pts: PackedVector2Array, x: float) -> Array[float]:
+	var zs: Array[float] = []
+	var n := pts.size()
+	for i in n:
+		var a := pts[i]
+		var b := pts[(i + 1) % n]
+		if (a.x <= x and b.x > x) or (b.x <= x and a.x > x):
+			zs.append(lerpf(a.y, b.y, (x - a.x) / (b.x - a.x)))
+	zs.sort()
+	return zs

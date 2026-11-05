@@ -63,12 +63,27 @@ const ARM_A := deg_to_rad(42.0)
 const LEG_A := deg_to_rad(5.0)
 ## The model's feet sit at y = 0; the rig's origin is the capsule centre.
 const MODEL_OFFSET := Vector3(0, -0.9, 0)
+## gear.glb was fitted to the old masked head; the real head (faces) sits
+## further forward and a little lower, and its eyes further forward still.
+const GEAR_FIT := {
+	"cap": Vector3(0, -0.032, -0.068), "beanie": Vector3(0, -0.032, -0.068),
+	"headphones": Vector3(0, -0.032, -0.068), "crown": Vector3(0, -0.058, -0.066),
+	"shades": Vector3(0, -0.021, -0.036), "visor": Vector3(0, -0.026, -0.062),
+}
 
 var player: Player
 var bones := {}
-var launcher: Node3D  # the web hand; RopeVisual starts here
+var launcher: Node3D  # marker on the web hand; RopeVisual starts here (moves hand to hand)
+## Which hand shoots and holds the web ("r"/"l"): picked per web from the
+## side the anchor is on (straight ahead: hands alternate). The swing pose is
+## written for the right hand and mirrored for the left (_pose_rope).
+var web_side := "r"
+var _mir := false
+var _mir_o := Vector3.ZERO
+var _mir_n := Vector3.RIGHT
 var ragdoll := VerletRagdoll.new()
 var ragdolling := false
+var _rag_low := 0.0  # 0 = pelvis at the capsule's centre, 1 = lying on the ground
 var _hero_materials: Array[Dictionary] = []
 var _glove_mesh: MeshInstance3D
 var _finger_curl := {"l": 0.0, "r": 0.0}
@@ -153,6 +168,7 @@ var _release_t := 0.0      # launch stretch after letting go of a web (s left)
 var _hard_t := 0.0         # hard-landing crouch remaining (s)
 var _glide := 0.0          # 0..1 flying forward off a web: chest leads, arms out like wings
 var _glide_rope := 0.0     # 0..1 the same lean while swinging forward on the web
+var _speedfly := 0.0       # 0..1 flying fast (≳60 km/h): streamline – arms swept back, legs together
 var _bank := Vector3.ZERO  # smoothed sideways lean into an air turn (world, horizontal)
 var _turn := 0.0           # -1..1 how hard the body is turning (+ = right); head and arms lead it
 const HARD_TIME := 0.62
@@ -231,11 +247,8 @@ func _ready() -> void:
 			bones["hand_" + side].add_child(grip)
 			grip.visible = false
 			_grips[side] = [parts.get("hand_" + side), grip]
-	# Headwear: the hood (part of the character model) and the shop gear
-	# (gear.glb) all ride the head; apply_look shows one hat and one face piece.
-	var hood: MeshInstance3D = parts.get("hood")
-	if hood:
-		_gear["hood"] = hood
+	# Headwear and eyewear from the shop (gear.glb) ride the head; apply_look
+	# shows one hat and one face piece.
 	if ResourceLoader.exists(GEAR_PATH):
 		var g: Node = (load(GEAR_PATH) as PackedScene).instantiate()
 		for mi in g.find_children("*", "MeshInstance3D", true, false):
@@ -245,12 +258,14 @@ func _ready() -> void:
 		g.free()
 	for key in _gear:
 		var gm: MeshInstance3D = _gear[key]
-		gm.transform = Transform3D.IDENTITY
+		gm.transform = Transform3D(Basis.IDENTITY, GEAR_FIT.get(key, Vector3.ZERO))
 		gm.material_override = mat
 		gm.visible = false
 		bones[GEAR_BONES.get(key, "head")].add_child(gm)
 	apply_look(Shop.look())
-	launcher = bones["hand_r"]
+	launcher = Node3D.new()
+	launcher.name = "Launcher"
+	bones["hand_r"].add_child(launcher)
 	_bind_skeleton()
 	for i in (3 if parts.has("scarf_0") else 0):  # optional cloth tail
 		var seg := Node3D.new()
@@ -285,9 +300,16 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			material.set_shader_parameter("albedo_map", source.albedo_texture)
 		if source.normal_enabled and source.normal_texture:
 			material.set_shader_parameter("normal_map", source.normal_texture)
-			material.set_shader_parameter("normal_strength", source.normal_scale)
+			material.set_shader_parameter("normal_strength", minf(source.normal_scale, 0.45))
 		if source.ao_enabled and source.ao_texture:
 			material.set_shader_parameter("ao_map", source.ao_texture)
+		# A readable slate shell and muted teal lens give the masked hero a
+		# recognisable face even in shade; no extra mesh, texture or light.
+		if source.resource_name == "hero_mask_courier":
+			material.set_shader_parameter("base_color", Color(0.10, 0.13, 0.16))
+		elif source.resource_name == "hero_lens":
+			material.set_shader_parameter("base_color", Color(0.15, 0.40, 0.43))
+			material.set_shader_parameter("surface_emission", Vector3(0.015, 0.045, 0.05))
 		mi.set_surface_override_material(surface, material)
 		var region := ""
 		var reference := Color.WHITE
@@ -295,6 +317,26 @@ func _install_hero_materials(mi: MeshInstance3D) -> void:
 			"hero_jacket":
 				region = "suit"
 				reference = Color(0.22, 0.24, 0.26)
+			# Skin-tight tops, the face and its parts: tints are relative to
+			# the authored colour (the shop colour replaces it exactly).
+			"hero_top", "hero_top_collar", "hero_bandana":
+				region = "suit"
+				reference = source.albedo_color
+			"hero_top_panel", "hero_bandana_knot":
+				region = "suit_panel"
+				reference = source.albedo_color
+			"hero_skin", "hero_skin_body":
+				region = "skin"
+				reference = source.albedo_color
+			"hero_lips":
+				region = "lips"
+				reference = source.albedo_color
+			"hero_hair", "hero_brow":
+				region = "hair"
+				reference = source.albedo_color
+			"hero_iris":
+				region = "iris"
+				reference = source.albedo_color
 			"hero_cargo", "hero_cargo_pocket":
 				region = "pants"
 				reference = Color(0.24, 0.26, 0.28)
@@ -330,6 +372,16 @@ func apply_look(look: Dictionary) -> void:
 	look_state = look
 	for region in ["suit", "pants", "shoe", "sole", "glove"]:
 		_tint_hero(region, look[region])
+	var suit: Color = look["suit"]
+	# Contrast panels: darker on light colours, lighter on near-black ones.
+	_tint_hero("suit_panel", suit.lightened(0.28) if suit.get_luminance() < 0.12 else suit.darkened(0.5))
+	if look.has("skin"):
+		var skin: Color = look["skin"]
+		_tint_hero("skin", skin)
+		_tint_hero("lips", Color(skin.r * 0.82, skin.g * 0.62, skin.b * 0.6))
+		_tint_hero("hair", look["hair"])
+		_tint_hero("iris", look["eyes"])
+	_show_variants()
 	if _mat:
 		for k in [["suit", "suit_color"], ["pants", "pants_color"], ["shoe", "shoe_color"], ["sole", "sole_color"],
 				["glove", "glove_color"], ["glow", "glow_color"]]:
@@ -345,6 +397,32 @@ func set_gadget_active(on: bool) -> void:
 		_show_gear()
 
 
+## Which of the character model's variant meshes are drawn: the top's cut
+## (and bare forearms with short sleeves), the chosen face and its hair, the
+## mask. A full mask hides the face under it (and its draw calls); a hat or
+## the balaclava hides the hair.
+func _show_variants() -> void:
+	if skeleton == null:
+		return
+	var face: String = look_state.get("hero", "kai")
+	var style: String = look_state.get("hair_style", "crop")
+	var cut: String = look_state.get("top", "long")
+	var mask: String = look_state.get("mask", "")
+	var hat: String = look_state.get("head", "")
+	for mi in skeleton.find_children("*", "MeshInstance3D", true, false):
+		var n := String(mi.name)
+		if n.begins_with("Top_") and n != "Top_Collar":
+			mi.visible = n.to_lower() == "top_" + cut
+		elif n.begins_with("Skin_Arms_"):
+			mi.visible = n.to_lower() == "skin_arms_" + cut
+		elif n.begins_with("Face_"):
+			mi.visible = n == "Face_" + face and mask != "courier"
+		elif n.begins_with("Hair_"):
+			mi.visible = n == "Hair_%s_%s" % [style, face] and not mask in Shop.HAIR_MASKS and hat != "beanie"
+		elif n.begins_with("Mask_"):
+			mi.visible = mask != "" and (n == "Mask_" + mask or n.begins_with("Mask_%s_" % mask))
+
+
 func _show_gear() -> void:
 	var g: Dictionary = look_state.get("gadget", {})
 	var parts: Array = g.get("parts", [])
@@ -352,7 +430,7 @@ func _show_gear() -> void:
 	if _gadget_on and g.get("swap", false):
 		parts = []
 	for key in _gear:
-		(_gear[key] as MeshInstance3D).visible = key == look_state.get("head", "hood") \
+		(_gear[key] as MeshInstance3D).visible = key == look_state.get("head", "") \
 			or key == look_state.get("face", "") or key in parts or (_gadget_on and key in active)
 
 
@@ -369,13 +447,16 @@ func _connect_player() -> void:
 	player.released.connect(_on_released)
 	player.stun_started.connect(_on_stun)
 	player.stun_ended.connect(_on_stun_ended)
+	player.slammed.connect(_on_slam)
 	player.perfect_release.connect(_on_perfect)
-	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.STEP_MAX))
+	player.stepped_up.connect(func(h: float) -> void: _step_off = minf(_step_off + h, Player.MANTLE_MAX))
 	player.respawned.connect(_on_respawned)
 	player.landed.connect(func(spd, _street): on_landed(spd))
 	player.wall_kicked.connect(_on_wall)
+	player.wall_topped.connect(func(): _takeoff_t = 0.3; _jump_t = 0.0)
 	player.bumped.connect(_on_bumped)
 	player.staggered.connect(_on_staggered)
+	player.grapple_fired.connect(func(t: Vector3, _h: bool) -> void: _pick_web_hand(t))
 	player.attached.connect(func(_a) -> void:
 		_swing_lead = "r" if _swing_lead == "l" else "l"
 		_jolt(0.6))
@@ -692,9 +773,26 @@ func _probe_ground() -> float:
 	return INF if hit.is_empty() else from.y - 0.9 - (hit.position as Vector3).y
 
 
+## The limp body hits the ground: arms and legs flung up and out by the
+## impact, the head nods with it (the pelvis follows the capsule's bounce).
+func _on_slam(speed: float, _point: Vector3) -> void:
+	if not ragdolling:
+		return
+	var k := clampf(speed, 4.0, 30.0)
+	var pv := {}
+	for j in ["wr_l", "wr_r", "an_l", "an_r"]:
+		var side := Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)) * k * 0.09
+		pv[j] = Vector3.UP * k * randf_range(0.14, 0.22) + side
+	for j in ["el_l", "el_r", "kn_l", "kn_r"]:
+		pv[j] = Vector3.UP * k * randf_range(0.06, 0.11)
+	pv["head"] = Vector3.UP * k * 0.05
+	ragdoll.kick(pv)
+
+
 func _on_stun(speed: float) -> void:
 	ragdolling = true
 	_rag_time = 0.0
+	_rag_low = 0.0
 	_trick = ""
 	# A landing that turns into a crash must not leave its roll / crouch
 	# queued for after the get-up.
@@ -735,6 +833,9 @@ func _knockout_ragdoll(speed: float) -> void:
 
 
 func _on_respawned() -> void:
+	_edge = 0.0
+	_edge_goal = 0.0
+	_edge_probe = 0.0
 	ragdolling = false
 	_flip = 0.0
 	_trick = ""
@@ -770,6 +871,7 @@ func _on_respawned() -> void:
 		_heel[sd] = 0.0
 	_hard_t = 0.0
 	_glide = 0.0
+	_speedfly = 0.0
 	_glide_rope = 0.0
 	_bank = Vector3.ZERO
 	_turn = 0.0
@@ -819,8 +921,8 @@ func debug_state() -> Dictionary:
 				gap = maxf(gap, absf(p.y - (hit.position as Vector3).y - ANKLE_H))
 	var hand_off := -1.0
 	if player.line_state == Player.Line.ATTACHED and player.s.taut:
-		var sh := (bones["upper_arm_r"] as Node3D).global_position
-		var hand := (bones["hand_r"] as Node3D).global_position
+		var sh := (bones["upper_arm_" + web_side] as Node3D).global_position
+		var hand := (bones["hand_" + web_side] as Node3D).global_position
 		var dir := (player.s.anchor - sh).normalized()
 		hand_off = ((hand - sh) - dir * (hand - sh).dot(dir)).length()
 	return {"skinned": skeleton != null and not _skel_idx.is_empty(), "planted": _plant.size(),
@@ -849,8 +951,9 @@ func _process(dt: float) -> void:
 	# Gliding, the free hands open flat like wing tips.
 	var fists := not player.is_on_floor() or player.speed() > 3.5 or ragdolling
 	var wing := maxf(_glide, _glide_rope) > 0.5 and not ragdolling
-	_set_grip("r", player.line_state != Player.Line.IDLE or (fists and not wing))
-	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
+	var free_side := "l" if web_side == "r" else "r"
+	_set_grip(web_side, player.line_state != Player.Line.IDLE or (fists and not wing))
+	_set_grip(free_side, (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
 	posed.emit()
 
 
@@ -934,7 +1037,10 @@ func _update_animated(dt: float) -> void:
 	var attached := player.line_state == Player.Line.ATTACHED
 	# Rope load 0..1: taut + tension. Slack line = 0 (body relaxes into flight).
 	_load = move_toward(_load, clampf(s.tension / 40.0, 0.0, 1.0) if attached and s.taut else 0.0, dt * 4.0)
-	var wall_run := _wall_time > 0.0 and v.y > 1.5 and not on_rope
+	if player.wall_run:
+		_wall_time = maxf(_wall_time, 0.15)
+		_wall_n = player.wall_normal
+	var wall_run := (_wall_time > 0.0 and v.y > 1.5 or player.wall_run) and not on_rope
 	_wall_time = maxf(_wall_time - dt, 0.0)
 	_takeoff_t = maxf(_takeoff_t - dt, 0.0)
 	_release_t = maxf(_release_t - dt, 0.0)
@@ -987,9 +1093,16 @@ func _update_animated(dt: float) -> void:
 	# --- facing & turn rate -----------------------------------------------
 	_stagger_t = maxf(_stagger_t - dt, 0.0)
 	if wall_run:
-		_facing = _facing.slerp(-_wall_n, 1.0 - exp(-14.0 * dt)).normalized()
+		# Up the wall: chest to it. Along it: facing the run, side to the wall.
+		var face_to := -_wall_n
+		var al := player.wall_run_along if player.wall_run else 0.0
+		if al > 0.05 and hs > 1.0:
+			face_to = (-_wall_n).slerp(vh.normalized(), al).normalized()
+		_facing = _facing.slerp(face_to, 1.0 - exp(-14.0 * dt)).normalized()
 	elif _stagger_t > 0.0 and grounded:
 		_facing = _facing.slerp(-_stagger_n, 1.0 - exp(-10.0 * dt)).normalized()  # still facing the wall
+	elif player.wall_kick and not grounded and hs > 1.0 and vh.normalized().dot(_facing) < 0.2:
+		pass  # drifting back off a wall-run kick: keep facing on, no about-turn
 	elif hs > 1.0:
 		# Walking turns follow the path closely (feet and hips stay lined up
 		# with where the body is going); at a run the body swings round more.
@@ -1018,6 +1131,12 @@ func _update_animated(dt: float) -> void:
 	var glide_go := not grounded and not on_rope and not _off_ledge and _trick == "" \
 		and hs > 6.0 and v.y > -16.0 and (_ground_h == INF or _ground_h > 5.0)
 	_glide = move_toward(_glide, clampf((hs - 6.0) / 6.0, 0.0, 1.0) if glide_go else 0.0, dt * (2.5 if glide_go else 4.0))
+	# Speed flight: fast and free in the air the wings fold – arms sweep back
+	# along the body, legs close up and trail. Wings at 120 km/h read as a
+	# T-pose with the legs hanging.
+	var fast_go := not grounded and not on_rope and _trick == "" and not wall_run and not ragdolling \
+		and (_ground_h == INF or _ground_h > 4.0)
+	_speedfly = move_toward(_speedfly, smoothstep(13.0, 24.0, hs) if fast_go else 0.0, dt * (3.0 if fast_go else 5.0))
 	var rope_go := attached and speed > 7.0
 	_glide_rope = move_toward(_glide_rope, clampf((speed - 7.0) / 9.0, 0.0, 1.0) if rope_go else 0.0, dt * 3.0)
 
@@ -1040,7 +1159,10 @@ func _update_animated(dt: float) -> void:
 			var gp := _getup_pitch(_getup_u())
 			up = (Vector3.UP * cos(gp) + _facing * sin(gp)).normalized()
 	elif wall_run:
-		up = (Vector3.UP + _wall_n * 0.12).normalized()  # chest to the wall, hips just off it
+		# Chest to the wall, hips just off it; running along it the body tips
+		# out from the wall, feet on its face.
+		var al := player.wall_run_along if player.wall_run else 0.0
+		up = (Vector3.UP + _wall_n * (0.12 + 0.75 * al)).normalized()
 	elif on_rope:
 		var target := s.anchor if attached else player.line_tip
 		var rope_dir := (target - player.global_position).normalized()
@@ -1062,10 +1184,13 @@ func _update_animated(dt: float) -> void:
 		up = Vector3.UP.lerp(v.normalized() if speed > 1.0 else Vector3.UP, lean).normalized()
 		if v.y < -6.0:
 			up = up.lerp(Vector3.UP, 0.5).normalized()  # dropping: feet stay under the body
-		if _glide > 0.0 and hs > 0.1:
-			# Gliding: pitched ~35° forward over the direction of travel.
-			var gl := (Vector3.UP * cos(0.62) + vh / hs * sin(0.62)).normalized()
-			up = up.slerp(gl, _glide).normalized()
+		var gw := maxf(_glide, _speedfly)
+		if gw > 0.0 and hs > 0.1:
+			# Gliding: pitched ~35° forward over the direction of travel; flying
+			# fast, flatter still (~60°) – the body lies into the airflow.
+			var pa := lerpf(0.62, 1.05, _speedfly)
+			var gl := (Vector3.UP * cos(pa) + vh / hs * sin(pa)).normalized()
+			up = up.slerp(gl, gw).normalized()
 		up = (up + _bank).normalized()  # banked into the turn
 		# Freefall arch: falling fast with height to spare, the body lies
 		# belly-down, head toward the travel direction.
@@ -1077,7 +1202,13 @@ func _update_animated(dt: float) -> void:
 		dive = maxf(dive, smoothstep(0.0, 1.0, _swan))
 		if dive > 0.0:
 			up = up.slerp(v.normalized(), dive * 0.85).normalized()
-			fwd_hint = Vector3.DOWN.slerp(_facing, 0.5).normalized()
+			# The chest is wherever a forward pitch from standing puts it for
+			# this "up": belly-down when level, facing back the way you came
+			# head-down. (Aiming it at the travel direction made the body
+			# half-turn about its own axis on the way into a vertical dive.)
+			var pitched := _facing * up.y - Vector3.UP * up.dot(_facing)
+			if pitched.length_squared() > 0.01:
+				fwd_hint = pitched.normalized()
 	var fwd := (fwd_hint - up * fwd_hint.dot(up)).normalized()
 	if fwd.length_squared() < 0.01:
 		fwd = (_facing - up * _facing.dot(up)).normalized()
@@ -1238,7 +1369,7 @@ func _update_animated(dt: float) -> void:
 			var wh := get_world_3d().direct_space_state.intersect_ray(wq)
 			reach = clampf(sh.distance_to(wh["position"]) - 0.02, 0.2, 0.53) if not wh.is_empty() else 0.5
 		for sd in ["l", "r"]:
-			if (sd == "r" and on_rope) or (sd == "l" and _lgrip > 0.5):
+			if (sd == web_side and on_rope) or (sd != web_side and _lgrip > 0.5):
 				continue
 			var sgn := -1.0 if sd == "l" else 1.0
 			var ik := _two_bone(chest_b, (into - chest_b.x * sgn * -0.25 * _press).normalized(), reach,
@@ -1300,6 +1431,12 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 	var run0 := g.run
 	var crouch := (0.012 + 0.038 * run0 + 0.018 * g.sprint) * clampf(hs / 1.2, 0.0, 1.0)
 	var td := g.touchdowns
+	# On a moving train the feet travel with the roof.
+	var carry := player.carry_velocity * dt
+	if carry != Vector3.ZERO:
+		g.shift(carry)
+		for sd in _plant:
+			_plant[sd][0] = (_plant[sd][0] as Vector3) + carry
 	g.update(dt, player.s.velocity, _facing, player.global_position, hips_w, ground, crouch)
 	if g.touchdowns != td:
 		footstep.emit(g.last_touchdown)
@@ -1413,16 +1550,33 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 ## side-bends toward the rope arm, legs stretch out when the line is taut and
 ## tuck when it goes slack, and lag the body's acceleration.
 func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float, speed: float) -> void:
+	if web_side == "r":
+		_pose_rope_r(q, dt, body, la, twist, speed)
+		return
+	# Left hand on the web: solve the right-handed swing in the world mirrored
+	# through the body's mid-plane, then mirror the pose back (left ↔ right).
+	_mir = true
+	_mir_o = player.global_position
+	_mir_n = body.x.normalized()
+	_mirror_pose(q)
+	_pose_rope_r(q, dt, body, Vector3(-la.x, la.y, la.z), -twist, speed)
+	_mirror_pose(q)
+	_mir = false
+
+
+## The swing as it would be with the web in the right hand; in mirror mode
+## every world input is reflected (see _mp / _bone_pos).
+func _pose_rope_r(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float, speed: float) -> void:
 	var s := player.s
 	var attached := player.line_state == Player.Line.ATTACHED
-	var target := s.anchor if attached else player.line_tip
+	var target := _mp(s.anchor if attached else player.line_tip)
 	var L := _load
 	q["spine"] = _rx(-0.06 * L + 0.18 * (1.0 - L) * float(attached)) * _ry(twist * 0.5) * _rz(-0.06 * L)
 	q["chest"] = _ry(twist * 0.6) * _rz(-0.12 - 0.1 * L) * _rx(-0.05 * L)
 	q["neck"] = _rz(0.06 * L)
 	q["head"] = _rx(-0.15 - 0.15 * L) * _ry(-twist * 0.4)  # eyes ahead along the swing
-	var chest_basis := body * Basis(_rot["spine"]) * Basis(_rot["chest"])
-	var shoulder := (bones["upper_arm_r"] as Node3D).global_position
+	var chest_basis := body * Basis(_mq(_rot["spine"])) * Basis(_mq(_rot["chest"]))
+	var shoulder := _bone_pos("upper_arm_r")
 	var reach := (0.29 + 0.26) * lerpf(0.86, 0.985, L if attached else 0.9)
 	var dir := (target - shoulder).normalized()
 	var ik_r := _two_bone(chest_basis, dir, reach, Vector3(0.75, -0.2, 0.6))
@@ -1435,7 +1589,7 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	var bal_up := _rz(-0.55 - (1.0 - L) * 0.35) * _rx(clampf(-la.z * 0.025, -0.9, 0.9) + 0.2)
 	var bal_fore := _rx(0.7 + (1.0 - L) * 0.3)
 	if _lgrip > 0.01:
-		var sh_l := (bones["upper_arm_l"] as Node3D).global_position
+		var sh_l := _bone_pos("upper_arm_l")
 		var hand_r := shoulder + dir * reach
 		var grip := hand_r - dir * 0.11  # just below the web hand
 		var dl := grip - sh_l
@@ -1466,7 +1620,7 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 		var qa := {}
 		for b in BONES:
 			qa[b] = Quaternion.IDENTITY
-		_pose_air(qa, s.velocity, speed, la, 0.0, twist)
+		_pose_air(qa, _md(s.velocity), speed, la, 0.0, twist)
 		for b in BONES:
 			if b == "upper_arm_r" or b == "forearm_r" or (b.ends_with("_l") and b.contains("arm") and _lgrip > 0.01):
 				continue
@@ -1517,8 +1671,8 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 			if tg and tg.pick_ok:
 				# Toward the web it would actually take next (above the line
 				# of travel), not just "up".
-				var sh_l := (bones["upper_arm_l"] as Node3D).global_position
-				var dn := (tg.pick - sh_l).normalized()
+				var sh_l := _bone_pos("upper_arm_l")
+				var dn := (_mp(tg.pick) - sh_l).normalized()
 				if dn.y > -0.2:
 					var ik_n := _two_bone(chest_basis, dn, 0.5, Vector3(-0.75, -0.2, 0.6))
 					ru = ik_n[0]
@@ -1530,12 +1684,85 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	# free arm spreads out wide and a little back like a wing – dipping or
 	# lifting with the turn.
 	var gw := _glide_rope * (1.0 - _lgrip)
+	var turn := -_turn if _mir else _turn
 	if gw > 0.01:
 		var flap := sin(_time * 2.3) * 0.05
-		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-1.28 - _turn * 0.3 - flap) * _rx(-0.5) * _ry(0.4), gw * 0.9)
+		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-1.28 - turn * 0.3 - flap) * _rx(-0.5) * _ry(0.4), gw * 0.9)
 		q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.3), gw * 0.9)
 		q["chest"] = (q["chest"] as Quaternion) * _rx(0.08 * _glide_rope)
-		q["head"] = (q["head"] as Quaternion) * _rx(0.22 * _glide_rope) * _ry(-_turn * 0.3)
+		q["head"] = (q["head"] as Quaternion) * _rx(0.22 * _glide_rope) * _ry(-turn * 0.3)
+
+
+## Web hand for a line fired at `t`: the hand on the anchor's side; an
+## anchor about straight ahead/above takes the other hand from last time, so
+## a run of webs alternates hands like a real swinger.
+func _pick_web_hand(t: Vector3) -> void:
+	if not bones.has("upper_arm_l"):
+		return
+	var sl := (bones["upper_arm_l"] as Node3D).global_position
+	var sr := (bones["upper_arm_r"] as Node3D).global_position
+	var across := sr - sl
+	# Moving: "right" is right of the direction of travel (what the player
+	# sees); standing, the body's own right.
+	var vh := Vector3(player.s.velocity.x, 0.0, player.s.velocity.z)
+	if vh.length() > 2.0:
+		across = vh.cross(Vector3.UP)
+	across.y = 0.0
+	if across.length_squared() < 1e-6:
+		return
+	var to := t - player.global_position
+	to.y = 0.0
+	var side_k := to.normalized().dot(across.normalized()) if to.length_squared() > 1e-4 else 0.0
+	var side := web_side
+	if side_k > 0.26:
+		side = "r"
+	elif side_k < -0.26:
+		side = "l"
+	else:
+		side = "l" if web_side == "r" else "r"
+	if side != web_side:
+		web_side = side
+		_lgrip = 0.0
+		if launcher and launcher.get_parent():
+			launcher.reparent(bones["hand_" + side], false)
+
+
+## Mirror helpers for the left-handed swing (identity when not mirroring).
+func _mp(p: Vector3) -> Vector3:
+	return p - _mir_n * 2.0 * (p - _mir_o).dot(_mir_n) if _mir else p
+
+
+func _md(v: Vector3) -> Vector3:
+	return v - _mir_n * 2.0 * v.dot(_mir_n) if _mir else v
+
+
+## Bone-local rotation reflected through the x = 0 plane (the rig is
+## symmetric: offsets are ±x).
+func _mq(r: Quaternion) -> Quaternion:
+	return Quaternion(r.x, -r.y, -r.z, r.w) if _mir else r
+
+
+## World position of `b` as seen in the (possibly mirrored) frame.
+func _bone_pos(b: String) -> Vector3:
+	if not _mir:
+		return (bones[b] as Node3D).global_position
+	return _mp((bones[_swap_side(b)] as Node3D).global_position)
+
+
+static func _swap_side(b: String) -> String:
+	if b.ends_with("_l"):
+		return b.substr(0, b.length() - 2) + "_r"
+	if b.ends_with("_r"):
+		return b.substr(0, b.length() - 2) + "_l"
+	return b
+
+
+## Reflect a whole pose left ↔ right (applied on the way in and out).
+func _mirror_pose(q: Dictionary) -> void:
+	var src := q.duplicate()
+	for b in src:
+		var r: Quaternion = src[b]
+		q[_swap_side(b)] = Quaternion(r.x, -r.y, -r.z, r.w)
 
 
 ## Two-bone IK in the parent's frame (chest for arms, hips for legs). `dir`
@@ -1724,9 +1951,12 @@ func _plant_gait(dt: float) -> void:
 				_lead = sd  # the knee coming through leads if we jump now
 			# The hips settle ahead of a touchdown the leg could only just
 			# reach (stepping down a kerb, a long stride) – never after it.
+			# Vertical only (a kerb, a step down): the foot's horizontal
+			# position mid-swing is still behind on its way forward, and
+			# measuring to it pulled the hips down every running stride.
 			if f.w > 0.55 and not f.settle:
-				var down := Vector3(f.out.x, minf(f.out.y, f.target.y), f.out.z)
-				drop = maxf(drop, (down.distance_to(hip) - (LEG_LEN - 0.005)) * smoothstep(0.55, 0.9, f.w))
+				var below := hip.y - minf(f.out.y, f.target.y)
+				drop = maxf(drop, (below - (LEG_LEN - 0.02)) * smoothstep(0.55, 0.9, f.w))
 		_toe[sd] = f.toe
 		_heel[sd] = f.heel
 		_foot_mode[sd] = f.pos if f.planted else null
@@ -1849,7 +2079,7 @@ func _guard_limbs() -> void:
 	for sd in ["l", "r"]:
 		var sgn := -1.0 if sd == "l" else 1.0
 		# The web hand stays on the line (the drawn web bends round edges instead).
-		if not (sd == "r" and player.line_state != Player.Line.IDLE and not ragdolling):
+		if not (sd == web_side and player.line_state != Player.Line.IDLE and not ragdolling):
 			_guard_chain(space, q, chest, "upper_arm_" + sd, "forearm_" + sd, "hand_" + sd, 0.29, 0.26,
 				Vector3(0, -0.12, 0), 1.0, false, Vector3(0.75 * sgn, -0.2, 0.6), dt)
 		# Feet stand on floors (foot IK owns that): legs are only kept out of
@@ -2068,6 +2298,30 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"thigh_" + tr: _rx(-0.22) * _rz(0.04 * sg[tr] - tn * 0.2),
 		"shin_" + ld: _rx(-0.75), "shin_" + tr: _rx(-0.22), "foot_" + ld: _rx(-0.55), "foot_" + tr: _rx(-0.7),
 	}, _glide)
+	# Speed flight: the streamline a body takes in fast air. Arms swept back
+	# along the sides (elbows soft, the lead one a touch higher and bent),
+	# chest leading, chin up to see ahead, legs together and long behind with
+	# one knee loose and the toes pointed. The air works on it: a quick
+	# flutter in the legs and forearms that grows with speed, and banking the
+	# arms tip with the turn. Weighted out near the ground, in a dive and in
+	# the freefall arch (those layers follow).
+	var sp := _speedfly * (1.0 - 0.6 * rising)
+	if sp > 0.001:
+		var buff := clampf((speed - 15.0) / 25.0, 0.0, 1.0)
+		var fl := sin(_time * 13.0) * 0.035 * buff
+		var fl2 := sin(_time * 11.3 + 1.7) * 0.035 * buff
+		var ab := 1.0 - 0.75 * dive  # head-down the arms lie along the sides
+		_put(q, {
+			"spine": _rx(0.08) * _ry(-tn * 0.15), "chest": _rx(0.1) * _ry(-tn * 0.12), "neck": _rx(0.14),
+			"head": _rx(0.36) * _ry(-tn * 0.35),
+			"upper_arm_" + ld: _rz((0.4 + tn * sg[ld] * 0.2) * sg[ld]) * _rx((-0.3 + fl) * ab),
+			"upper_arm_" + tr: _rz((0.3 + tn * sg[tr] * 0.2) * sg[tr]) * _rx((-0.5 - fl) * ab),
+			"forearm_" + ld: _rx(0.55 + fl2), "forearm_" + tr: _rx(0.28 - fl2),
+			"thigh_" + ld: _rx(0.12 + fl) * _rz(0.03 * sg[ld] - tn * 0.12),
+			"thigh_" + tr: _rx(-0.12 - fl) * _rz(0.02 * sg[tr] - tn * 0.12),
+			"shin_" + ld: _rx(-0.6 - fl2), "shin_" + tr: _rx(-0.2 + fl2),
+			"foot_" + ld: _rx(-0.65), "foot_" + tr: _rx(-0.75),
+		}, sp)
 	# Freefall arch.
 	_put(q, {
 		"spine": _rx(-0.3), "chest": _rx(-0.15), "neck": _rx(-0.2), "head": _rx(-0.45),
@@ -2087,11 +2341,15 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"thigh_l": _rx(0.55) * _rz(-0.08), "thigh_r": _rx(0.45) * _rz(0.08),
 		"shin_l": _rx(-0.75), "shin_r": _rx(-0.65), "foot_l": _rx(0.2), "foot_r": _rx(0.2),
 	}, near)
-	# Dive: streamlined, arms together overhead, toes pointed.
+	# Dive: streamlined, arms together overhead, toes pointed. Already flying
+	# fast with the arms swept back, they stay back (a tracking dive): blending
+	# back-swept into overhead passes through "arm hanging down".
 	_put(q, {
-		"spine": _rx(0.08), "chest": _rx(0.0), "neck": _rx(0.15), "head": _rx(-0.35),
 		"upper_arm_l": _rx(2.85) * _rz(0.12), "upper_arm_r": _rx(2.85) * _rz(-0.12),
 		"forearm_l": _rx(0.15), "forearm_r": _rx(0.15),
+	}, dive * (1.0 - _speedfly))
+	_put(q, {
+		"spine": _rx(0.08), "chest": _rx(0.0), "neck": _rx(0.15), "head": _rx(-0.35),
 		"thigh_l": _rx(0.05) * _rz(0.03), "thigh_r": _rx(-0.05) * _rz(-0.03),
 		"shin_l": _rx(-0.15), "shin_r": _rx(-0.25), "foot_l": _rx(-0.7), "foot_r": _rx(-0.7),
 	}, dive)
@@ -2202,7 +2460,7 @@ func _pose_trick(q: Dictionary, name: String, u: float) -> void:
 ## Running up a facade after a head-on hit: quick high-knee steps against the
 ## wall, arms reaching up alternately.
 func _pose_wall_run(q: Dictionary, dt: float) -> void:
-	_run_phase += dt * 15.0
+	_run_phase += dt * clampf(8.0 + player.s.velocity.y * 0.65, 11.0, 17.0)
 	var ph := _run_phase
 	q["spine"] = _rx(0.15)
 	q["chest"] = _rx(0.05)
@@ -2332,7 +2590,7 @@ func _drive_springs(q: Dictionary, dt: float, rope_arm: bool, grounded := true) 
 	var lw := _loco if grounded else 0.0
 	for b in BONES:
 		var grp := _group(b)
-		if rope_arm and (b == "upper_arm_r" or b == "forearm_r"):
+		if rope_arm and (b == "upper_arm_" + web_side or b == "forearm_" + web_side):
 			grp = "rope_arm"
 		var k: float = SPRINGS[grp][0]
 		var c: float = SPRINGS[grp][1]
@@ -2386,7 +2644,11 @@ static func _group(b: String) -> String:
 # ------------------------------------------------------------------ ragdoll
 func _update_ragdoll(dt: float) -> void:
 	_rag_time += dt
-	var anchor := player.global_position + Vector3(0, 0.08, 0)
+	# On the ground the body lies flat: the pelvis comes down from the
+	# capsule's centre to lying height (fast – it slaps down, it doesn't sink).
+	var lie := 1.0 if player.is_on_floor() else 0.0
+	_rag_low = move_toward(_rag_low, lie, dt * (9.0 if lie > _rag_low else 4.0))
+	var anchor := player.global_position + Vector3(0, 0.08 - 0.74 * _rag_low, 0)
 	var hanging := player.line_state == Player.Line.ATTACHED
 	ragdoll.hand_pin = player.hand_position() if hanging else Vector3.INF
 	# Protective reflex while dropping toward the ground: the arms reach down
@@ -2609,6 +2871,7 @@ var _shift_next := 4.0
 var _gaze := Vector2.ZERO   # current head yaw/pitch offset (rad)
 var _gaze_goal := Vector2.ZERO
 var _gaze_next := 1.5
+var _edge_goal := 0.0
 var _edge := 0.0            # 0..1 standing at a drop in front
 var _edge_probe := 0.0
 var _idle_sink := 0.0       # m the hips sink (winded)
@@ -2663,7 +2926,8 @@ func _idle_pose(q: Dictionary, k: float, dt: float) -> void:
 		var from := player.global_position + _facing * 0.85 + Vector3.UP * 0.3
 		var eq := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 3.5, player.collision_mask, [player.get_rid()])
 		var at_edge := get_world_3d().direct_space_state.intersect_ray(eq).is_empty()
-		_edge = 1.0 if at_edge else 0.0
+		_edge_goal = 1.0 if at_edge else 0.0
+	_edge = move_toward(_edge, _edge_goal, dt * 2.5)
 	var edge_k := _edge
 	var high := clampf((player.height_above_ground() - 25.0) / 80.0, 0.0, 1.0)
 	# Gaze: pick somewhere to look, ease to it, hold it a while.

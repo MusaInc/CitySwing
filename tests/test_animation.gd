@@ -60,32 +60,47 @@ func test_skinned_body_follows_the_rig(t) -> void:
 
 
 func test_web_hand_stays_on_the_line(t) -> void:
-	player.respawn(Vector3(-25, 48, -20))
-	player.s.velocity = Vector3(14, 0, 0)
-	player.fire_at(Vector3(0, 72, -32.0), 1)
-	var worst := 0.0
-	var frames := 0
-	var wing := INF  # how far out to the side the free hand gets (least, over the fast taut frames)
-	for i in 150:
-		await get_tree().process_frame
-		if player.line_state != Player.Line.ATTACHED or not player.s.taut:
-			continue
-		frames += 1
-		var sh := _pos("upper_arm_r")
-		var hand := _pos("hand_r")
-		var dir := (player.s.anchor - sh).normalized()
-		var off := (hand - sh) - dir * (hand - sh).dot(dir)
-		worst = maxf(worst, off.length())
-		if rig._glide_rope > 0.95 and i > 40:
-			# Swinging forward: the free arm is out wide like a wing (the hand
-			# well out past the left shoulder, along the body's left side).
-			var left := -rig.global_basis.x.normalized()
-			wing = minf(wing, (_pos("hand_l") - _pos("chest")).dot(left))
-	t.note("web hand off the line: worst %.1f cm over %d taut frames; free hand out %.2f m" % [
-		worst * 100.0, frames, wing])
-	t.check(frames > 30, "the swing was taut long enough to judge")
-	t.check(worst < 0.06, "the web hand stays on the rope line (IK)")
-	t.check(wing > 0.4 and wing < INF, "swinging forward, the free arm spreads out like a wing")
+	# The same swing with the anchor off to either side: the web goes from the
+	# hand on that side, which stays on the line; the other arm is the wing.
+	var sides := []
+	for az: float in [-32.0, -8.0]:
+		player.respawn(Vector3(-25, 48, -20))
+		player.s.velocity = Vector3(14, 0, 0)
+		for i in 3:
+			await get_tree().process_frame  # (the rig catches up with the respawn)
+		player.fire_at(Vector3(0, 72, az), 1)
+		var web: String = rig.web_side
+		var free := "l" if web == "r" else "r"
+		sides.append(web)
+		var worst := 0.0
+		var frames := 0
+		var wing := INF  # how far out to the side the free hand gets (least, over the fast taut frames)
+		for i in 150:
+			await get_tree().process_frame
+			if player.line_state != Player.Line.ATTACHED or not player.s.taut:
+				continue
+			frames += 1
+			var sh := _pos("upper_arm_" + web)
+			var hand := _pos("hand_" + web)
+			var dir := (player.s.anchor - sh).normalized()
+			var off := (hand - sh) - dir * (hand - sh).dot(dir)
+			worst = maxf(worst, off.length())
+			if rig._glide_rope > 0.95 and i > 40:
+				# Swinging forward: the free arm is out wide like a wing (the hand
+				# well out past its shoulder, along the body's free side).
+				var out := rig.global_basis.x.normalized() * (1.0 if free == "r" else -1.0)
+				wing = minf(wing, (_pos("hand_" + free) - _pos("chest")).dot(out))
+		var launch: Node3D = rig.launcher.get_parent()
+		t.note("anchor z %.0f: %s hand on the web, off the line worst %.1f cm over %d taut frames; free hand out %.2f m" % [
+			az, web, worst * 100.0, frames, wing])
+		t.check(launch == rig.bones["hand_" + web], "the web leaves from the hand holding it")
+		t.check(frames > 30, "the swing was taut long enough to judge")
+		t.check(worst < 0.06, "the web hand stays on the rope line (IK)")
+		t.check(wing > 0.4 and wing < INF, "swinging forward, the free arm spreads out like a wing")
+		player.release_web()
+		for i in 5:
+			await get_tree().process_frame
+	t.check(sides[0] != sides[1], "anchors on opposite sides take opposite hands")
 
 
 func test_running_feet_plant_instead_of_sliding(t) -> void:

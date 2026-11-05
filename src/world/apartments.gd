@@ -18,18 +18,20 @@ extends RefCounted
 ## the room out of the tier, and features skip the opening. Coordinates are
 ## the building's lot frame (CityLayout.bxf turns them into the world).
 
-const FLOOR := 3.6  # storey height (matches the facade shader's bands)
+const FLOOR := 3.6
+const WALL := 0.3    # outer wall thickness round a home's floor
+const SLACK := 4.5   # how much bigger than its spec a home's floor plate may be  # storey height (matches the facade shader's bands)
 const TIERS := [
-	{"id": "starter", "name": "Quay Studio", "floor": [14.0, 26.0], "w": 7.8, "d": 7.2, "h": 3.2,
-		"open_w": 2.6, "sill": 0.0, "open_h": 2.4, "price": 0, "view": 45.0},
-	{"id": "city", "name": "City Apartment", "floor": [28.0, 44.0], "w": 11.0, "d": 10.0, "h": 3.4,
-		"open_w": 4.0, "sill": 0.0, "open_h": 2.55, "price": 1500, "view": 80.0},
-	{"id": "loft", "name": "High-Rise Loft", "floor": [55.0, 85.0], "w": 14.0, "d": 12.0, "h": 4.4,
-		"open_w": 7.2, "sill": 0.0, "open_h": 3.7, "price": 4000, "view": 120.0},
-	{"id": "sky", "name": "Luxury Sky Apartment", "floor": [100.0, 150.0], "w": 18.0, "d": 14.0, "h": 4.2,
-		"open_w": 9.6, "sill": 0.0, "open_h": 3.3, "price": 9000, "view": 160.0},
-	{"id": "penthouse", "name": "Ultimate Penthouse", "floor": [-1.0, -1.0], "w": 24.0, "d": 18.0, "h": 5.2,
-		"open_w": 20.0, "sill": 0.0, "open_h": 4.0, "price": 20000, "view": 50.0, "cbd": 900.0},
+	{"id": "starter", "name": "Quay Studio", "floor": [14.0, 30.0], "w": 12.0, "d": 11.0, "h": 4.0,
+		"open_w": 4.2, "sill": 0.0, "open_h": 3.0, "price": 0, "view": 45.0},
+	{"id": "city", "name": "City Apartment", "floor": [28.0, 48.0], "w": 16.0, "d": 14.0, "h": 4.2,
+		"open_w": 6.4, "sill": 0.0, "open_h": 3.2, "price": 1500, "view": 80.0},
+	{"id": "loft", "name": "High-Rise Loft", "floor": [55.0, 90.0], "w": 20.0, "d": 16.0, "h": 6.2,
+		"open_w": 10.0, "sill": 0.0, "open_h": 5.2, "price": 4000, "view": 120.0},
+	{"id": "sky", "name": "Luxury Sky Apartment", "floor": [95.0, 155.0], "w": 24.0, "d": 18.0, "h": 5.2,
+		"open_w": 14.0, "sill": 0.0, "open_h": 4.2, "price": 9000, "view": 160.0},
+	{"id": "penthouse", "name": "Ultimate Penthouse", "floor": [-1.0, -1.0], "w": 26.0, "d": 20.0, "h": 7.2,
+		"open_w": 22.0, "sill": 0.0, "open_h": 5.8, "price": 20000, "view": 50.0, "cbd": 900.0},
 ]
 
 ## Placed homes: [{id, tier, name, b (building dict), t (tier index), face,
@@ -60,6 +62,7 @@ static func place(layout: CityLayout) -> Apartments:
 		best["tier"] = ti
 		best["name"] = spec["name"]
 		best["price"] = spec["price"]
+		best["wins"] = facade_windows(best)
 		var b: Dictionary = best["b"]
 		# Facade geometry needs a building frame, not a circular building→home→building graph.
 		var facade_home := best.duplicate()
@@ -109,9 +112,9 @@ func _candidates(spec: Dictionary, used: Dictionary) -> Array:
 		order = _layout.buildings.filter(func(b): return b["kind"] == "normal")
 		var tall := func(b: Dictionary) -> float: return float(b["tiers"][-1][5]) - BuildingMesher.base_of(b)
 		order.sort_custom(func(a, b): return tall.call(a) > tall.call(b))
-		order = order.slice(0, 12)
+		order = order.slice(0, 60)  # (a 26 m penthouse needs a broad top: the slimmest supertalls can't hold it)
 	for b in order:
-		if b["kind"] != "normal" or b.has("apt"):
+		if b["kind"] != "normal" or b.has("apt") or b.has("shape"):
 			continue
 		var base := BuildingMesher.base_of(b)
 		var tiers: Array = b["tiers"]
@@ -136,14 +139,18 @@ func _candidates(spec: Dictionary, used: Dictionary) -> Array:
 				var f := BuildingMesher._face(t, k)
 				var flen: float = f[3]
 				var depth := float(t[3]) - float(t[1]) if k % 2 == 0 else float(t[2]) - float(t[0])
-				if flen < spec["w"] + 3.0 or depth < spec["d"] + 3.0:
+				# The whole floor (360° glass): the room is the storey's footprint
+				# inside 0.3 m outer walls, so the tier must be about its size.
+				var rw := flen - 2.0 * WALL
+				var rd := depth - WALL
+				if rw < spec["w"] or rw > spec["w"] + SLACK or rd < spec["d"] or rd > spec["d"] + SLACK:
 					continue
-				var a0 := (flen - float(spec["w"])) * 0.5
-				var a1 := a0 + float(spec["w"])
+				var a0 := WALL
+				var a1 := flen - WALL
 				var oa0 := (flen - float(spec["open_w"])) * 0.5
 				var c := {"b": b, "t": ti, "face": k, "a0": a0, "a1": a1, "y0": y0, "y1": y0 + spec["h"],
 					"oa0": oa0, "oa1": oa0 + float(spec["open_w"]), "oy0": y0 + float(spec["sill"]),
-					"oy1": y0 + float(spec["sill"]) + float(spec["open_h"]), "depth": spec["d"]}
+					"oy1": y0 + float(spec["sill"]) + float(spec["open_h"]), "depth": rd}
 				var view := _view(c, spec)
 				if view < 0.0:
 					continue
@@ -153,6 +160,7 @@ func _candidates(spec: Dictionary, used: Dictionary) -> Array:
 					s -= Vector2(cp.x, cp.z).distance_to(CityLayout.CBD_CENTER) * (0.05 if spec["price"] > 0 else 0.0)
 				else:
 					s += (float(t[5]) - base) * 2.0  # height above its street first
+				s -= ((rw - float(spec["w"])) + (rd - float(spec["d"]))) * 70.0  # its intended size, not a hall
 				c["score"] = s
 				out.append(c)
 	return out
@@ -169,6 +177,10 @@ func _view(c: Dictionary, spec: Dictionary) -> float:
 	var reach := 320.0
 	var straight := _clear(p + n * 1.0, n, reach, skip)
 	if straight < float(spec["view"]):
+		return -1.0
+	# Open air under the window too: no neighbour's roof just below the sill
+	# (you'd step out onto it, and swing-ins land there instead of the sill).
+	if _clear(p + n * 1.0 + Vector3.DOWN * 4.0, n, 30.0, skip) < 30.0:
 		return -1.0
 	var l := _clear(p + n * 1.0, n.rotated(Vector3.UP, 0.49), reach, skip)
 	var r := _clear(p + n * 1.0, n.rotated(Vector3.UP, -0.49), reach, skip)
@@ -200,6 +212,41 @@ func _city_below(p: Vector3, n: Vector3, skip: Array) -> float:
 
 
 # ------------------------------------------------------------ geometry
+## The home's side and back windows as facade openings: [face k of its tier,
+## along0, along1, y0, y1] (local frame), from HomeInteriors.windows_for.
+static func facade_windows(c: Dictionary) -> Array:
+	var out: Array = []
+	var t: Array = (c["b"] as Dictionary)["tiers"][c["t"]]
+	var f := face_of(c)
+	var W := float(c["a1"]) - float(c["a0"])
+	var D := float(c["depth"])
+	var y0 := float(c["y0"])
+	var room := func(x: float, z: float) -> Vector3: return BuildingMesher._fpt(f, float(c["a0"]) + x, -z, 0.0)
+	for wd in HomeInteriors.windows_for(int(c["tier"]), W, D, float(c["y1"]) - y0):
+		var p0: Vector3
+		var p1: Vector3
+		match String(wd[0]):
+			"back":
+				p0 = room.call(wd[1], D)
+				p1 = room.call(wd[2], D)
+			"left":
+				p0 = room.call(0.0, wd[1])
+				p1 = room.call(0.0, wd[2])
+			_:
+				p0 = room.call(W, wd[1])
+				p1 = room.call(W, wd[2])
+		for k in 4:
+			var fk := BuildingMesher._face(t, k)
+			var o: Vector3 = fk[0]
+			var n: Vector3 = fk[2]
+			if absf((p0 - o).dot(n) + WALL) < 0.2 and absf((p1 - o).dot(n) + WALL) < 0.2:
+				var u0 := (p0 - o).dot(fk[1])
+				var u1 := (p1 - o).dot(fk[1])
+				out.append([k, minf(u0, u1), maxf(u0, u1), y0 + float(wd[3]), y0 + float(wd[4])])
+				break
+	return out
+
+
 ## Local-frame face of the home's tier.
 static func face_of(c: Dictionary) -> Array:
 	return BuildingMesher._face((c["b"] as Dictionary)["tiers"][c["t"]], c["face"])
@@ -230,7 +277,7 @@ static func along_dir(c: Dictionary) -> Vector3:
 static func spawn_point(c: Dictionary) -> Vector3:
 	# Near the glass in the big high rooms (so the follow camera, a few metres
 	# behind, still looks out over the city), mid-room in the small flats.
-	var back := 1.7 if float(c["depth"]) >= 8.0 else minf(float(c["depth"]) * 0.45, 3.0)
+	var back := 2.2 if float(c["depth"]) >= 10.0 else minf(float(c["depth"]) * 0.45, 3.0)
 	var p := window_center(c) - outward(c) * back
 	return Vector3(p.x, float(c["y0"]) + 0.95, p.z)
 

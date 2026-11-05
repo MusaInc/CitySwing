@@ -173,7 +173,6 @@ func test_multitouch_roles(t) -> void:
 	for i in 4:
 		await get_tree().physics_frame
 		await get_tree().process_frame
-	var yaw0 := cam_rig.view_yaw()
 	# Finger 0: stick. Finger 1: the big SWING button.
 	tc.touch_down(0, Vector2(200, 560))
 	tc.touch_drag(0, Vector2(200, 480))
@@ -183,9 +182,26 @@ func test_multitouch_roles(t) -> void:
 	for i in 30:
 		await get_tree().physics_frame
 	t.check(player.line_state == Player.Line.ATTACHED, "web attached")
-	# Finger 2 anywhere else on the right: a fresh web (re-attach) owned by finger 2.
-	tc.touch_down(2, Vector2(900, 200))
-	t.check(player.web_touch_id == 2, "a second right-side press re-attaches")
+	# Finger 6 on the open right side: free look, all while stick + web are held.
+	tc.touch_down(6, Vector2(900, 260))
+	t.check(player.web_touch_id == 1, "a look touch never fires or steals the web")
+	for i in 10:
+		tc.touch_drag(6, Vector2(900 - 12 * (i + 1), 260))
+		await get_tree().process_frame
+	for i in 10:
+		await get_tree().process_frame
+	t.check(absf(cam_rig.look_yaw) > 0.15, "dragging the right side turns the camera (%.2f rad)" % cam_rig.look_yaw)
+	# Held still while the hero swings: the view stays where the finger put it.
+	var held := cam_rig.view_yaw()
+	for i in 40:
+		await get_tree().physics_frame
+		await get_tree().process_frame
+	t.check(absf(wrapf(cam_rig.view_yaw() - held, -PI, PI)) < 0.01,
+		"the follow never fights a held look finger (drift %.3f rad)" % wrapf(cam_rig.view_yaw() - held, -PI, PI))
+	tc.touch_up(6)
+	# Finger 2 on SWING again: a fresh web (re-attach) owned by finger 2.
+	tc.touch_down(2, tc.button_center("grapple") + Vector2(-40, -60))
+	t.check(player.web_touch_id == 2, "a second SWING press re-attaches")
 	tc.touch_up(1)
 	t.check(player.line_state != Player.Line.IDLE, "lifting the old finger keeps the new web")
 	# JUMP is its own button, not a web.
@@ -196,7 +212,7 @@ func test_multitouch_roles(t) -> void:
 	t.check(player.line_state == Player.Line.IDLE, "lifting the owning finger lets go")
 	tc.touch_up(0)
 	t.check(not Input.is_action_pressed("move_forward"), "stick release clears movement")
-	t.check(absf(cam_rig.look_yaw) < 0.001, "touches never move the camera by hand (%.3f)" % cam_rig.look_yaw)
+	cam_rig.face(cam_rig.yaw)
 	# Tap mode (setting): the web goes exactly where the finger lands.
 	Settings.aim_mode = "tap"
 	_place(Vector3(12, 30, -30))
@@ -262,3 +278,17 @@ class _Idle:
 	extends RefCounted
 	func drive(_p, _dt) -> Dictionary:
 		return {"move": Vector3.ZERO, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+
+func test_home_tap_is_not_a_web_or_jump(t) -> void:
+	var controls := TouchControls.new()
+	add_child(controls)
+	controls.player = player
+	controls.home_button_rect = Rect2(500, 16, 56, 56)
+	var requests := [0]
+	controls.home_pressed.connect(func(): requests[0] += 1)
+	controls.touch_down(3, Vector2(528, 44))
+	t.check(requests[0] == 1, "one home request per tap")
+	t.check(controls.touches.is_empty(), "home tap creates no movement or web role")
+	t.check(player.line_state == Player.Line.IDLE, "home tap does not launch a web")
+	controls.touch_up(3)
+	controls.queue_free()

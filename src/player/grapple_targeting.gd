@@ -16,8 +16,12 @@ extends RefCounted
 
 const GRAPPLE_MASK := 1 << 1
 const ELEVATIONS := [30.0, 42.0, 55.0, 68.0, 80.0]
+## Falling from high with long reach (Player.reach_extra): flatter webs to
+## the facades of towers further off, which the steep fan misses.
+const LOW_ELEVATIONS := [12.0, 20.0, 30.0, 42.0, 55.0, 68.0, 80.0]
 const YAWS := [-42.0, -24.0, -9.0, 0.0, 9.0, 24.0, 42.0]
 
+var human_assist := false
 var has_target := false
 var point := Vector3.ZERO
 var normal := Vector3.ZERO
@@ -45,7 +49,7 @@ const STREET_CLEARANCE := 10.0   # m: arcs bottoming out lower than this rank do
 ## `aim` is the camera's forward vector; `travel` is the player's velocity.
 ## `steer` is the stick direction in world space (zero when not pushed).
 func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, travel: Vector3,
-		p: SwingParams, grounded: bool, exclude: Array[RID], steer := Vector3.ZERO) -> void:
+		p: SwingParams, grounded: bool, exclude: Array[RID], steer := Vector3.ZERO, low := false) -> void:
 	has_target = false
 	score = -INF
 	heading = Vector3(aim.x, 0.0, aim.z)
@@ -61,10 +65,14 @@ func update(space: PhysicsDirectSpaceState3D, origin: Vector3, aim: Vector3, tra
 	# Aim pitch nudges which elevation band is preferred (look up = steeper anchors).
 	var aim_pitch := rad_to_deg(asin(clampf(aim.normalized().y, -1.0, 1.0)))
 	var q := PhysicsRayQueryParameters3D.new()
-	q.collision_mask = GRAPPLE_MASK
+	# The web layer, plus solid-only bodies (world layer: e.g. the City Loop
+	# viaduct) as occluders – a web can't pass through them, so nothing
+	# behind one is a candidate. Buildings are on both layers (unchanged).
+	q.collision_mask = GRAPPLE_MASK | 1
 	q.exclude = exclude
 	var candidates: Array = []
-	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, ELEVATIONS, YAWS, candidates)
+	_scan(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, LOW_ELEVATIONS if low else ELEVATIONS,
+		YAWS, candidates)
 	if not anchor_lines.is_empty():
 		_scan_lines(space, origin, heading, travel_h, speed, aim_pitch, p, grounded, q, candidates)
 	# (Tried: a ±65–90° side fan when nothing ahead qualifies. Novices flew
@@ -90,7 +98,7 @@ func _scan(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vector3, 
 			q.from = origin
 			q.to = origin + dir * p.grapple_range
 			var hit := space.intersect_ray(q)
-			if hit.is_empty():
+			if hit.is_empty() or not _grabbable(hit):
 				continue
 			var pt: Vector3 = hit["position"]
 			var rise := pt.y - origin.y
@@ -161,6 +169,11 @@ func _scan_lines(space: PhysicsDirectSpaceState3D, origin: Vector3, heading: Vec
 			candidates.append([s, pt, Vector3.DOWN])
 
 
+static func _grabbable(hit: Dictionary) -> bool:
+	var col = hit.get("collider")
+	return col is CollisionObject3D and ((col as CollisionObject3D).collision_layer & GRAPPLE_MASK) != 0
+
+
 static func _closest_on_segment_to_ray(a: Vector3, b: Vector3, o: Vector3, d: Vector3) -> Vector3:
 	var u := b - a
 	var w := a - o
@@ -207,7 +220,7 @@ func refresh_pick(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.Sta
 		if near:
 			continue
 		tried.append(pt)
-		var r := predict_swing(space, from_state, pt, p, exclude, heading)
+		var r := predict_swing(space, from_state, pt, p, exclude, heading, human_assist)
 		if not r["clear"]:
 			continue
 		var exit_v: Vector3 = r["exit_v"]
@@ -250,7 +263,7 @@ static func predict_swing_clear(space: PhysicsDirectSpaceState3D, from_state: Sw
 ## flight (window scaled to the rope's swing period). clear = no building or street on the way; exit_v = velocity at the
 ## release; min_y = lowest point; path = sampled body positions.
 static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhysics.State, anchor: Vector3,
-		p: SwingParams, exclude: Array[RID], _heading: Vector3) -> Dictionary:
+		p: SwingParams, exclude: Array[RID], _heading: Vector3, assisted := false) -> Dictionary:
 	var out := {"clear": false, "released": false, "landed": false, "exit_v": Vector3.ZERO, "min_y": from_state.position.y,
 		"path": PackedVector3Array()}
 	var s := SwingPhysics.State.new()
@@ -259,6 +272,7 @@ static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhy
 	if not SwingPhysics.attach(s, anchor, p):
 		return out
 	var c := SwingPhysics.Controls.new()
+	c.human = assisted
 	var attach_length := s.rope_length
 	var q := PhysicsRayQueryParameters3D.new()
 	q.collision_mask = 1 | GRAPPLE_MASK | (1 << 3)
@@ -277,7 +291,7 @@ static func predict_swing(space: PhysicsDirectSpaceState3D, from_state: SwingPhy
 	for i in steps:
 		var a := s.position
 		if released < 0.0:
-			c.reel = SwingPhysics.auto_tighten(s, p, attach_length)  # same pull as the real player
+			c.reel = SwingPhysics.auto_tighten(s, p, attach_length, assisted)  # same pull as the real player
 		SwingPhysics.step(s, c, p, dt)
 		var dir := s.position - a
 		q.from = a

@@ -61,6 +61,8 @@ const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var furniture_mat: StandardMaterial3D
 var trains: Trains
+var sea_sky: SeaAndSky   # port ships, boats, helicopter, airliner, gulls (visual only)
+var ads: AdScreens
 var _lamp_mat: BaseMaterial3D   # the streetlight head's emissive material (brightened at night)
 var _lamp_base := 1.0
 var _glow_mats: Array[ShaderMaterial] = []  # [pool, halo]
@@ -126,6 +128,11 @@ func _ready() -> void:
 	_build_landmarks()
 	_build_structures()
 	_build_homes()
+	if not secondary:
+		ads = AdScreens.new()
+		ads.name = "Ads"
+		add_child(ads)
+		ads.build(layout)
 	if traffic_density > 0.0 and not car_meshes.is_empty():
 		traffic = Traffic.new()
 		traffic.name = "Traffic"
@@ -137,6 +144,10 @@ func _ready() -> void:
 	trains.name = "Trains"
 	add_child(trains)
 	trains.setup(layout.rail.lines, _load_mesh("train_car"), _load_mesh("train_cab"))
+	sea_sky = SeaAndSky.new()
+	sea_sky.name = "SeaAndSky"
+	add_child(sea_sky)
+	sea_sky.setup(layout)
 	_bake_street_maps()
 	if secondary:
 		print("Mainland: %d buildings, %d chunks, %d ms" % [layout.buildings.size(), _all_keys.size(),
@@ -144,10 +155,14 @@ func _ready() -> void:
 		return
 	_bake_ground_height()
 	_build_birds()
+	var hinter := Hinterland.new()
+	hinter.name = "Hinterland"
+	add_child(hinter)
 	mainland = CityWorld.new()
 	mainland.name = "Mainland"
 	mainland.secondary = true
-	mainland.layout = CityLayout.new().generate_mainland(layout.seed)
+	# (The island's layout made Westbank's already: the railway crosses to it.)
+	mainland.layout = layout.mainland if layout.mainland else CityLayout.new().generate_mainland(layout.seed)
 	add_child(mainland)
 	layout.mainland = mainland.layout
 	# (The bridge's anchor lines are the island layout's; the mainland's
@@ -158,6 +173,10 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	for task in _pending.values():
+		WorkerThreadPool.wait_for_task_completion(task)
+	_pending.clear()
+	_results.clear()
 	if not secondary:
 		GrappleTargeting.anchor_lines = []
 
@@ -409,10 +428,20 @@ func _clear_spot(t: Array, roof_props: Dictionary, b: Dictionary = {}) -> Dictio
 			nearby.append_array(roof_props.get(c + Vector2i(dx, dz), []))
 	var best := {}
 	var best_margin := 0.0
+	# A shaped roof (round, chamfered, notched): only spots inside its real
+	# outline, the edge clearance in from it.
+	var roof_poly := PackedVector2Array()
+	if not b.is_empty() and BuildingMesher.shaped(b):
+		var ins := Geometry2D.offset_polygon(BuildingMesher.footprint(b, t), -ROOF_EDGE_CLEARANCE)
+		if ins.is_empty():
+			return {}
+		roof_poly = ins[0]
 	for i in 5:
 		for j in 5:
 			var x := lerpf(x0, x1, i / 4.0)
 			var z := lerpf(z0, z1, j / 4.0)
+			if not roof_poly.is_empty() and not Geometry2D.is_point_in_polygon(Vector2(x, z), roof_poly):
+				continue
 			var margin := 30.0
 			for pr in nearby:
 				var o: Vector3 = to_local * (pr[1].origin as Vector3)
@@ -566,6 +595,10 @@ func set_sky_colors(_top: Color, _horizon: Color) -> void:
 func set_night(n: float) -> void:
 	if trains:
 		trains.set_night(n)
+	if sea_sky:
+		sea_sky.set_night(n)
+	if ads:
+		ads.set_night(n)
 	if mainland:
 		mainland.set_night(n)
 	if _lamp_mat:
@@ -787,6 +820,12 @@ func _place_furniture() -> Dictionary:
 					elif roll < 0.6:
 						put.call("planter", d, 4.0)
 				d += rng.randf_range(16.0, 34.0)
+	for item in layout.public_furniture:
+		var p: Vector3 = item[1].origin
+		var key := Vector2i(floori(p.x / CHUNK), floori(p.z / CHUNK))
+		if not out.has(key):
+			out[key] = []
+		out[key].append(item)
 	return out
 
 
@@ -850,6 +889,13 @@ func _build_collision() -> void:
 					_add_box_xf(body, box, X)
 				else:
 					_add_box(body, box)
+			for hull: PackedVector3Array in BuildingMesher.collision_hulls(b):
+				var cs := CollisionShape3D.new()
+				var cp := ConvexPolygonShape3D.new()
+				cp.points = hull
+				cs.shape = cp
+				cs.transform = X
+				body.add_child(cs)
 			if b["kind"] == "normal":
 				for box: AABB in BuildingMesher.features(b)["col_human"]:
 					_add_box_xf(soft, box, X)
@@ -917,6 +963,19 @@ func _build_collision() -> void:
 		cs2.shape = cv
 		kit.add_child(cs2)
 	add_child(kit)
+	if not layout.kit_obbs_solid.is_empty():
+		var solid := StaticBody3D.new()
+		solid.name = "SetPieceSolid"
+		solid.collision_layer = 1  # (no web layer: see CityLayout.kit_solid_only)
+		solid.collision_mask = 0
+		for ob in layout.kit_obbs_solid:
+			var cs3 := CollisionShape3D.new()
+			var bs3 := BoxShape3D.new()
+			bs3.size = ob[1]
+			cs3.shape = bs3
+			cs3.transform = ob[0]
+			solid.add_child(cs3)
+		add_child(solid)
 
 
 ## Solid shapes for every drawn prop, in the prop's own frame:
@@ -1237,7 +1296,10 @@ func update_streaming(pos: Vector3, budget := -1) -> void:
 	order.sort_custom(func(a, b): return want[a] < want[b])
 	var in_flight := _pending.size()
 	for key in order:
-		if _loaded.has(key) or _pending.has(key):
+		_mutex.lock()
+		var ready: bool = _results.has(key)
+		_mutex.unlock()
+		if _loaded.has(key) or _pending.has(key) or ready:
 			continue
 		if in_flight >= 3:
 			break
@@ -1594,6 +1656,14 @@ func _pavement_paths() -> Array:
 				var b := Vector3(r[(k + 1) % r.size()].x, 0.15, r[(k + 1) % r.size()].y)
 				if a.distance_to(b) > 6.0:
 					out.append([a, b] if fwd else [b, a])
+	# The quay promenade has its own walking route, clear of the garden bays.
+	if not layout.is_mainland:
+		for z in range(-500, 501, 100):
+			var a := Vector3(33.8, 0.15, z)
+			var b := a + Vector3(0, 0, 85)
+			if not layout.is_water(a) and not layout.is_water(b):
+				out.append([a, b])
+				out.append([b + Vector3(1.1, 0, 0), a + Vector3(1.1, 0, 0)])
 	return out
 
 
@@ -1747,6 +1817,13 @@ func _add_occluder(root: Node3D, key: Vector2i) -> void:
 		var x1: float = t[2] - 0.5
 		var z1: float = t[3] - 0.5
 		var y1: float = t[5] - 0.5
+		if b.has("apt"):
+			# A home is cut into this tower: an occluder round the room would
+			# hide the whole city from inside it (the view is the point), so
+			# it stops below the room's floor.
+			y1 = minf(y1, float(b["apt"]["y0"]) - 0.5)
+			if y1 - t[4] < 20.0:
+				continue
 		var base := v.size()
 		var X := CityLayout.bxf(b)
 		for q: Vector3 in [Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1),

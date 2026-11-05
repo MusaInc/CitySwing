@@ -26,6 +26,13 @@ const DEFAULTS := {
 	"outfit": {},       # Shop slot -> item id (the suit stays in "suit")
 	"homes": [],        # bought homes (Homes; the starter is always owned)
 	"home": "starter",  # the home Free Swing starts in
+	# Contracts (Contracts / JobBoard). Flat keys: older saves load unchanged.
+	"rep": 0,           # reputation (rank ladder in Contracts.RANKS)
+	"jobs_done": 0,     # contracts completed (legal + underworld)
+	"jobs_crime": 0,    # of which underworld
+	"jobs_failed": 0,   # out of time / busted / abandoned
+	"jobs_busted": 0,
+	"jobs_earned": 0,   # coins paid by contracts (net of fines)
 }
 
 
@@ -40,19 +47,48 @@ func use_file(p: String) -> void:
 
 func load_data() -> void:
 	data = DEFAULTS.duplicate(true)
-	if not FileAccess.file_exists(path):
-		return
-	var f := FileAccess.open(path, FileAccess.READ)
+	# The save, or – if it is missing or unreadable (the app killed mid-write
+	# on an older build, a bad disk block) – the last good copy.
+	for p in [path, path + ".bak"]:
+		var parsed = _read(p)
+		if parsed is Dictionary:
+			for k in parsed:
+				data[k] = parsed[k]
+			if p != path:
+				push_warning("SaveData: %s unreadable, recovered from backup" % path)
+			return
+
+
+static func _read(p: String):
+	if not FileAccess.file_exists(p):
+		return null
+	var f := FileAccess.open(p, FileAccess.READ)
+	if f == null:
+		return null
 	var parsed = JSON.parse_string(f.get_as_text())
-	if parsed is Dictionary:
-		for k in parsed:
-			data[k] = parsed[k]
+	return parsed if parsed is Dictionary and not (parsed as Dictionary).is_empty() else null
 
 
+## Atomic save: write a temp file, check it reads back, keep the previous save
+## as .bak, then move the new one into place. A crash or the OS killing the
+## app at any point leaves a complete save (or its backup) on disk.
 func save() -> void:
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(data, "  "))
+	var tmp := path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		push_warning("SaveData: cannot write %s" % tmp)
+		return
+	f.store_string(JSON.stringify(data, "  "))
+	f.flush()
+	f.close()
+	if _read(tmp) == null:
+		push_warning("SaveData: temp save did not read back; keeping the old save")
+		return
+	var dir := DirAccess.open(path.get_base_dir())
+	if dir:
+		if FileAccess.file_exists(path):
+			dir.copy(path, path + ".bak")
+		dir.rename(tmp, path)
 	changed.emit()
 
 
@@ -118,6 +154,28 @@ func complete_tutorial() -> void:
 func add_coins(n: int) -> void:
 	data["coins"] = int(data["coins"]) + n
 	data["coins_earned"] = int(data["coins_earned"]) + n
+
+
+## Records a settled contract: coins (may be a fine), reputation, counters.
+## A fine never takes the balance below zero.
+func record_job(legal: bool, outcome: String, coins: int, rep: int) -> int:
+	if coins < 0:
+		coins = -mini(-coins, int(data["coins"]))
+		data["coins"] = int(data["coins"]) + coins
+	elif coins > 0:
+		add_coins(coins)
+	data["jobs_earned"] = int(data.get("jobs_earned", 0)) + coins
+	data["rep"] = int(data.get("rep", 0)) + rep
+	if outcome == "done":
+		data["jobs_done"] = int(data.get("jobs_done", 0)) + 1
+		if not legal:
+			data["jobs_crime"] = int(data.get("jobs_crime", 0)) + 1
+	else:
+		data["jobs_failed"] = int(data.get("jobs_failed", 0)) + 1
+		if outcome == "busted":
+			data["jobs_busted"] = int(data.get("jobs_busted", 0)) + 1
+	save()
+	return coins
 
 
 func set_suit(id: String) -> void:

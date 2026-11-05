@@ -47,6 +47,8 @@ const TUNABLES := [
 ]
 
 var params: SwingParams  # live params of the player (tuning edits these)
+## Free Swing's contracts while a session runs (main sets it), else null.
+var jobs: JobBoard
 var screen_name := ""    # current screen id (debug bridge / tests)
 var _screen: Control
 var _theme := Theme.new()
@@ -171,14 +173,31 @@ func _brand(root: Control, studio := false) -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(MenuParts.Logo.new(0.64 if studio else 0.48))
+	box.add_child(MenuParts.Logo.new(0.95 if studio else 0.62))
 	if studio:
 		box.add_child(_label("A MUSA STUDIOS GAME", 12, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	# A soft pool of Night Ink behind the lockup: it sits in the shot (and
+	# stays legible over a bright sky) instead of floating on top of it.
+	var pool := TextureRect.new()
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	g.colors = PackedColorArray([Color(UiStyle.INK, 0.62), Color(UiStyle.INK, 0.3), Color(UiStyle.INK, 0.0)])
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	pool.texture = gt
+	pool.stretch_mode = TextureRect.STRETCH_SCALE
+	pool.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pool.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(pool)
 	root.add_child(box)
 	var place := func():
-		var vp := get_viewport_rect().size
 		var sa := _safe_rect()
 		box.position = Vector2(sa.position.x + 34.0, sa.end.y - box.size.y - 26.0)
+		pool.size = box.size * Vector2(1.7, 2.4)
+		pool.position = box.position + box.size * 0.5 - pool.size * 0.5
 	place.call_deferred()
 	root.resized.connect(place)
 
@@ -260,10 +279,9 @@ func _show_main() -> void:
 	_brand(root)
 	var col := _menu_column(root)
 	var trained: bool = SaveData.data["tutorial_done"]
-	var tokens := SaveData.token_count()
 	var mc := Progress.medal_counts()
 	var best_e: float = SaveData.data["best_endurance_m"]
-	var play := _menu_row("PLAY", "Free swing  ·  %d/%d tokens" % [tokens, Progress.TOKEN_TOTAL],
+	var play := _menu_row("PLAY", "Open City  ·  jobs, homes, tokens  ·  %s" % Contracts.rank_name(int(SaveData.data.get("rep", 0))),
 		func(): start_mode.emit("free", ""), 34, true)
 	_reg("free", play)
 	var train := _menu_row("Training", "Start here" if not trained else "Swing, release, steer",
@@ -310,7 +328,7 @@ func _show_main() -> void:
 func show_courses() -> void:
 	var box := _page("time_trial", "TIME TRIAL", show_title, 640)
 	box.add_child(_label("Fly the rings in order. Medals come from the par time.", 18, DIM, "semibold",
-		HORIZONTAL_ALIGNMENT_LEFT))
+		HORIZONTAL_ALIGNMENT_RIGHT))
 	var first: Button
 	for id in CourseBuilder.COURSES:
 		var c := CourseBuilder.load_course(id)
@@ -326,7 +344,6 @@ func show_courses() -> void:
 		_reg("course_" + id, b)
 		box.add_child(b)
 		var targets := HBoxContainer.new()
-		targets.add_child(_gap_x(70))
 		for md in [Progress.Medal.GOLD, Progress.Medal.SILVER, Progress.Medal.BRONZE]:
 			targets.add_child(_chip("medal", Progress.MEDAL_COLORS[md],
 				TimeTrialMode._fmt(Progress.medal_target(c["par"], md)), 15))
@@ -355,8 +372,8 @@ func show_suits() -> void:
 ## scroll to zoom; the camera frames the category being browsed. Picking an
 ## item only previews it; Wear / Buy (confirmed) commit, leaving restores the
 ## equipped look.
-const SHOP_FOCUS := {"suit": "suit", "pants": "pants", "shoes": "shoes", "gloves": "gloves", "head": "head",
-	"face": "face", "web": "web", "gadget": "gadget"}
+const SHOP_FOCUS := {"hero": "face", "hair": "face", "top": "suit", "suit": "suit", "pants": "pants", "shoes": "shoes", "gloves": "gloves",
+	"head": "head", "face": "face", "web": "web", "gadget": "gadget"}
 var _thumbs: ThumbStudio
 var _thumb_rects := {}     # item id -> TextureRect on the current grid
 var _confirm_id := ""      # purchase awaiting its confirming tap
@@ -417,10 +434,11 @@ func show_shop(tab := "", sel := "", anim := true) -> void:
 	head.add_theme_constant_override("separation", 14)
 	var bb := Button.new()
 	bb.custom_minimum_size = Vector2(56, 56)
-	bb.add_theme_stylebox_override("normal", _box(Color(1, 1, 1, 0.08), 28))
-	bb.add_theme_stylebox_override("hover", _box(Color(1, 1, 1, 0.16), 28))
-	bb.add_theme_stylebox_override("focus", _box(Color(1, 1, 1, 0.12), 28, ACCENT, 3))
-	bb.add_theme_stylebox_override("pressed", _box(Color(ACCENT, 0.35), 28, ACCENT, 3))
+	bb.focus_mode = Control.FOCUS_ALL
+	bb.add_theme_stylebox_override("normal", _box(Color(UiStyle.INK, 0.35), 28, Color(1, 1, 1, 0.22), 1))
+	bb.add_theme_stylebox_override("hover", _box(Color(UiStyle.INK, 0.5), 28, ACCENT, 2))
+	bb.add_theme_stylebox_override("focus", _box(Color(UiStyle.INK, 0.5), 28, ACCENT, 2))
+	bb.add_theme_stylebox_override("pressed", _box(Color(ACCENT, 0.3), 28, ACCENT, 2))
 	var bic := MenuParts.Icon.new("back", Color.WHITE, 26)
 	bic.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	bic.position -= Vector2(13, 13)
@@ -429,7 +447,7 @@ func show_shop(tab := "", sel := "", anim := true) -> void:
 		_tap(0.8)
 		_leave_shop())
 	head.add_child(_reg("back", bb))
-	var title := _label("Wardrobe", 34, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	var title := _label("WARDROBE", 30, ACCENT, "black", HORIZONTAL_ALIGNMENT_LEFT)
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(title)
 	head.add_child(_spacer())
@@ -437,6 +455,10 @@ func show_shop(tab := "", sel := "", anim := true) -> void:
 	bal.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(bal)
 	col.add_child(head)
+	var hair := ColorRect.new()
+	hair.color = Color(1, 1, 1, 0.14)
+	hair.custom_minimum_size = Vector2(0, 1)
+	col.add_child(hair)
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation", 14)
@@ -472,7 +494,7 @@ func show_shop(tab := "", sel := "", anim := true) -> void:
 		if it["id"] == _shop_sel:
 			focus = t
 	right.add_child(_shop_detail(Shop.item(_shop_sel)))
-	look_changed.emit(Shop.look({_shop_tab: _shop_sel}))
+	look_changed.emit(Shop.try_on(_shop_tab, _shop_sel))
 	preview_focus.emit(SHOP_FOCUS.get(_shop_tab, "full"))
 	if focus:
 		focus.grab_focus.call_deferred()
@@ -498,12 +520,16 @@ func _shop_cat(slot: String, name: String, on: bool) -> Button:
 	var ink := UiStyle.INK if on else ACCENT
 	var ic: Control
 	if slot in ["head", "face"]:
-		ic = MenuParts.Swatch.new({"slot": slot, "model": "cap" if slot == "head" else "shades"}, 30)
+		ic = MenuParts.Swatch.new({"slot": slot, "model": "cap" if slot == "head" else "", "mask": "" if slot == "head" else "domino"}, 30)
+	elif slot == "hero":
+		ic = MenuParts.Swatch.new({"slot": "hero", "skin": ink, "hair": Color(ink, 0.5)}, 30)
+	elif slot == "top":
+		ic = MenuParts.Swatch.new({"slot": "top", "cut": "short", "color": ink}, 30)
 	else:
 		ic = MenuParts.Swatch.new({"slot": slot, "color": ink, "glow": ink, "sole": ink}, 30)
 	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	v.add_child(ic)
-	v.add_child(_label("Hoodies" if slot == "suit" else name, 13, UiStyle.INK if on else Color.WHITE, "bold",
+	v.add_child(_label(name, 13, UiStyle.INK if on else Color.WHITE, "bold",
 		HORIZONTAL_ALIGNMENT_CENTER))
 	b.add_child(v)
 	b.pressed.connect(func():
@@ -544,10 +570,19 @@ func _preview_input(ev: InputEvent) -> void:
 		_pinch[ev.index] = ev.position
 
 
+## Set while the Wardrobe is open from a home (main restores the game).
+var shop_return := Callable()
+
+
 func _leave_shop() -> void:
 	_confirm_id = ""
 	look_changed.emit(Shop.look())
-	show_title()
+	if shop_return.is_valid():
+		var r := shop_return
+		shop_return = Callable()
+		r.call()
+	else:
+		show_title()
 
 
 ## A thumbnail tile: the item rendered on the hero, its name, its state.
@@ -693,8 +728,8 @@ func _coin_chip(n: int, size := 17) -> PanelContainer:
 
 
 # =================================================================== stats
-func show_stats() -> void:
-	var box := _page("stats", "STATS", show_title, 640)
+func show_stats(back := Callable()) -> void:
+	var box := _page("stats", "STATS", back if back.is_valid() else show_title, 640)
 	var d: Dictionary = SaveData.data
 	var mc := Progress.medal_counts()
 	var grid := GridContainer.new()
@@ -734,7 +769,7 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_row("60 FPS", _check(Settings.fps_60, func(v): Settings.fps_60 = v; Settings.save())))
 	if OS.is_debug_build():
 		box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))
-	box.add_child(_label("Draw-distance changes apply on next launch.", 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_label("Draw-distance changes apply on next launch.", 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 	box.add_child(_section("World"))
 	var tod := OptionButton.new()
 	var tod_ids := ["cycle", "day", "sunset", "night"]
@@ -771,13 +806,13 @@ func show_settings(back: Callable) -> void:
 	box.add_child(_row("Music", _slider(Settings.music_volume, 0.0, 1.0, 0.05, func(v): Settings.music_volume = v; Settings.save())))
 	box.add_child(_row("Effects", _slider(Settings.sfx_volume, 0.0, 1.0, 0.05, func(v): Settings.sfx_volume = v; Settings.save())))
 	box.add_child(_section("Device"))
-	var bench := _card("Run benchmark", "45 s scripted flight  ·  saves benchmark.json", "bench",
+	var bench := _card("Performance test", "A 45 s flight  ·  how smoothly this device runs CitySwing", "bench",
 		func(): start_mode.emit("benchmark", ""))
 	_reg("benchmark", bench)
 	box.add_child(bench)
 	box.add_child(_gap(6))
-	box.add_child(_label("City Swing v%s  ·  Musa Studios  ·  Outfit font (SIL OFL)" %
-		ProjectSettings.get_setting("application/config/version", "1.0"), 14, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_label("CitySwing v%s  ·  Musa Studios  ·  Outfit font (SIL OFL)" %
+		ProjectSettings.get_setting("application/config/version", "1.0"), 14, FAINT, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 	box.add_child(_menu_row("Character credits", "", func(): show_character_credits(back), 16))
 	q.grab_focus.call_deferred()
 
@@ -799,10 +834,17 @@ func show_pause(free_swing := false) -> void:
 		var st := HBoxContainer.new()
 		st.add_child(_chip("token", UiStyle.TEAL, "TOKENS %d/%d" % [SaveData.token_count(), Progress.TOKEN_TOTAL], 17))
 		st.add_child(_chip("coin", Color.WHITE, "%s COINS" % Hud._fmt_int(Shop.coins()), 17))
+		var rep := int(SaveData.data.get("rep", 0))
+		st.add_child(_chip("job", UiStyle.GOLD, Contracts.rank_name(rep).to_upper(), 17))
 		box.add_child(st)
 	var b := _card("Resume", "Back to the swing", "play", func(): resume.emit(), "", true)
 	_reg("resume", b)
 	box.add_child(b)
+	if free_swing and jobs:
+		var sub := "Pick up work around the city"
+		if not jobs.active.is_empty():
+			sub = "On the job: %s" % jobs.active["title"]
+		box.add_child(_reg("jobs", _card("Job Board", sub, "job", func(): show_jobs(show_pause.bind(free_swing)), "%d" % jobs.offers.size())))
 	if free_swing:
 		box.add_child(_reg("end", _card("End session", "See your distance and tokens", "check", func(): end_session.emit())))
 	else:
@@ -818,20 +860,122 @@ func show_pause(free_swing := false) -> void:
 	b.grab_focus.call_deferred()
 
 
+# =================================================================== jobs
+## Contracts on offer around you (the same ones standing as beacons in the
+## city), your rank, and the job you're on. Tracking an offer points the
+## route arrow and the minimap at its pickup; the job starts when you get
+## there.
+func show_jobs(back: Callable) -> void:
+	var box := _page("jobs", "Job Board", back, 680, 0.35)
+	var rep := int(SaveData.data.get("rep", 0))
+	var r := Contracts.rank_for(rep)
+	# Rank card: name, bar to the next, totals.
+	var rp := PanelContainer.new()
+	rp.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.7), 16, Color(UiStyle.GOLD, 0.35), 1, 14))
+	var rv := VBoxContainer.new()
+	rv.add_theme_constant_override("separation", 6)
+	rp.add_child(rv)
+	var top := HBoxContainer.new()
+	top.add_child(MenuParts.Icon.new("job", UiStyle.GOLD, 30))
+	var rn := _label(Contracts.RANKS[r], 26, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	rn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(rn)
+	var nxt := "MAX RANK" if r >= Contracts.RANKS.size() - 1 else "%d / %d rep  →  %s" % [rep, Contracts.RANK_REP[r + 1], Contracts.RANKS[r + 1]]
+	top.add_child(_label(nxt, 15, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
+	rv.add_child(top)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(0, 8)
+	bar.show_percentage = false
+	bar.max_value = 1.0
+	bar.value = Contracts.rank_progress(rep)
+	bar.add_theme_stylebox_override("background", _box(Color(1, 1, 1, 0.1), 4))
+	bar.add_theme_stylebox_override("fill", _box(UiStyle.GOLD, 4))
+	rv.add_child(bar)
+	rv.add_child(_label("%d done  ·  %d underworld  ·  %d busted  ·  %s coins earned  ·  contracts up to tier %d" % [
+		int(SaveData.data.get("jobs_done", 0)), int(SaveData.data.get("jobs_crime", 0)),
+		int(SaveData.data.get("jobs_busted", 0)), Hud._fmt_int(int(SaveData.data.get("jobs_earned", 0))),
+		Contracts.max_tier(rep)], 14, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(rp)
+	if jobs == null:
+		return
+	if not jobs.active.is_empty():
+		var c := jobs.active
+		box.add_child(_section("On the job"))
+		box.add_child(_job_row(c, -1, back))
+		var ab := _card("Drop the contract", "Counts as failed" + ("" if c["legal"] else " (no fine)"), "back",
+			func():
+				jobs.abandon()
+				show_jobs(back))
+		box.add_child(_reg("job_abandon", ab))
+		return
+	box.add_child(_section("Legal work"))
+	box.add_child(_para("Steady pay and reputation. Land on a teal beacon to take the job.", 14))
+	for o in jobs.offers:
+		if o["legal"]:
+			box.add_child(_job_row(o, o["id"], back))
+	box.add_child(_section("Underworld"))
+	box.add_child(_para("About 2.4× the pay – and drones. Stay fast and high: heat builds while one can see you, and getting busted costs a fine.", 14))
+	for o in jobs.offers:
+		if not o["legal"]:
+			box.add_child(_job_row(o, o["id"], back))
+
+
+func _job_row(c: Dictionary, id: int, back: Callable) -> PanelContainer:
+	var legal: bool = c["legal"]
+	var col: Color = JobBoard.COL_LEGAL if legal else JobBoard.COL_CRIME
+	var on := id >= 0 and jobs.tracked == id
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.7), 16,
+		col if on else Color(1, 1, 1, 0.08), 2 if on else 1, 12))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	p.add_child(row)
+	var ic := MenuParts.Icon.new("job" if legal else "crime", col, 34)
+	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(ic)
+	var tx := VBoxContainer.new()
+	tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tx.add_theme_constant_override("separation", 0)
+	var tier := " ·  " + "★".repeat(int(c["tier"]))
+	tx.add_child(_label("%s%s" % [c["title"], tier], 21, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
+	var dist := 0
+	if jobs.player:
+		dist = int(jobs.player.global_position.distance_to(c["start"]))
+	var info := "%s  ·  %d m away  ·  %d m route  ·  %ds" % [c["client"], dist, int(Contracts.path_length(c)), int(c["time"])]
+	tx.add_child(_label(info, 14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	var br := _label(c["brief"], 13, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT)
+	br.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tx.add_child(br)
+	row.add_child(tx)
+	var pay := VBoxContainer.new()
+	pay.alignment = BoxContainer.ALIGNMENT_CENTER
+	pay.add_child(_label(Hud._fmt_int(c["pay"]), 24, UiStyle.GOLD, "black", HORIZONTAL_ALIGNMENT_RIGHT))
+	pay.add_child(_label("+%d rep" % int(c["rep"]), 13, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
+	row.add_child(pay)
+	if id >= 0:
+		var tb := _icon_button("check" if on else "play", "Tracking" if on else "Track", func():
+			jobs.track(id)
+			show_jobs(back))
+		tb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(_reg("job_track_%d" % id, tb))
+	return p
+
+
 # ================================================================== homes
 ## Five real homes in the city's buildings, from the bedsit to the penthouse:
 ## where each is, how high, and one action – Home / Make home / Buy (with a
 ## confirming tap) / how many coins it needs. In Free Swing, owned homes can
 ## be gone to right away.
 var homes_info: Array = []   # [{id, name, height, price}] (main fills it from the layout)
+## One line on each home's character (HomeInteriors builds them to match).
+const HOME_STYLE := ["Courier studio", "Scandi one-bed", "Industrial loft", "Marble & walnut", "Pool, mezzanine, Hall of Fame"]
 var _home_confirm := ""
 
 
 func show_homes(back: Callable, in_game := false) -> void:
 	var box := _page("homes", "Homes", back, 640)
 	var cur := Homes.selected()
-	box.add_child(_label("Live up the city: each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in.",
-		15, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_para("Each home is a real flat in a real tower – wake up there, run out of the window, swing home and climb back in. Coming home rests you: your coin multiplier starts higher the better the home. At home: change in the wardrobe, sleep the day away, take work from the job screen, and see your trophies on the shelf."))
 	var bal := _coin_chip(Shop.coins(), 18)
 	box.add_child(bal)
 	for i in homes_info.size():
@@ -844,12 +988,22 @@ func show_homes(back: Callable, in_game := false) -> void:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 14)
 		p.add_child(row)
+		var shot := "res://assets/ui/homes/%s.jpg" % id
+		if ResourceLoader.exists(shot):
+			var pic := TextureRect.new()
+			pic.texture = load(shot)
+			pic.custom_minimum_size = Vector2(176, 99)
+			pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+			pic.modulate = Color.WHITE if owned else Color(0.78, 0.78, 0.8)
+			row.add_child(pic)
 		var tx := VBoxContainer.new()
 		tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tx.add_theme_constant_override("separation", 0)
 		tx.add_child(_label(hi["name"], 22, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
-		tx.add_child(_label("Tier %d  ·  %d m above the street" % [i + 1, int(hi["height"])], 14, DIM, "semibold",
-			HORIZONTAL_ALIGNMENT_LEFT))
+		var perk := "  ·  rested ×%s" % Hud._fmt_mult(1.0 + i * CoinMeter.STEP) if i > 0 else ""
+		tx.add_child(_label("%s  ·  %s  ·  %d m up%s" % [HOME_STYLE[i] if i < HOME_STYLE.size() else "Tier %d" % (i + 1),
+			hi.get("size", ""), int(hi["height"]), perk], 14, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
 		row.add_child(tx)
 		if id == cur:
 			row.add_child(_chip("home", ACCENT, "HOME", 16))
@@ -884,19 +1038,24 @@ func show_homes(back: Callable, in_game := false) -> void:
 		if in_game and owned:
 			var go := _icon_button("play", "Go", func(): go_home.emit(id))
 			row.add_child(_reg("home_go_" + id, go))
+		elif in_game:
+			# Look round before you buy: you can't use it or come back in
+			# through its window until it's yours.
+			var vis := _icon_button("home", "Visit", func(): go_home.emit(id))
+			row.add_child(_reg("home_visit_" + id, vis))
 		box.add_child(p)
 
 
 # ================================================================= results
 func show_results(r: Dictionary) -> void:
 	var mode: String = r.get("mode", "")
-	var titles := {"trial": "COURSE COMPLETE", "endurance": "RUN OVER", "benchmark": "BENCHMARK",
+	var titles := {"trial": "COURSE COMPLETE", "endurance": "RUN OVER", "benchmark": "PERFORMANCE TEST",
 		"training": "TRAINING COMPLETE"}
 	var box := _page("results", titles.get(mode, "SESSION"), Callable(), 640, 0.2)
 	if mode == "benchmark":
 		box.add_child(_big("%.1f fps" % r["avg_fps"]))
 		box.add_child(_label("%s · %s quality · target %d fps" % [r["device"], r["quality"], r["target_fps"]], 20, DIM,
-			"semibold", HORIZONTAL_ALIGNMENT_LEFT))
+			"semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 		var g := GridContainer.new()
 		g.columns = 3
 		g.add_theme_constant_override("h_separation", 10)
@@ -906,8 +1065,8 @@ func show_results(r: Dictionary) -> void:
 				["%d" % int(r["avg_draw_calls"]), "Draw calls"], ["%dk" % int(r["avg_prims"] / 1000.0), "Primitives"]]:
 			g.add_child(_tile(e[0], e[1], 190))
 		box.add_child(g)
-		box.add_child(_label("CPU %.1f ms process + %.1f ms physics  ·  saved to benchmark.json" % [r["cpu_process_ms"],
-			r["cpu_physics_ms"]], 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+		box.add_child(_label("CPU %.1f ms process + %.1f ms physics" % [r["cpu_process_ms"],
+			r["cpu_physics_ms"]], 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 		var bb := _card("Title", "", "home", func(): quit_to_title.emit(), "", true)
 		_reg("title", bb)
 		box.add_child(bb)
@@ -924,7 +1083,7 @@ func show_results(r: Dictionary) -> void:
 			detail = "%s   ·   best %d m" % [r["reason"], int(r["best"])]
 		"training":
 			headline = "You're ready"
-			detail = "Free Swing hides %d tokens around the city." % Progress.TOKEN_TOTAL
+			detail = "%d tokens are hidden around the open city." % Progress.TOKEN_TOTAL
 		_:
 			headline = "%.2f km" % (r.get("distance", 0.0) / 1000.0)
 			detail = "%d token%s this session   ·   %d/%d found" % [r.get("tokens_session", 0),
@@ -938,7 +1097,7 @@ func show_results(r: Dictionary) -> void:
 	if badges.get_child_count() > 0:
 		box.add_child(badges)
 	box.add_child(_big(headline))
-	box.add_child(_label(detail, 20, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	box.add_child(_label(detail, 20, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 	var g2 := HBoxContainer.new()
 	var tw := 140 if r.has("close_calls") else 190  # four tiles fit the 640 px page
 	g2.add_child(_tile("%d" % r.get("swings", 0), "Swings", tw))
@@ -953,11 +1112,14 @@ func show_results(r: Dictionary) -> void:
 		cr.add_child(_chip("coin", Color.WHITE, "BEST ×%s" % Hud._fmt_mult(r.get("best_mult", 1.0)), 20))
 		cr.add_child(_chip("coin", Color.WHITE, "BALANCE %s" % Hud._fmt_int(Shop.coins()), 20))
 		box.add_child(cr)
+	if int(r.get("jobs_session", 0)) > 0 or int(r.get("job_coins", 0)) != 0:
+		box.add_child(_chip("job", UiStyle.GOLD, "%d CONTRACT%s  ·  %s COINS" % [int(r.get("jobs_session", 0)),
+			"" if int(r.get("jobs_session", 0)) == 1 else "S", Hud._fmt_int(int(r.get("job_coins", 0)))], 18))
 	for u in r.get("unlocks", []):
 		box.add_child(_chip("suit", UiStyle.TEAL, "SUIT UNLOCKED: %s" % String(u).to_upper(), 18))
 	var b: Button
 	if mode == "training":
-		b = _card("Free Swing", "The whole city, your pace", "play", func(): start_mode.emit("free", ""), "", true)
+		b = _card("Open City", "The whole city is yours", "play", func(): start_mode.emit("free", ""), "", true)
 	else:
 		b = _card("Go again", "Same mode, fresh start", "restart", func(): restart.emit(), "", true)
 	_reg("again", b)
@@ -970,7 +1132,7 @@ func show_results(r: Dictionary) -> void:
 func show_tuning() -> void:
 	var box := _page("tuning", "PHYSICS TUNING", show_pause, 820, 0.35)
 	box.add_child(_label("Live – changes apply immediately and are saved on this device.", 16, FAINT, "semibold",
-		HORIZONTAL_ALIGNMENT_LEFT))
+		HORIZONTAL_ALIGNMENT_RIGHT))
 	var first: Control
 	for t in TUNABLES:
 		var prop: String = t[0]
@@ -1047,45 +1209,64 @@ func _margins(root: Control, l: float, t: float, r: float, b: float) -> MarginCo
 	return m
 
 
-## A left-hand page: header (back button + title) over a scrolling column.
+## A page in the main menu's language: a column down the right of the
+## screen over the live city (edge shade, no panel), the wordmark signing the
+## bottom-left, a gold title with a hairline under it, rows that light gold
+## with a bar at the right edge. Everything hugs the right edge.
 ## `dim` darkens the whole view too (pause / results over gameplay).
 func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0, anim := true) -> VBoxContainer:
 	var root := _new_screen(id)
 	if dim > 0.0:
 		var shade := ColorRect.new()
-		shade.color = Color(0, 0, 0, dim)
+		shade.color = Color(UiStyle.INK, dim)
 		shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		root.add_child(shade)
-	root.add_child(MenuParts.backdrop(1.0, 0.66))
-	var m := _margins(root, MARGIN, 30, MARGIN, 24)
+	root.add_child(MenuParts.edge_shade(1.0, 0.62))
+	_brand(root)
 	var col := VBoxContainer.new()
-	col.custom_minimum_size.x = width
-	col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	col.add_theme_constant_override("separation", 14)
-	m.add_child(col)
+	col.add_theme_constant_override("separation", 10)
+	root.add_child(col)
+	var place := func():
+		var sa := _safe_rect()
+		var w := minf(float(width), sa.size.x * 0.52)
+		col.custom_minimum_size = Vector2(w, 0)
+		col.size = Vector2(w, sa.size.y - 30.0 - 24.0)
+		# (by its real width: content wider than asked still ends at the edge)
+		col.position = Vector2(sa.end.x - col.size.x - 34.0, sa.position.y + 30.0)
+	place.call_deferred()
+	root.resized.connect(place)
+	col.resized.connect(func():
+		var sa := _safe_rect()
+		col.position.x = sa.end.x - col.size.x - 34.0)
 	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 18)
+	head.add_theme_constant_override("separation", 14)
 	if back.is_valid():
 		var bb := Button.new()
-		bb.custom_minimum_size = Vector2(64, 64)
-		bb.add_theme_stylebox_override("normal", _box(Color(1, 1, 1, 0.08), 32))
-		bb.add_theme_stylebox_override("hover", _box(Color(1, 1, 1, 0.16), 32))
-		bb.add_theme_stylebox_override("focus", _box(Color(1, 1, 1, 0.12), 32, ACCENT, 3))
-		bb.add_theme_stylebox_override("pressed", _box(Color(ACCENT, 0.35), 32, ACCENT, 3))
-		var ic := MenuParts.Icon.new("back", Color.WHITE, 30)
+		bb.custom_minimum_size = Vector2(56, 56)
+		bb.focus_mode = Control.FOCUS_ALL
+		bb.add_theme_stylebox_override("normal", _box(Color(UiStyle.INK, 0.35), 28, Color(1, 1, 1, 0.22), 1))
+		bb.add_theme_stylebox_override("hover", _box(Color(UiStyle.INK, 0.5), 28, ACCENT, 2))
+		bb.add_theme_stylebox_override("focus", _box(Color(UiStyle.INK, 0.5), 28, ACCENT, 2))
+		bb.add_theme_stylebox_override("pressed", _box(Color(ACCENT, 0.3), 28, ACCENT, 2))
+		var ic := MenuParts.Icon.new("back", Color.WHITE, 26)
 		ic.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-		ic.position -= Vector2(15, 15)
+		ic.position -= Vector2(13, 13)
 		bb.add_child(ic)
 		bb.pressed.connect(func():
 			_tap(0.8)
 			back.call())
 		head.add_child(bb)
 		_reg("back", bb)
-	var t := _label(title.capitalize() if title == title.to_upper() else title, 34, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	head.add_child(_spacer())
+	var t := _label(title.to_upper(), 30, ACCENT, "black", HORIZONTAL_ALIGNMENT_RIGHT)
 	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(t)
 	col.add_child(head)
+	var sep := ColorRect.new()
+	sep.color = Color(1, 1, 1, 0.14)
+	sep.custom_minimum_size = Vector2(0, 1)
+	col.add_child(sep)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1093,8 +1274,22 @@ func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0, 
 	col.add_child(scroll)
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_theme_constant_override("separation", 12)
+	box.add_theme_constant_override("separation", 6)
 	scroll.add_child(box)
+	# Open at the top (focusing the first row before layout settles could
+	# leave the page scrolled past its intro).
+	var top := func():
+		await get_tree().process_frame
+		await get_tree().process_frame
+		if is_instance_valid(scroll):
+			scroll.scroll_vertical = 0
+	top.call()
+	# Rows of chips/buttons and grids hug the right edge like the menu.
+	box.child_entered_tree.connect(func(c: Node):
+		if c is HBoxContainer:
+			(c as HBoxContainer).alignment = BoxContainer.ALIGNMENT_END
+		elif c is GridContainer or (c is PanelContainer and (c as Control).size_flags_horizontal == Control.SIZE_SHRINK_BEGIN):
+			(c as Control).size_flags_horizontal = Control.SIZE_SHRINK_END)  # (chips; full-width rows stay full width)
 	if anim:
 		_enter(col)
 	return box
@@ -1128,49 +1323,36 @@ func _reg(id: String, b: Control) -> Control:
 
 
 # ============================================================== components
-## A mode card: icon, title, subtitle, and a stat (or badge) on the right.
+## A row in the main menu's style: title and caption right-aligned, no box;
+## focus/hover lights it gold with a slim bar at the right edge. A stat (or
+## badge) sits at the far left. `primary` = the gold call to action. The icon
+## is only drawn when it carries a colour (a suit, a medal).
 func _card(title: String, sub: String, icon: String, cb: Callable, stat := "", primary := false,
 		stat_icon := "", stat_color := ACCENT, icon_color := Color.TRANSPARENT) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 92 if primary else 80)
+	b.custom_minimum_size = Vector2(0, 68 if primary else 58)
 	b.focus_mode = Control.FOCUS_ALL
-	var ink := UiStyle.INK if primary else Color.WHITE
-	if primary:
-		var st: Array = _card_style["primary"]
-		b.add_theme_stylebox_override("normal", st[0])
-		b.add_theme_stylebox_override("hover", st[1])
-		b.add_theme_stylebox_override("focus", st[2])
-		b.add_theme_stylebox_override("pressed", st[3])
+	var on := StyleBoxFlat.new()
+	on.bg_color = Color(UiStyle.INK, 0.42)
+	on.border_color = ACCENT
+	on.border_width_right = 3
+	on.set_corner_radius_all(6)
+	var empty := StyleBoxEmpty.new()
+	b.add_theme_stylebox_override("normal", empty)
+	for st in ["hover", "focus", "pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(st, on)
 	var row := HBoxContainer.new()
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.offset_left = 20
-	row.offset_right = -20
-	row.add_theme_constant_override("separation", 16)
+	row.offset_left = 12
+	row.offset_right = -16
+	row.add_theme_constant_override("separation", 14)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var ic := MenuParts.Icon.new(icon, icon_color if icon_color.a > 0.0 else (ink if primary else ACCENT),
-		38 if primary else 32)
-	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(ic)
-	var texts := VBoxContainer.new()
-	texts.alignment = BoxContainer.ALIGNMENT_CENTER
-	texts.add_theme_constant_override("separation", 0)
-	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	texts.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var tl := _label(title, 30 if primary else 23, ink, "black" if primary else "bold", HORIZONTAL_ALIGNMENT_LEFT)
-	texts.add_child(tl)
-	if sub != "":
-		var sl := _label(sub, 15, Color(ink, 0.68), "semibold", HORIZONTAL_ALIGNMENT_LEFT)
-		sl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		sl.clip_text = true
-		texts.add_child(sl)
-	row.add_child(texts)
 	if stat_icon != "":
-		var si := MenuParts.Icon.new(stat_icon, stat_color, 24)
+		var si := MenuParts.Icon.new(stat_icon, stat_color, 22)
 		si.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(si)
 	if stat != "":
-		var stl := _label(stat, 19 if stat != "NEW" else 16, stat_color if not primary else ink, "black",
-			HORIZONTAL_ALIGNMENT_RIGHT)
+		var stl := _label(stat, 18 if stat != "NEW" else 15, stat_color, "black", HORIZONTAL_ALIGNMENT_LEFT)
 		stl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		if stat == "NEW":
 			var badge := PanelContainer.new()
@@ -1182,7 +1364,31 @@ func _card(title: String, sub: String, icon: String, cb: Callable, stat := "", p
 			row.add_child(badge)
 		else:
 			row.add_child(stl)
+	var texts := VBoxContainer.new()
+	texts.alignment = BoxContainer.ALIGNMENT_CENTER
+	texts.add_theme_constant_override("separation", -2)
+	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	texts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tl := _label(title, 28 if primary else 22, ACCENT if primary else Color.WHITE, "black" if primary else "bold",
+		HORIZONTAL_ALIGNMENT_RIGHT)
+	texts.add_child(tl)
+	if sub != "":
+		var sl := _label(sub, 13, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT)
+		sl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		sl.clip_text = true
+		texts.add_child(sl)
+	row.add_child(texts)
+	if icon_color.a > 0.0:
+		var ic := MenuParts.Icon.new(icon, icon_color, 26)
+		ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(ic)
 	b.add_child(row)
+	var light := func(on_: bool):
+		tl.add_theme_color_override("font_color", ACCENT if (on_ or primary) else Color.WHITE)
+	b.focus_entered.connect(light.bind(true))
+	b.focus_exited.connect(light.bind(false))
+	b.mouse_entered.connect(light.bind(true))
+	b.mouse_exited.connect(func(): light.call(b.has_focus()))
 	b.pressed.connect(func():
 		_tap()
 		cb.call())
@@ -1192,14 +1398,22 @@ func _card(title: String, sub: String, icon: String, cb: Callable, stat := "", p
 ## Round-cornered icon + label button (secondary actions).
 func _icon_button(icon: String, text: String, cb: Callable) -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 64)
+	b.custom_minimum_size = Vector2(0, 56)
+	var on := StyleBoxFlat.new()
+	on.bg_color = Color(UiStyle.INK, 0.5)
+	on.border_color = ACCENT
+	on.border_width_right = 3
+	on.set_corner_radius_all(6)
+	b.add_theme_stylebox_override("normal", _box(Color(UiStyle.INK, 0.35), 6))
+	for st in ["hover", "focus", "pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(st, on)
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_theme_constant_override("separation", 10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.add_child(MenuParts.Icon.new(icon, ACCENT, 26))
-	row.add_child(_label(text, 20, Color.WHITE, "bold"))
+	row.add_child(MenuParts.Icon.new(icon, ACCENT, 22))
+	row.add_child(_label(text, 18, Color.WHITE, "bold"))
 	b.add_child(row)
 	var tw := UiStyle.font("bold").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
 	b.custom_minimum_size.x = tw + 26 + 10 + 48
@@ -1211,7 +1425,7 @@ func _icon_button(icon: String, text: String, cb: Callable) -> Button:
 
 func _chip(icon: String, col: Color, text: String, size := 17) -> PanelContainer:
 	var p := PanelContainer.new()
-	p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.6), 20, Color(1, 1, 1, 0.1), 1, 8))
+	p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.5), 6, Color(1, 1, 1, 0.1), 1, 8))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	var ic := MenuParts.Icon.new(icon, col, size + 4)
@@ -1227,23 +1441,32 @@ func _chip(icon: String, col: Color, text: String, size := 17) -> PanelContainer
 func _tile(value: String, caption: String, width := 300) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.custom_minimum_size = Vector2(width, 0)
-	p.add_theme_stylebox_override("panel", _box(Color(1, 1, 1, 0.06), 16, Color.TRANSPARENT, 0, 16))
+	p.add_theme_stylebox_override("panel", _box(Color(UiStyle.INK, 0.42), 6, Color.TRANSPARENT, 0, 14))
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 0)
-	v.add_child(_label(value, 32, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT))
-	v.add_child(_label(caption, 15, DIM, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	v.add_theme_constant_override("separation", -2)
+	v.add_child(_label(value, 28, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_RIGHT))
+	v.add_child(_label(caption, 13, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
 	p.add_child(v)
 	return p
 
 
 func _big(text: String) -> Label:
-	return _label(text, 84, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	return _label(text, 72, Color.WHITE, "black", HORIZONTAL_ALIGNMENT_RIGHT)
 
 
 func _section(text: String) -> Label:
-	var l := _label(text.to_upper(), 15, ACCENT, "black", HORIZONTAL_ALIGNMENT_LEFT)
+	var l := _label(text.to_upper(), 14, ACCENT, "black", HORIZONTAL_ALIGNMENT_RIGHT)
 	l.custom_minimum_size.y = 34
 	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	return l
+
+
+## A wrapping paragraph for page intros (never widens the page).
+func _para(text: String, size := 15) -> Label:
+	var l := _label(text, size, DIM, "semibold", HORIZONTAL_ALIGNMENT_RIGHT)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.custom_minimum_size.x = 200
 	return l
 
 

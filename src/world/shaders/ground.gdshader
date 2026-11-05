@@ -186,6 +186,25 @@ void fragment() {
 		vec2 f = fract(p / 1.8);
 		albedo *= 1.0 - 0.1 * (step(f.x, 0.03) + step(f.y, 0.03));
 	}
+	if (!shore && v_up < 0.3 && COLOR.a < 0.06) {
+		// Retaining walls (BuildingMesher._skirt, KIND_WALL; UV = metres along,
+		// world y): coursed dressed stone instead of a flat grey slab – 0.6 m
+		// courses of 1.2 m blocks, alternate courses half offset, recessed
+		// joints, a little tone per block and faint rain streaks running down.
+		float yy = v_world.y;
+		float row = floor(yy / 0.6);
+		float bx = p.x / 1.2 + 0.5 * mod(row, 2.0);
+		vec2 blk = vec2(floor(bx), row);
+		float tone = hash12(blk + 7.0);
+		float jx = abs(fract(bx) - 0.5) * 1.2;          // m from the block's centre (along)
+		float jy = abs(fract(yy / 0.6) - 0.5) * 0.6;    // (up)
+		float joint = max(band(jx - 0.6, 0.025, aa), band(jy - 0.3, 0.022, aa)) * near;
+		albedo = c * (0.9 + 0.16 * tone) * (0.93 + 0.1 * vnoise(vec2(p.x, yy) * 1.7));
+		albedo *= 1.0 - 0.3 * joint;
+		float streak = smoothstep(0.55, 0.9, vnoise(vec2(p.x * 1.8, yy * 0.08))) * 0.12;
+		albedo *= 1.0 - streak;
+		rough = 0.88;
+	}
 	if (wetness > 0.001 && flat_top) {
 		// Wet streets: everything darkens and gets a sheen; puddles collect in
 		// the dips of a low-frequency noise (and fill as the rain goes on),

@@ -9,18 +9,25 @@ extends Node3D
 ##    they persist for over a second – no 180° spins.
 ##  * Pitch is fixed with a gentle, rate-limited tilt for dives.
 ##  * Near the street it tilts up so the buildings to swing from are in view.
-##  * No manual camera on touch. (Controller stick / mouse can still offset the
-##    view; it eases back behind the player 0.8 s after the input stops.)
+##  * Free look (touch drag on the right, mouse, stick): a manual offset that
+##    turns a full 360° (pitch clamped). While the player is looking – and
+##    for LOOK_HOLD s after – every automatic yaw/pitch change is cancelled
+##    out of the view, so the follow never fights the finger. After that it
+##    eases back behind the player, but only while they are moving.
 ##  * Critically damped position follow, speed-based FOV, sphere-cast
 ##    collision that pulls in smoothly and never leaves the camera in a wall.
 ##  * Swing framing: big arcs get a wider shot and the view lifts toward the
 ##    line; the camera dips with the down-swing and looks up out of a
 ##    release toward the next anchor (biased a little toward the web pick).
 ##  * Feel: landings dip the view, catching a web gives a small tug, a
-##    gentle bank (max 4°) leans into sustained turns at speed.
+##    gentle bank (max 2.5°) leans into sustained turns at speed – the
+##    horizon stays readable at 200 km/h.
+##  * Facade clearance: walls up to 6 m beside the line slide the lens away,
+##    and walls ahead-side turn the view a little (≤10°) toward the open
+##    street, so a tower never fills half the frame.
 
 @export var base_fov := 70.0
-@export var max_fov := 82.0  # restrained: wide enough to sell speed, no fish-eye
+@export var max_fov := 86.0  # restrained: wide enough to sell speed, no fish-eye
 @export var fov_speed_full := 50.0
 @export var follow_smooth := 0.12
 @export var aim_smooth := 0.08
@@ -28,7 +35,10 @@ extends Node3D
 @export var steer_follow_rate := 5.5      # 1/s, the same while the player steers in the air
 @export var max_yaw_speed := deg_to_rad(120.0)
 @export var reversal_hold := 1.0          # s a >110° heading change must persist before following
-@export var recenter_delay := 0.8
+@export var recenter_delay := 1.6
+## Total view pitch limits (follow pitch + manual look).
+const LOOK_PITCH_MIN := deg_to_rad(-65.0)
+const LOOK_PITCH_MAX := deg_to_rad(45.0)
 @export var base_pitch := deg_to_rad(-12.0)
 @export var collision_margin := 0.35
 
@@ -48,6 +58,7 @@ var _damp_vel: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _dist := 6.0
 var _height := 1.6
 var _since_look := 10.0
+var _look_pending := Vector2.ZERO  # touch look not yet applied (smoothed in)
 var _reverse_time := 0.0
 var _heading := 0.0       # filtered travel heading
 var _col_dist := -1.0
@@ -67,6 +78,10 @@ var _pick_bias := Vector3.ZERO
 var _crane := 0.0          # 0..1 lift over the shoulder when squeezed
 var _side := 0.0           # m the lens slides sideways away from a close facade
 var _side_t := 0.0
+var _clear_yaw := 0.0      # rad the view turns away from a facade close ahead-side
+var _clear_t := 0.0
+var _aim_q := Quaternion.IDENTITY  # smoothed view rotation (no frame-to-frame snaps)
+var _aim_init := false
 var _shake := 0.0          # metres of positional shake (decays)
 var _shake_t := 0.0
 var _body: Node3D          # the character, hidden if the lens gets inside it
@@ -83,6 +98,15 @@ var cine: Callable
 ## is below the horizon (HomeSystem sets it while the hero is inside).
 var look_down := 0.0
 var _look_down := 0.0
+## Scripted shots (cine) that frame something other than the hero hide it.
+var hide_body := false
+## Indoors (set by HomeSystem): the room's ceiling height (world y), else INF.
+## A home is a box a few metres across: the lens comes in closer and lower,
+## never cranes into the ceiling, and treats partitions and big furniture
+## (HUMAN_LAYER, ignored outdoors) as walls.
+var indoor_ceiling := INF
+var _indoor := 0.0         # 0 outdoors → 1 indoors (eased)
+var _mask := 1 | (1 << 1)
 
 
 func _ready() -> void:
@@ -90,7 +114,7 @@ func _ready() -> void:
 	cam.name = "Camera"
 	cam.fov = base_fov
 	cam.near = 0.15
-	cam.far = 2400.0
+	cam.far = 6500.0  # the mountains round the bay are 2-5 km out (reversed-Z: no precision cost)
 	add_child(cam)
 	cam.make_current()
 	look = LookFilter.new()
@@ -133,8 +157,21 @@ func face(heading_yaw: float) -> void:
 
 ## Look input in radians (already sensitivity-scaled). Called by touch/mouse/stick.
 func add_look(delta: Vector2) -> void:
-	look_yaw = clampf(look_yaw - delta.x, -PI * 0.9, PI * 0.9)
-	look_pitch = clampf(look_pitch - delta.y, deg_to_rad(-50.0), deg_to_rad(50.0))
+	look_yaw = wrapf(look_yaw - delta.x, -PI, PI)
+	look_pitch = clampf(pitch + look_pitch - delta.y, LOOK_PITCH_MIN, LOOK_PITCH_MAX) - pitch
+	_since_look = 0.0
+
+
+## Touch look: a finger drag in pixels across a view `width` px wide. Eased
+## in over a few frames (smooth, still tight to the finger).
+func add_touch_look(drag_px: Vector2, width: float) -> void:
+	var k: float = PI * 1.15 / maxf(width, 1.0) * get_node("/root/Settings").look_sensitivity
+	_look_pending += drag_px * Vector2(k, k * 0.8)
+	_since_look = 0.0
+
+
+## A look finger is down (even if still): hold the view where it is.
+func hold_look() -> void:
 	_since_look = 0.0
 
 
@@ -157,12 +194,19 @@ func _process(dt: float) -> void:
 		global_transform = c[0]
 		cam.fov = c[1]
 		if _body:
-			_body.visible = true
+			_body.visible = not hide_body
 		return
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	if stick.length() > 0.05:
 		add_look(stick * dt * 2.6 * get_node("/root/Settings").look_sensitivity)
+	if _look_pending.length_squared() > 1e-8:
+		var take := _look_pending * (1.0 - exp(-32.0 * dt))
+		_look_pending -= take
+		add_look(take)
 	_since_look += dt
+	var manual := _since_look < recenter_delay
+	var yaw_before := yaw
+	var pitch_before := pitch
 
 	var v := target.s.velocity
 	var vh := Vector3(v.x, 0.0, v.z)
@@ -175,6 +219,8 @@ func _process(dt: float) -> void:
 	if not rail_at.is_empty():
 		var rd: Vector3 = rail_at[1]
 		_heading = atan2(-rd.x, -rd.z)
+	elif target.wall_hold > 0.0 and target.wall_run_along < 0.5 or target.wall_kick:
+		pass  # running up a wall, or drifting back off one: keep facing on
 	elif vh.length() > 3.0 and vh.length() > absf(v.y) * 0.35:
 		var travel := atan2(-vh.x, -vh.z)
 		var diff := wrapf(travel - _heading, -PI, PI)
@@ -206,13 +252,22 @@ func _process(dt: float) -> void:
 	if target.height_above_ground() < 15.0 and not target.s.attached:
 		# Down at street level: look up at the facades you can swing from.
 		want_pitch = deg_to_rad(6.0)
+	if target.wall_run:
+		# Running up a facade: look up the wall.
+		want_pitch = lerpf(deg_to_rad(20.0), want_pitch, target.wall_run_along)
 	_look_down = lerpf(_look_down, look_down, 1.0 - exp(-2.5 * dt))
 	want_pitch -= _look_down
-	pitch = move_toward(pitch, want_pitch, deg_to_rad(25.0) * dt)
+	pitch = move_toward(pitch, want_pitch, deg_to_rad(55.0 if target.wall_run else 25.0) * dt)
 
-	# Manual look eases back to centre once the player lets go.
-	if _since_look > recenter_delay:
-		var k := 1.0 - exp(-3.0 * dt)
+	if manual:
+		# The player is aiming the view: the follow keeps tracking underneath
+		# but none of it reaches the screen (no fighting the finger).
+		look_yaw = wrapf(look_yaw - wrapf(yaw - yaw_before, -PI, PI), -PI, PI)
+		look_pitch -= pitch - pitch_before
+		look_pitch = clampf(pitch + look_pitch, LOOK_PITCH_MIN, LOOK_PITCH_MAX) - pitch
+	elif vh.length() > 2.0 or not grounded:
+		# Moving again after looking: ease back behind the player, gently.
+		var k := 1.0 - exp(-1.8 * dt)
 		look_yaw = lerpf(look_yaw, 0.0, k)
 		look_pitch = lerpf(look_pitch, 0.0, k)
 
@@ -220,6 +275,19 @@ func _process(dt: float) -> void:
 	# Tighter in flight than it used to be (8 m + 2.2 for long ropes left the
 	# hero ~10% of the screen): the hero is the show; the FOV sells the speed.
 	var want_dist := lerpf(5.0, 6.6, t) if not grounded else lerpf(4.8, 6.2, clampf(vh.length() / 11.0, 0.0, 1.0))
+	if not grounded:
+		# Real speed (well past a jog through the air): ease the lens back so
+		# the city streams past around the hero instead of the hero filling it.
+		want_dist += 1.6 * smoothstep(24.0, 45.0, spd)
+	if target.wall_run:
+		want_dist += 1.0
+	var indoors := indoor_ceiling < INF
+	_indoor = move_toward(_indoor, 1.0 if indoors else 0.0, dt * 1.5)
+	_mask = 1 | (1 << 1) | (CityWorld.HUMAN_LAYER if indoors else 0)
+	if _sweep:
+		_sweep.collision_mask = _mask
+		_point.collision_mask = _mask
+	want_dist = lerpf(want_dist, lerpf(3.5, 4.2, clampf(vh.length() / 9.0, 0.0, 1.0)), _indoor)
 	var lift_goal := 0.0
 	if target.s.attached and target.s.taut:
 		# Long lines swing big arcs: frame more of them.
@@ -231,6 +299,7 @@ func _process(dt: float) -> void:
 	# Running: the lens rises a little with pace so the hero sits lower in frame
 	# and more of the street ahead shows.
 	var run_h := 1.4 + 0.25 * clampf(vh.length() / 11.0, 0.0, 1.0)
+	run_h = lerpf(run_h, 1.3, _indoor)
 	_height = lerpf(_height, (run_h if grounded else 1.6) * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
 	var ahead := (vh * 0.12).limit_length(minf(3.5, _dist * 0.35))
 	# In flight, lean the framing a little toward the web you'd get next.
@@ -246,7 +315,14 @@ func _process(dt: float) -> void:
 	_tug_v += (-_tug * 90.0 - _tug_v * 14.0) * dt
 	_tug += _tug_v * dt
 	var focus_goal := target.global_position + Vector3.UP * (_height + _lift) + ahead + _pick_bias
-	var basis := Basis.from_euler(Vector3(clampf(pitch + look_pitch, deg_to_rad(-70.0), deg_to_rad(50.0)), yaw + look_yaw, 0.0))
+	var clear_before := _clear_yaw
+	if rail_at.is_empty() and _indoor < 0.5:
+		_clear_view(focus_goal, yaw + look_yaw, dt)
+	else:
+		_clear_yaw = lerpf(_clear_yaw, 0.0, 1.0 - exp(-3.0 * dt))
+	if manual:
+		look_yaw -= _clear_yaw - clear_before  # never moves the view under a finger
+	var basis := Basis.from_euler(Vector3(clampf(pitch + look_pitch, deg_to_rad(-70.0), LOOK_PITCH_MAX), yaw + look_yaw + _clear_yaw, 0.0))
 	var snapped_this_frame := _snapped
 	if _snapped:
 		_bump = 0.0
@@ -256,6 +332,10 @@ func _process(dt: float) -> void:
 		_roll = 0.0
 		_crane = 0.0
 		_side = 0.0
+		_side_t = 0.0
+		_clear_yaw = 0.0
+		_clear_t = 0.0
+		_aim_init = false
 		_prev_heading = _heading
 		_turn_rate = 0.0
 		_focus = focus_goal
@@ -288,10 +368,21 @@ func _process(dt: float) -> void:
 	# A wall right behind would push the lens into the body: crane up and
 	# look over the shoulder instead (the crane is collision-checked too).
 	var squeeze := clampf((2.4 - placed.distance_to(shaken)) / 2.0, 0.0, 1.0)
+	if indoor_ceiling < INF:
+		# Rooms are close quarters by design: only crane when really pinned.
+		squeeze = clampf((1.5 - placed.distance_to(shaken)) / 1.3, 0.0, 1.0)
 	_crane = lerpf(_crane, squeeze, 1.0 - exp(-(10.0 if squeeze > _crane else 2.5) * dt))
 	if _crane > 0.01:
-		var up := _ray_clear(placed, placed + Vector3.UP * 2.2 * _crane)
+		var reach := 2.2
+		if indoor_ceiling < INF:
+			reach = clampf(indoor_ceiling - 0.6 - placed.y, 0.0, 0.7)
+		var up := _ray_clear(placed, placed + Vector3.UP * reach * _crane)
 		placed = up
+	if indoor_ceiling < INF:
+		placed.y = minf(placed.y, indoor_ceiling - 0.45)
+		# Round a door frame the focus can see the lens while the body can't:
+		# keep the chest in sight too (rooms are small; a cut-in reads fine).
+		placed = _ray_clear(target.global_position + Vector3.UP * 0.4, placed)
 	if _shake > 0.002:
 		# Real time, so the shake still reads while the game is in slow motion.
 		var rt := dt / maxf(Engine.time_scale, 0.05)
@@ -311,15 +402,35 @@ func _process(dt: float) -> void:
 				placed = candidate
 	_last_subject = target.global_position
 	global_position = placed
-	look_at(shaken + Vector3.DOWN * 0.4 * _crane, Vector3.UP)
+	var aim := shaken + Vector3.DOWN * 0.4 * _crane * (1.0 - 0.6 * _indoor)
+	if _indoor > 0.0:
+		# Pinned close behind the hero in a room: look past them into the room
+		# (over the head) rather than down at the top of it.
+		var close := clampf((2.4 - global_position.distance_to(shaken)) / 1.8, 0.0, 1.0) * _indoor
+		var ahead_dir := -Basis(Vector3.UP, yaw + look_yaw + _clear_yaw).z
+		aim += (ahead_dir * 1.5 + Vector3.DOWN * 1.0) * close
+	if aim.distance_squared_to(global_position) > 0.01:
+		look_at(aim, Vector3.UP)
+		# Pinned close to the hero (scrambles, wall bumps at street level) a
+		# few cm of focus motion swing the aim a lot: ease the rotation. Close
+		# = heavy smoothing, normal follow distance = barely any (it stays
+		# tight to the hero at speed), a finger on the view = none.
+		var q := global_transform.basis.get_rotation_quaternion()
+		var near := clampf((4.5 - global_position.distance_to(shaken)) / 2.0, 0.0, 1.0)
+		if _aim_init and not manual:
+			var rate := lerpf(30.0, 9.0, near)
+			q = _aim_q.slerp(q, 1.0 - exp(-rate * dt))
+		_aim_q = q
+		_aim_init = true
+		global_transform.basis = Basis(q)
 	# Never film the inside of the character.
 	if _body:
 		_body.visible = global_position.distance_to(target.global_position + Vector3.UP * 0.3) > 0.85
 	# Bank into sustained turns at speed (never during reversals).
 	_turn_rate = lerpf(_turn_rate, wrapf(_heading - _prev_heading, -PI, PI) / maxf(dt, 1e-4), 1.0 - exp(-3.0 * dt))
 	_prev_heading = _heading
-	var roll_goal := clampf(-_turn_rate * vh.length() * 0.004, -deg_to_rad(4.0), deg_to_rad(4.0)) if not grounded else 0.0
-	_roll = lerpf(_roll, roll_goal, 1.0 - exp(-2.5 * dt))
+	var roll_goal := clampf(-_turn_rate * vh.length() * 0.003, -deg_to_rad(2.5), deg_to_rad(2.5)) if not grounded else 0.0
+	_roll = lerpf(_roll, roll_goal, 1.0 - exp(-1.8 * dt))
 	rotate_object_local(Vector3.FORWARD, _roll)
 
 	_fov_kick = move_toward(_fov_kick, 0.0, 5.0 * dt / maxf(Engine.time_scale, 0.05))
@@ -335,7 +446,7 @@ func _process(dt: float) -> void:
 ## wall (centre between both in a narrow gap). Smoothed, so it never pops.
 func _side_offset(focus: Vector3, goal: Vector3, right: Vector3, dt: float) -> float:
 	right = Vector3(right.x, 0.0, right.z).normalized()
-	const REACH := 3.4
+	const REACH := 6.0
 	var mid := _ray_clear(focus, focus.lerp(goal, 0.6))
 	var dl := REACH
 	var dr := REACH
@@ -344,8 +455,11 @@ func _side_offset(focus: Vector3, goal: Vector3, right: Vector3, dt: float) -> f
 		dl = minf(dl, _side_hit(o, -right, REACH))
 	# Each wall pushes by how far it is inside REACH: continuous, and in a
 	# gap the pushes cancel toward its middle.
-	var want := (dr - dl) * 0.6
-	want = clampf(want, -2.0, 2.0)
+	# Close walls push hardest (squared falloff): a facade at 5 m nudges, one
+	# at 1.5 m shoves the lens a good 2.5 m out.
+	var push_r := pow(1.0 - dr / REACH, 1.5) * 3.0
+	var push_l := pow(1.0 - dl / REACH, 1.5) * 3.0
+	var want := clampf(push_l - push_r, -2.6, 2.6)
 	# Slide away fast-ish, drift back slowly (no see-saw past window ledges).
 	var rate := 2.5 if absf(want) > absf(_side_t) else 0.8
 	_side_t = lerpf(_side_t, want, 1.0 - exp(-rate * dt))
@@ -353,8 +467,28 @@ func _side_offset(focus: Vector3, goal: Vector3, right: Vector3, dt: float) -> f
 	return _side
 
 
+## Facades ahead-left / ahead-right of the hero (within 14 m): turn the view
+## a few degrees toward the open side so the street you fly along takes the
+## middle of the frame instead of a wall. Limited and slow – it never steers
+## the shot, it only keeps the lens from staring into a tower.
+func _clear_view(focus: Vector3, view_yaw_now: float, dt: float) -> void:
+	const R := 14.0
+	const MAX := deg_to_rad(10.0)
+	var fwd := -Basis(Vector3.UP, view_yaw_now).z
+	var dl := R
+	var dr := R
+	for ang: float in [deg_to_rad(28.0), deg_to_rad(55.0)]:
+		dl = minf(dl, _side_hit(focus, fwd.rotated(Vector3.UP, ang), R))
+		dr = minf(dr, _side_hit(focus, fwd.rotated(Vector3.UP, -ang), R))
+	# + yaw turns the view left: a wall on the left (small dl) turns it right.
+	var want := clampf((dl - dr) / R, -1.0, 1.0) * MAX
+	var rate := 1.6 if absf(want) > absf(_clear_t) else 0.7
+	_clear_t = lerpf(_clear_t, want, 1.0 - exp(-rate * dt))
+	_clear_yaw = _clear_t
+
+
 func _side_hit(from: Vector3, dir: Vector3, reach: float) -> float:
-	var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, 1 | (1 << 1))
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, _mask)
 	q.exclude = [target.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	return reach if hit.is_empty() else from.distance_to(hit.position)
@@ -368,9 +502,9 @@ func _avoid_walls(from: Vector3, to: Vector3, dt: float) -> Vector3:
 		shape.radius = collision_margin
 		_sweep = PhysicsShapeQueryParameters3D.new()
 		_sweep.shape = shape
-		_sweep.collision_mask = 1 | (1 << 1)
+		_sweep.collision_mask = _mask
 		_point = PhysicsPointQueryParameters3D.new()
-		_point.collision_mask = 1 | (1 << 1)
+		_point.collision_mask = _mask
 	_sweep.exclude = [target.get_rid()]
 	var q := _sweep
 	q.transform = Transform3D(Basis(), from)
@@ -439,7 +573,7 @@ func _push_out(space: PhysicsDirectSpaceState3D, p: Vector3, fallback_from: Vect
 
 ## The furthest point from `from` toward `to` that is clear of buildings.
 func _ray_clear(from: Vector3, to: Vector3) -> Vector3:
-	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | (1 << 1))
+	var q := PhysicsRayQueryParameters3D.create(from, to, _mask)
 	q.exclude = [target.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty():

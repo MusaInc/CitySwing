@@ -92,6 +92,49 @@ func test_spawn_inside_and_run_out_of_the_window(t) -> void:
 	player.bot = null
 
 
+class _HumanDrive:
+	extends _Drive
+	var human_steer := true  # moves like the player (Controls.human)
+
+
+func test_walking_indoors_is_calm_and_precise(t) -> void:
+	# Indoors a player walks/jogs (capped, immediate turns, quick stop) instead
+	# of city sprinting – and can still run out of the window.
+	var h := hs.home_by_id("loft") if not hs.home_by_id("loft").is_empty() else hs.home_by_id("starter")
+	hs.spawn_in(h, world, null)
+	var d := _HumanDrive.new()
+	player.bot = d
+	for i in 20:
+		await get_tree().physics_frame
+	t.check(player.indoors, "player knows it is indoors")
+	d.move = -Apartments.outward(h)  # into the room
+	var top := 0.0
+	for i in 30:
+		await get_tree().physics_frame
+		var v := player.s.velocity
+		top = maxf(top, Vector2(v.x, v.z).length())
+	t.check(top > 3.5 and top <= SwingPhysics.INDOOR_SPEED + 0.2, "indoor jog speed %.1f m/s (≤ %.1f)" % [top, SwingPhysics.INDOOR_SPEED])
+	d.move = Vector3.ZERO
+	var stop_t := -1.0
+	for i in 30:
+		await get_tree().physics_frame
+		var v := player.s.velocity
+		if Vector2(v.x, v.z).length() < 0.3:
+			stop_t = (i + 1) / 60.0
+			break
+	t.check(stop_t > 0.0 and stop_t <= 0.3, "stops within a step (%.2f s)" % stop_t)
+	d.move = Apartments.outward(h)
+	var out := false
+	for i in 360:
+		await get_tree().physics_frame
+		if Apartments.to_face(h, player.global_position).y > 1.0:
+			out = true
+			break
+	t.check(out, "still runs out of the window")
+	t.check(not player.indoors, "outdoors once out")
+	player.bot = null
+
+
 func test_catch_the_sill_and_climb_in(t) -> void:
 	var h := hs.home_by_id("city")
 	var n := Apartments.outward(h)
@@ -204,3 +247,115 @@ func test_vault_speeds_remain_inside_window_clearance(t) -> void:
 				if hs.state == "":
 					break
 			t.check(clear and hs.inside() == h["id"], "%s %.0f m/s capsule clears frame and lands inside" % [h["id"], speed])
+
+
+## Steers like a player (turn assist on), as the review tools do.
+class _Walk:
+	extends RefCounted
+	var move := Vector3.ZERO
+	var human_steer := true
+	func drive(_p, _dt) -> Dictionary:
+		return {"move": move, "aim": Vector3.FORWARD, "grapple": false, "reel": 0.0, "jump": false}
+
+
+func test_indoor_camera_keeps_the_hero_in_view(t) -> void:
+	# Walk each home's route (tools/home_cam_probe.gd: into the bedrooms and
+	# bathrooms, up the penthouse stairs and along the mezzanine) behind the
+	# real follow camera: the lens never leaves the room and the hero is
+	# hidden behind walls or furniture for at most ~2% of frames.
+	var routes: Dictionary = preload("res://tools/home_cam_probe.gd").ROUTES
+	var probe = preload("res://tools/home_cam_probe.gd").new()
+	var cam := SwingCamera.new()
+	add_child(cam)
+	cam.set_target(player)
+	hs.camera = cam
+	for h in hs.homes:
+		world.build_all_near(Apartments.window_center(h), 120.0)
+		hs.spawn_in(h, world, cam)
+		var d := _Walk.new()
+		player.bot = d
+		for i in 10:
+			await get_tree().process_frame
+		var frames := 0
+		var outside := 0
+		var hidden := 0
+		var reached := 0
+		var top := 0.0
+		for wp: Array in routes[h["id"]]:
+			var goal := Apartments.face_point(h, float(h["a0"]) + probe.probe_x(h, wp[0]), -probe.probe_z(h, wp[1]), float(h["y0"]))
+			for i in 420:
+				var to := goal - player.global_position
+				to.y = 0.0
+				if to.length() < 0.5:
+					reached += 1
+					break
+				d.move = to.normalized() * (0.55 if to.length() < 2.0 else 1.0)
+				await get_tree().process_frame
+				frames += 1
+				top = maxf(top, player.global_position.y - float(h["y0"]))
+				var f := Apartments.to_face(h, cam.global_position)
+				if not (f.x > float(h["a0"]) and f.x < float(h["a1"]) and f.y < 0.0 and f.y > -float(h["depth"])
+						and f.z > float(h["y0"]) and f.z < float(h["y1"])) and not probe.in_opening(h, f):
+					outside += 1
+				var q := PhysicsRayQueryParameters3D.create(cam.global_position, player.global_position + Vector3.UP * 0.4,
+					1 | CityWorld.HUMAN_LAYER)
+				q.exclude = [player.get_rid()]
+				var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
+				if not hit.is_empty() and not probe._thin(hit):
+					hidden += 1
+		d.move = Vector3.ZERO
+		player.bot = null
+		var n: int = routes[h["id"]].size()
+		t.check(reached == n, "%s: walked the whole route (%d/%d waypoints)" % [h["id"], reached, n])
+		t.check(outside == 0, "%s: lens stays in the room (%d of %d frames outside)" % [h["id"], outside, frames])
+		t.check(hidden <= frames / 50, "%s: hero in view (%d of %d frames hidden)" % [h["id"], hidden, frames])
+		if h["id"] == "penthouse":
+			t.check(top > HomeInteriors.MEZZ + 0.5, "penthouse: climbed the stairs to the mezzanine (%.2f m)" % top)
+	probe.free()
+	hs.camera = null
+	cam.queue_free()
+
+
+func test_things_to_use_at_home(t) -> void:
+	# Every home has a wardrobe, a bed, a job screen and a trophy shelf; each
+	# spot is somewhere you can stand, and standing there offers it.
+	hs.owned = func(_id: String) -> bool: return true
+	for h in hs.homes:
+		hs.spawn_in(h, world, null)
+		await get_tree().physics_frame
+		var list: Array = HomeInteriors.spots.get(h["id"], [])
+		var kinds := {}
+		for sp: Dictionary in list:
+			kinds[sp["kind"]] = true
+		t.check(kinds.size() == 4, "%s: wardrobe, bed, jobs, trophies (%s)" % [h["id"], kinds.keys()])
+		for sp: Dictionary in list:
+			player.respawn(sp["pos"] + Vector3.UP * 0.95)
+			for i in 12:
+				await get_tree().physics_frame
+			var near := hs.near_spot()
+			t.check(near.get("kind", "") == sp["kind"] and hs.inside() == h["id"],
+				"%s: standing at the %s offers it (got %s)" % [h["id"], sp["kind"], near.get("kind", "nothing")])
+	hs.owned = func(id: String) -> bool: return Homes.owns(id)
+	# Not yours (visiting): nothing to use.
+	hs.owned = func(_id: String) -> bool: return false
+	var h0: Dictionary = hs.homes[0]
+	hs.spawn_in(h0, world, null)
+	player.respawn((HomeInteriors.spots[h0["id"]][0] as Dictionary)["pos"] + Vector3.UP * 0.95)
+	for i in 12:
+		await get_tree().physics_frame
+	t.check(hs.near_spot().is_empty(), "visiting: nothing to use")
+	hs.owned = func(id: String) -> bool: return Homes.owns(id)
+
+
+func test_trophies_follow_progress(t) -> void:
+	var snap := HomeTrophies.snapshot()
+	t.check((snap["medals"] as Array).size() == CourseBuilder.COURSES.size(), "a stand for every course")
+	var sd: Node = get_node("/root/SaveData")
+	var before: Dictionary = sd.data.duplicate(true)
+	sd.data["rep"] = 100000
+	sd.data["tokens"] = range(Progress.TOKEN_TOTAL)
+	var full := HomeTrophies.snapshot()
+	t.check(int(full["rank"]) > int(snap["rank"]) or int(snap["rank"]) == Contracts.RANKS.size() - 1, "rank cup grows with rep")
+	t.check(int(full["tokens"]) == Progress.TOKEN_TOTAL, "token jar counts tokens")
+	t.check((full["suits"] as Array).size() >= (snap["suits"] as Array).size(), "suit folds for unlocked suits")
+	sd.data = before

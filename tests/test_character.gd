@@ -45,8 +45,9 @@ func test_hangs_along_the_rope_and_reaches_for_the_anchor(t) -> void:
 		if i > 40 and player.line_state == Player.Line.ATTACHED and player.s.taut:
 			var rope := (player.s.anchor - player.global_position).normalized()
 			worst_body = maxf(worst_body, rad_to_deg(_up_of("chest").angle_to(rope)))
-			var arm := -(rig.bones["upper_arm_r"] as Node3D).global_basis.y
-			var to_anchor := (player.s.anchor - (rig.bones["upper_arm_r"] as Node3D).global_position).normalized()
+			var ua := "upper_arm_" + String(rig.web_side)  # (either hand can hold the web)
+			var arm := -(rig.bones[ua] as Node3D).global_basis.y
+			var to_anchor := (player.s.anchor - (rig.bones[ua] as Node3D).global_position).normalized()
 			worst_arm = maxf(worst_arm, rad_to_deg(arm.angle_to(to_anchor)))
 			samples += 1
 	t.note("swinging: worst torso-vs-rope %.0f°, worst web-arm-vs-anchor %.0f° over %d frames" % [worst_body, worst_arm, samples])
@@ -83,7 +84,7 @@ func test_springs_stay_stable_and_bounded(t) -> void:
 			var q: Quaternion = (rig.bones[b] as Node3D).quaternion
 			# q and -q are the same rotation: measure the shortest angle.
 			var ang := 2.0 * acos(clampf(absf(q.w), 0.0, 1.0))
-			if not q.is_finite() or (b != "upper_arm_r" and ang > 3.0):
+			if not q.is_finite() or (b != "upper_arm_" + String(rig.web_side) and ang > 3.0):  # (the web arm reaches straight up)
 				bad += 1
 	t.check(bad == 0, "no NaN or extreme joint angles (%d bad samples)" % bad)
 

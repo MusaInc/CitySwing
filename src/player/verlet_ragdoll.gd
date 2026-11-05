@@ -65,6 +65,14 @@ func _link(a: String, b: String, kind: int) -> void:
 	links.append([a, b, (pos[a] as Vector3).distance_to(pos[b]), kind])
 
 
+## Adds velocity to particles (name -> m/s), e.g. limbs flung up as the body
+## slaps into the ground.
+func kick(part_vel: Dictionary) -> void:
+	for n in part_vel:
+		if pos.has(n):
+			prev[n] = (prev[n] as Vector3) - (part_vel[n] as Vector3) * STEP
+
+
 ## Advances the simulation; `anchor` is where the pelvis should stay (capsule).
 func update(dt: float, anchor: Vector3) -> void:
 	_acc = minf(_acc + dt, STEP * 4.0)

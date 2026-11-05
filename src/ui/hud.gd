@@ -16,10 +16,33 @@ var hint := ""
 var pointer := Vector3.INF
 ## Touch play: show the assisted target unless precise tap mode is selected.
 var touch_mode := false
+var indoors := false
+signal home_requested
+var home_button: Button
+var home_available := false
+
+func home_rect() -> Rect2:
+	var safe := _safe_rect()
+	return Rect2(Vector2(safe.end.x - 138.0, safe.position.y + 16.0), Vector2(56, 56))
+
+func _draw_home_button() -> void:
+	var c := Vector2(28, 28)
+	home_button.draw_circle(c, 22, Color(UiStyle.INK, 0.3))
+	home_button.draw_arc(c, 22, 0, TAU, 32, Color(UiStyle.WEB, 0.4), 1.5, true)
+	var col := UiStyle.GOLD if home_button.is_hovered() else Color(UiStyle.WEB, 0.88)
+	home_button.draw_polyline(PackedVector2Array([c + Vector2(-10, -1), c + Vector2(0, -9), c + Vector2(10, -1)]), col, 2, true)
+	home_button.draw_polyline(PackedVector2Array([c + Vector2(-7, -2), c + Vector2(-7, 9), c + Vector2(7, 9), c + Vector2(7, -2)]), col, 2, true)
+	home_button.draw_rect(Rect2(c + Vector2(-2, 3), Vector2(4, 6)), col)
+
+## Something to use within reach at home ("" = none). On touch the controls
+## draw it as a button; otherwise the HUD shows it with the key.
+var prompt := ""
 var coins: CoinMeter
 ## Live map at the top centre (src/ui/minimap.gd).
 var minimap: Minimap
 var gadgets: Gadgets
+## Free Swing contracts (src/modes/job_board.gd); null elsewhere.
+var jobs: JobBoard
 const GADGET_NAMES := {"boost": "JET BOOST", "glide": "GLIDE", "focus": "SLOW-MO", "surge": "DOUBLE COINS"}
 var _coin_shown := -1.0    # rolling balance readout
 var _gain := 0             # coins in the current "+n" burst
@@ -34,6 +57,7 @@ var _font_black: Font
 var _reticle_spin := 0.0
 var _ko_t := 0.0           # knockout flash + banner (s remaining, real time)
 var _ko_kmh := 0
+var _ko_cause := "WALL"
 const KO_TIME := 2.2
 var _reticle_pos := Vector2.INF
 var _speed_smooth := 0.0
@@ -56,6 +80,17 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_font = UiStyle.font("bold")
 	_font_black = UiStyle.font("black")
+	home_button = Button.new()
+	home_button.name = "HomeButton"
+	home_button.tooltip_text = "Go to your apartment"
+	home_button.focus_mode = Control.FOCUS_NONE
+	for style in ["normal", "hover", "pressed", "focus", "disabled"]:
+		home_button.add_theme_stylebox_override(style, StyleBoxEmpty.new())
+	home_button.draw.connect(_draw_home_button)
+	home_button.pressed.connect(func(): home_requested.emit())
+	home_button.mouse_entered.connect(func(): home_button.queue_redraw())
+	home_button.mouse_exited.connect(func(): home_button.queue_redraw())
+	add_child(home_button)
 	minimap = Minimap.new()
 	minimap.name = "Minimap"
 	add_child(minimap)
@@ -84,6 +119,7 @@ func on_close_call(razor: bool, coins_won: int) -> void:
 func on_knockout(speed: float) -> void:
 	_ko_t = KO_TIME
 	_ko_kmh = int(speed * 3.6)
+	_ko_cause = String(player.ko_cause).to_upper() if player else "WALL"
 
 
 func on_gadget(kind: String) -> void:
@@ -109,10 +145,15 @@ func flash(text: String, seconds := 2.0) -> void:
 
 
 func _process(dt: float) -> void:
+	if home_button:
+		home_button.position = home_rect().position
+		home_button.size = home_rect().size
+		home_button.visible = home_available
+		home_button.mouse_filter = Control.MOUSE_FILTER_IGNORE if touch_mode else Control.MOUSE_FILTER_STOP
 	if minimap:
-		# Responsive: ~22% of the short side, inside the safe area (clear of
+		# Responsive: ~18% of the short side, inside the safe area (clear of
 		# the Dynamic Island / notch in landscape: it's centred, below the top).
-		var d := clampf(minf(size.x, size.y) * 0.22, 104.0, 196.0)
+		var d := clampf(minf(size.x, size.y) * 0.18, 104.0, 148.0)
 		minimap.size = Vector2(d, d)
 		minimap.position = Vector2(size.x * 0.5 - d * 0.5, _safe_origin().y + 10.0)
 	_banner_t -= dt
@@ -144,6 +185,10 @@ func _draw() -> void:
 	var shadow := Color(0, 0, 0, 0.35)
 	var gold := Color(1.0, 0.82, 0.4, 0.95)
 	_draw_speed_lines()
+	if prompt != "" and not touch_mode:
+		var sz := get_viewport_rect().size
+		TouchControls.draw_use_prompt(self, _font, Rect2(Vector2(sz.x * 0.5 - 140.0, sz.y - 120.0), Vector2(280.0, 60.0)),
+			prompt, true)
 	# Live anchor marker (where the web is actually stuck).
 	if player.line_state != Player.Line.IDLE:
 		var a := player.rope_anchor() if player.line_state == Player.Line.ATTACHED else player.line_target
@@ -235,6 +280,8 @@ func _draw() -> void:
 		var pp := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.32 - age * 18.0)
 		draw_string(_font_black, pp + Vector2(2, 3), _close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
 		draw_string(_font_black, pp, _close_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.75, 0.95, 1.0, a))
+	if jobs:
+		_draw_jobs(cam, white, shadow)
 	if pointer != Vector3.INF:
 		_draw_pointer(cam)
 	if gadgets and gadgets.enabled and gadgets.kind() != "":
@@ -242,17 +289,19 @@ func _draw() -> void:
 	if _ko_t > 0.0:
 		_draw_knockout()
 	if hint != "":
-		var hs := 24
+		# Lower centre, between the thumbs and above the home "use" prompt:
+		# up top it ran under the minimap and the PERFECT callout.
+		var hs := 21
 		var hw := _font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, hs).x
-		var hp := Vector2(size.x / 2.0 - hw / 2.0, 132.0)  # under the mode readout, clear of thumbs
-		UiStyle.pill(self, Rect2(hp + Vector2(-26, -34), Vector2(hw + 52, 48)), Color(0, 0, 0, 0.5))
+		var hp := Vector2(size.x / 2.0 - hw / 2.0, _safe_rect().end.y - 132.0)
+		UiStyle.pill(self, Rect2(hp + Vector2(-22, -30), Vector2(hw + 44, 42)), Color(0, 0, 0, 0.45))
 		_text(hp, hint, hs, white, shadow)
 	if _banner_t > 0.0:
 		var a := clampf(_banner_t * 2.0, 0.0, 1.0)
 		var bw := _font_black.get_string_size(banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44).x
 		draw_string(_font_black, Vector2(size.x / 2.0 - bw / 2.0 + 2, size.y * 0.32 + 3), banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(0, 0, 0, 0.4 * a))
 		draw_string(_font_black, Vector2(size.x / 2.0 - bw / 2.0, size.y * 0.32), banner, HORIZONTAL_ALIGNMENT_LEFT, -1, 44, Color(1, 1, 1, a))
-	if Settings.show_perf:
+	if Settings.show_perf and OS.is_debug_build():
 		var fps := Engine.get_frames_per_second()
 		var lines := [
 			"FPS %d  (%.1f ms avg, %.1f worst/2s)" % [fps, _frame_ms, _worst_ms],
@@ -284,12 +333,12 @@ func _draw_knockout() -> void:
 	var shake := Vector2(sin(age * 53.0), sin(age * 47.0 + 1.0)) * 7.0 * exp(-age * 4.0)
 	var pop := 1.0 + 0.6 * exp(-age * 12.0)
 	var fs := int(56 * pop)
-	var txt := "KNOCKED OUT"
+	var txt := "KNOCKED OUT" if _ko_cause == "WALL" else "HIT BY A %s" % _ko_cause
 	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var p := Vector2(size.x / 2.0 - tw / 2.0, size.y * 0.36) + shake
 	draw_string(_font_black, p + Vector2(3, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.5 * a))
 	draw_string(_font_black, p, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.32, 0.26, a))
-	var sub := "WALL · %d KM/H" % _ko_kmh
+	var sub := "%s · %d KM/H" % [_ko_cause, _ko_kmh]
 	var sw := _font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 	_text(Vector2(size.x / 2.0 - sw / 2.0, size.y * 0.36 + 32), sub, 18, Color(1, 1, 1, 0.8 * a), Color(0, 0, 0, 0.4 * a))
 	if _lost_t > 0.0:
@@ -378,21 +427,21 @@ static func _fmt_int(n: int) -> String:
 ## Speed: a 270° gauge (full at 144 km/h) that warms from white to gold
 ## once speed lines kick in, with the number in the middle.
 func _draw_speed_gauge(c: Vector2, white: Color, shadow: Color) -> void:
-	var r := 52.0
+	var r := 39.0
 	var a0 := PI * 0.75
 	var sweep := PI * 1.5
 	var k := clampf(_speed_smooth / 40.0, 0.0, 1.0)
 	draw_circle(c, r + 6.0, Color(UiStyle.INK, 0.45))
-	draw_arc(c, r, a0, a0 + sweep, 48, Color(1, 1, 1, 0.16), 6.0, true)
+	draw_arc(c, r, a0, a0 + sweep, 48, Color(1, 1, 1, 0.16), 3.0, true)
 	if k > 0.005:
 		var hot := clampf((_speed_smooth - SPEED_LINES_FROM) / (SPEED_LINES_FULL - SPEED_LINES_FROM), 0.0, 1.0)
-		draw_arc(c, r, a0, a0 + sweep * k, maxi(4, int(48 * k)), Color(1, 1, 1, 0.9).lerp(UiStyle.GOLD, hot), 6.0, true)
+		draw_arc(c, r, a0, a0 + sweep * k, maxi(4, int(48 * k)), Color(1, 1, 1, 0.9).lerp(UiStyle.GOLD, hot), 3.0, true)
 	var txt := "%d" % int(_speed_smooth * 3.6)
-	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38).x
-	draw_string(_font_black, c + Vector2(-tw / 2.0 + 2, 12), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38, shadow)
-	draw_string(_font_black, c + Vector2(-tw / 2.0, 10), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 38, white)
+	var tw := _font_black.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+	draw_string(_font_black, c + Vector2(-tw / 2.0 + 2, 12), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, shadow)
+	draw_string(_font_black, c + Vector2(-tw / 2.0, 10), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, white)
 	var uw := _font.get_string_size("KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	draw_string(_font, c + Vector2(-uw / 2.0, 30), "KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
+	draw_string(_font, c + Vector2(-uw / 2.0, 25), "KM/H", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
 
 
 ## Four corner brackets turning slowly round a dot.
@@ -438,6 +487,8 @@ func _draw_speed_lines() -> void:
 ## Marker on the guided point; an edge arrow when it is off screen.
 func _draw_pointer(cam: Camera3D) -> void:
 	var teal := Color(0.45, 1.0, 0.85, 0.95)
+	if jobs and not jobs.active.is_empty():
+		teal = Color(JobBoard.COL_GOAL, 0.97)
 	var dist := player.global_position.distance_to(pointer)
 	var label := "%d m" % int(dist)
 	var behind := cam.is_position_behind(pointer)
@@ -469,13 +520,157 @@ func _draw_pointer(cam: Camera3D) -> void:
 	_text(p - dir * 30.0 + Vector2(-18, 5), label, 15, teal, Color(0, 0, 0, 0.4))
 
 
+## Contracts: labels over offer beacons, the active job's card (top right,
+## left of pause), heist crack progress and the settle toast.
+func _draw_jobs(cam: Camera3D, white: Color, shadow: Color) -> void:
+	var pp := player.global_position
+	if indoors and jobs.active.is_empty():
+		return
+	if jobs.active.is_empty():
+		# At most three labels (tracked first, then nearest), and they fade
+		# out at swing speed: the beacons themselves carry the city view.
+		var calm := 1.0 - smoothstep(16.0, 26.0, player.speed())
+		var list: Array = jobs.offers.duplicate()
+		list.sort_custom(func(a, b):
+			if (a["id"] == jobs.tracked) != (b["id"] == jobs.tracked):
+				return a["id"] == jobs.tracked
+			return pp.distance_squared_to(a["start"]) < pp.distance_squared_to(b["start"]))
+		var shown := 0
+		for o in list:
+			if shown >= 3 or calm <= 0.02:
+				break
+			var at: Vector3 = (o["start"] as Vector3) + Vector3.UP * 5.0
+			var d := pp.distance_to(at)
+			if d > 650.0 or d < 6.0 or cam.is_position_behind(at):
+				continue
+			shown += 1
+			var sp := cam.unproject_position(at)
+			if sp.x < 0.0 or sp.x > size.x or sp.y < 160.0 or sp.y > size.y - 180.0:
+				continue
+			var col: Color = JobBoard.COL_LEGAL if o["legal"] else JobBoard.COL_CRIME
+			var a := clampf(1.4 - d / 650.0, 0.35, 1.0) * (1.0 if o["id"] == jobs.tracked or d < 300.0 else 0.75) * calm
+			var t1: String = o["title"].to_upper()
+			var t2 := "%s  ·  %d m" % [_fmt_int(o["pay"]), int(d)]
+			var fs := 15 if d < 250.0 else 13
+			var w := maxf(_font.get_string_size(t1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x,
+				_font.get_string_size(t2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2).x + 16.0) + 22.0
+			var r := Rect2(sp - Vector2(w * 0.5, 40.0), Vector2(w, 38.0))
+			UiStyle.pill(self, r, Color(UiStyle.INK, 0.62 * a))
+			draw_rect(Rect2(r.position + Vector2(8, 6), Vector2(3, 26)), Color(col, a))
+			_text(r.position + Vector2(16, 17), t1, fs, Color(col, a), Color(shadow, shadow.a * a))
+			_coin_glyph(r.position + Vector2(22, 29), 5.0, a)
+			_text(r.position + Vector2(31, 33), t2, fs - 2, Color(1, 1, 1, 0.85 * a), Color(shadow, shadow.a * a))
+		if not jobs.hold_offer.is_empty():
+			var k := clampf(jobs.hold_t / Contracts.HOLD_TIME, 0.0, 1.0)
+			var c := size * Vector2(0.5, 0.62)
+			draw_arc(c, 34.0, 0.0, TAU, 40, Color(UiStyle.INK, 0.5), 9.0, true)
+			draw_arc(c, 34.0, -PI * 0.5, -PI * 0.5 + TAU * k, 40, JobBoard.COL_CRIME, 6.0, true)
+			_text(c + Vector2(-46, 62), "HOLD STILL", 16, white, shadow)
+	else:
+		_draw_job_card(white, shadow)
+	if not jobs.toast.is_empty():
+		_draw_job_toast(white, shadow)
+
+
+func _coin_glyph(c: Vector2, r: float, a: float) -> void:
+	draw_circle(c, r, Color(UiStyle.GOLD, a))
+	draw_circle(c, r * 0.55, Color(0.85, 0.6, 0.1, a))
+
+
+func _draw_job_card(white: Color, shadow: Color) -> void:
+	var c: Dictionary = jobs.active
+	var legal: bool = c["legal"]
+	var col: Color = JobBoard.COL_LEGAL if legal else JobBoard.COL_CRIME
+	var w := 272.0
+	var h := 96.0 if legal else 126.0
+	var origin := Vector2(_safe_rect().end.x - 158.0 - w, _safe_origin().y + 18.0)
+	var r := Rect2(origin, Vector2(w, h))
+	UiStyle.pill(self, r, Color(UiStyle.INK, 0.6))
+	draw_rect(Rect2(origin + Vector2(10, 12), Vector2(3, h - 24)), col)
+	var stops: int = (c["stops"] as Array).size()
+	var title: String = c["title"].to_upper()
+	if stops > 1:
+		title += "  %d/%d" % [jobs.stage, stops]
+	_text(origin + Vector2(22, 26), title, 15, col, shadow)
+	var obj: String = {"rescue": "Land on the medic roof", "survey": "Fly through the survey point",
+		"heist": "Get the case to the fence", "getaway": "Land at the safehouse"}.get(c["type"], "Land on the drop roof")
+	var dist := player.global_position.distance_to(jobs.objective())
+	_text(origin + Vector2(22, 48), obj, 14, Color(1, 1, 1, 0.78), shadow)
+	# Clock: big, turns red in the last 15 s.
+	var tl := maxf(jobs.time_left, 0.0)
+	var urgent := tl < 15.0
+	var clock := "%d:%02d" % [int(tl) / 60, int(tl) % 60]
+	var cc := Color(1.0, 0.36, 0.3) if urgent and fmod(tl, 1.0) > 0.35 else white
+	draw_string(_font_black, origin + Vector2(22, 84), clock, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, cc)
+	var right := "%d m" % int(dist)
+	var rw := _font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+	_text(origin + Vector2(w - rw - 18, 82), right, 17, white, shadow)
+	var pay := "%s" % _fmt_int(c["pay"])
+	var pw := _font.get_string_size(pay, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+	_coin_glyph(origin + Vector2(w - pw - 30, 21), 6.0, 1.0)
+	_text(origin + Vector2(w - pw - 18, 26), pay, 15, white, shadow)
+	if not legal:
+		# Heat: fills toward BUSTED; flashes while a drone has you.
+		var bar := Rect2(origin + Vector2(22, 98), Vector2(w - 44, 7))
+		draw_rect(bar, Color(1, 1, 1, 0.12))
+		var hc := Color(1.0, 0.75, 0.2).lerp(Color(1.0, 0.2, 0.15), jobs.heat)
+		if jobs.spotted and fmod(Time.get_ticks_msec() / 1000.0, 0.4) < 0.2:
+			hc = hc.lightened(0.35)
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * jobs.heat, bar.size.y)), hc)
+		var ht := "SPOTTED" if jobs.spotted else "HEAT"
+		var hw := _font.get_string_size(ht, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		_text(origin + Vector2(w - 22 - hw, 116), ht, 11, Color(hc, 0.95), shadow)
+		if jobs._drones.size() > 0:
+			_text(origin + Vector2(22, 116), "%d DRONE%s" % [jobs._drones.size(), "" if jobs._drones.size() == 1 else "S"],
+				11, Color(1, 1, 1, 0.6), shadow)
+	elif c["type"] == "express" and jobs.knockouts > 0:
+		_text(origin + Vector2(110, 82), "−%d%%" % int(minf(jobs.knockouts * Contracts.EXPRESS_KO_CUT,
+			1.0 - Contracts.EXPRESS_FLOOR) * 100.0), 15, Color(1.0, 0.45, 0.35), shadow)
+
+
+func _draw_job_toast(white: Color, shadow: Color) -> void:
+	var t: Dictionary = jobs.toast
+	var age: float = t["t"]
+	var a := clampf(minf(age / 0.25, (4.5 - age) / 0.6), 0.0, 1.0)
+	var ok: bool = t["outcome"] == "done"
+	var head: String = {"done": "CONTRACT COMPLETE", "late": "OUT OF TIME", "busted": "BUSTED",
+		"abandoned": "CONTRACT DROPPED"}[t["outcome"]]
+	var sub := ""
+	if ok:
+		sub = "+%s coins  ·  +%d rep" % [_fmt_int(t["coins"]), t["rep"]]
+		if int(t["bonus"]) > 0:
+			sub += "  ·  time bonus %s" % _fmt_int(t["bonus"])
+	elif int(t["coins"]) < 0:
+		sub = "Fined %s coins" % _fmt_int(-int(t["coins"]))
+	else:
+		sub = String(t["title"])
+	var fs := int(38 * (1.0 + 0.25 * exp(-age * 10.0)))
+	var hw := _font_black.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var y := maxf(size.y * 0.36, (minimap.position.y + minimap.size.y + 60.0) if minimap else 0.0)
+	var hc := Color(UiStyle.GOLD, a) if ok else Color(1.0, 0.38, 0.3, a)
+	draw_string(_font_black, Vector2(size.x / 2.0 - hw / 2.0 + 2, y + 3), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.4 * a))
+	draw_string(_font_black, Vector2(size.x / 2.0 - hw / 2.0, y), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, hc)
+	var sw := _font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x
+	_text(Vector2(size.x / 2.0 - sw / 2.0, y + 32), sub, 20, Color(white, a), Color(shadow, shadow.a * a))
+	if t["rank_up"]:
+		var rt := "RANK UP — %s" % String(t["rank"]).to_upper()
+		var rw := _font_black.get_string_size(rt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+		UiStyle.pill(self, Rect2(Vector2(size.x / 2.0 - rw / 2.0 - 18, y + 46), Vector2(rw + 36, 36)), Color(UiStyle.GOLD, 0.9 * a))
+		draw_string(_font_black, Vector2(size.x / 2.0 - rw / 2.0, y + 72), rt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(UiStyle.INK, a))
+
+
 ## Safe-area top-left in HUD pixels (zero on desktop).
 func _safe_origin() -> Vector2:
+	return _safe_rect().position
+
+
+func _safe_rect() -> Rect2:
 	var sa := DisplayServer.get_display_safe_area()
 	var win := DisplayServer.window_get_size()
 	if sa.size.x <= 0 or win.x <= 0 or DisplayServer.screen_get_size() != win:
-		return Vector2.ZERO  # (windowed on desktop: screen-space safe area doesn't apply)
-	return (Vector2(sa.position) * size / Vector2(win)).clamp(Vector2.ZERO, size * 0.2)
+		return Rect2(Vector2.ZERO, size)
+	var scale := size / Vector2(win)
+	return Rect2(Vector2(sa.position) * scale, Vector2(sa.size) * scale).intersection(Rect2(Vector2.ZERO, size))
 
 
 ## Markers never sit under the stick (bottom left) or SWING/JUMP (bottom

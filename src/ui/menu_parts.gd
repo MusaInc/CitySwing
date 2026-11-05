@@ -46,11 +46,11 @@ class Icon:
 				draw_arc(c, s * 0.2, 0.0, TAU, 24, color, w, true)
 				draw_circle(c, s * 0.06, color)
 			"suit":
-				# Hoodie silhouette.
-				var p := PackedVector2Array([Vector2(0.32, 0.16), Vector2(0.42, 0.12), Vector2(0.5, 0.2),
-					Vector2(0.58, 0.12), Vector2(0.68, 0.16), Vector2(0.9, 0.36), Vector2(0.8, 0.48),
-					Vector2(0.72, 0.42), Vector2(0.72, 0.88), Vector2(0.28, 0.88), Vector2(0.28, 0.42),
-					Vector2(0.2, 0.48), Vector2(0.1, 0.36)])
+				# A fitted long-sleeve top with a mock neck.
+				var p := PackedVector2Array([Vector2(0.42, 0.12), Vector2(0.58, 0.12), Vector2(0.6, 0.18),
+					Vector2(0.76, 0.22), Vector2(0.86, 0.6), Vector2(0.78, 0.62), Vector2(0.7, 0.36),
+					Vector2(0.68, 0.88), Vector2(0.32, 0.88), Vector2(0.3, 0.36), Vector2(0.22, 0.62),
+					Vector2(0.14, 0.6), Vector2(0.24, 0.22), Vector2(0.4, 0.18)])
 				for i in p.size():
 					p[i] = o + p[i] * s
 				draw_colored_polygon(p, color)
@@ -95,6 +95,20 @@ class Icon:
 				draw_line(c + Vector2(-s * 0.16, -s * 0.08), c + Vector2(-s * 0.16, s * 0.02), color, w)
 				draw_line(c + Vector2(s * 0.16, -s * 0.08), c + Vector2(s * 0.16, s * 0.02), color, w)
 				draw_rect(Rect2(c + Vector2(-s * 0.25, 0), Vector2(s * 0.5, s * 0.34)), color)
+			"job":
+				# Briefcase: handle, body, clasp line.
+				draw_rect(Rect2(c + Vector2(-s * 0.12, -s * 0.3), Vector2(s * 0.24, s * 0.12)), color, false, w * 0.8)
+				draw_rect(Rect2(c + Vector2(-s * 0.36, -s * 0.18), Vector2(s * 0.72, s * 0.48)), color)
+				draw_line(c + Vector2(-s * 0.36, s * 0.0), c + Vector2(s * 0.36, s * 0.0), Color(0, 0, 0, 0.45), w * 0.7)
+			"crime":
+				# Domino mask.
+				var m := PackedVector2Array([c + Vector2(-s * 0.42, -s * 0.12), c + Vector2(-s * 0.1, -s * 0.16),
+					c + Vector2(0, -s * 0.06), c + Vector2(s * 0.1, -s * 0.16), c + Vector2(s * 0.42, -s * 0.12),
+					c + Vector2(s * 0.36, s * 0.14), c + Vector2(s * 0.08, s * 0.16), c + Vector2(0, s * 0.06),
+					c + Vector2(-s * 0.08, s * 0.16), c + Vector2(-s * 0.36, s * 0.14)])
+				draw_colored_polygon(m, color)
+				draw_circle(c + Vector2(-s * 0.2, 0), s * 0.07, Color(0, 0, 0, 0.6))
+				draw_circle(c + Vector2(s * 0.2, 0), s * 0.07, Color(0, 0, 0, 0.6))
 			"check":
 				draw_polyline(PackedVector2Array([c + Vector2(-s * 0.25, 0), c + Vector2(-s * 0.06, s * 0.2),
 					c + Vector2(s * 0.28, -s * 0.2)]), color, w * 1.4, true)
@@ -168,11 +182,31 @@ class Swatch:
 				out.append(o + (q as Vector2) * s)
 			return out
 		match it.get("slot", ""):
-			"suit":
-				draw_colored_polygon(P.call([Vector2(0.32, 0.2), Vector2(0.42, 0.16), Vector2(0.5, 0.24),
-					Vector2(0.58, 0.16), Vector2(0.68, 0.2), Vector2(0.88, 0.38), Vector2(0.79, 0.5),
-					Vector2(0.71, 0.44), Vector2(0.71, 0.84), Vector2(0.29, 0.84), Vector2(0.29, 0.44),
-					Vector2(0.21, 0.5), Vector2(0.12, 0.38)]), col)
+			"suit", "top":
+				# A fitted top; the sleeve length follows the cut.
+				var cut: String = it.get("cut", "long")
+				if it["slot"] == "top" and not it.has("color"):
+					col = Progress.current_suit_color()
+				var sl: float = {"long": 0.62, "tq": 0.5, "short": 0.34, "vest": 0.0}.get(cut, 0.62)
+				draw_colored_polygon(P.call([Vector2(0.42, 0.14), Vector2(0.58, 0.14), Vector2(0.6, 0.2),
+					Vector2(0.7, 0.24), Vector2(0.69, 0.86), Vector2(0.31, 0.86), Vector2(0.3, 0.24),
+					Vector2(0.4, 0.2)]), col)
+				if sl > 0.0:
+					for sx: float in [-1.0, 1.0]:
+						var x0 := 0.5 + sx * 0.2
+						var x1 := 0.5 + sx * (0.2 + sl * 0.45)
+						draw_colored_polygon(P.call([Vector2(x0, 0.24), Vector2(x0 + sx * 0.05, 0.22),
+							Vector2(x1 + sx * 0.04, 0.24 + sl * 0.62), Vector2(x1 - sx * 0.04, 0.27 + sl * 0.62),
+							Vector2(x0, 0.4)]), col)
+			"hero":
+				# A face: skin tone, hair, eyes.
+				var sk: Color = it.get("skin", Color(0.6, 0.42, 0.3))
+				var hr: Color = it.get("hair", Color(0.05, 0.04, 0.03))
+				draw_circle(c + Vector2(0, s * 0.04), s * 0.27, sk)
+				draw_arc(c + Vector2(0, s * 0.04), s * 0.27, PI * 1.08, PI * 1.92, 16, hr, s * 0.12, true)
+				for sx: float in [-1.0, 1.0]:
+					draw_circle(c + Vector2(sx * s * 0.1, s * 0.05), s * 0.035, Color(0.95, 0.94, 0.9))
+					draw_circle(c + Vector2(sx * s * 0.1, s * 0.05), s * 0.02, it.get("eyes", Color(0.2, 0.12, 0.06)))
 			"pants":
 				draw_colored_polygon(P.call([Vector2(0.3, 0.16), Vector2(0.7, 0.16), Vector2(0.74, 0.86),
 					Vector2(0.56, 0.86), Vector2(0.5, 0.36), Vector2(0.44, 0.86), Vector2(0.26, 0.86)]), col)
@@ -210,13 +244,9 @@ class Swatch:
 		var model: String = it.get("model", "")
 		var r := s * 0.26
 		var hc := c + Vector2(0, s * 0.06)
-		if model != "hood":
-			draw_circle(hc, r, skin)
-			draw_arc(hc, r, PI * 1.05, PI * 1.95, 16, Color(0.08, 0.06, 0.05), s * 0.1, true)
+		draw_circle(hc, r, skin)
+		draw_arc(hc, r, PI * 1.05, PI * 1.95, 16, Color(0.08, 0.06, 0.05), s * 0.1, true)
 		match model:
-			"hood":
-				draw_circle(hc, r * 1.3, suit)
-				draw_circle(hc + Vector2(0, s * 0.03), r * 0.82, skin)
 			"cap":
 				draw_arc(hc, r * 1.04, PI, TAU, 18, suit, s * 0.16, true)
 				draw_rect(Rect2(hc + Vector2(-r * 0.2, -r * 0.42), Vector2(r * 1.6, s * 0.07)), suit.darkened(0.45))
@@ -249,8 +279,30 @@ class Swatch:
 				draw_colored_polygon(PackedVector2Array([hc + Vector2(-r * 1.0, r * 0.12), hc + Vector2(r * 1.0, r * 0.12),
 					hc + Vector2(r * 0.75, r * 0.8), hc + Vector2(0, r * 1.05), hc + Vector2(-r * 0.75, r * 0.8)]), suit)
 			"":
-				if it.get("slot", "") == "face":
-					draw_arc(c, s * 0.42, 0, TAU, 24, Color(1, 1, 1, 0.25), 2.0, true)
+				var mk: String = it.get("mask", "")
+				var dark := Color(0.06, 0.065, 0.075)
+				match mk:
+					"courier":
+						draw_circle(hc, r * 1.12, dark)
+						draw_rect(Rect2(hc + Vector2(-r * 0.8, -r * 0.18), Vector2(r * 1.6, r * 0.26)), Color(0.12, 0.16, 0.2))
+					"runner":
+						draw_colored_polygon(PackedVector2Array([hc + Vector2(-r * 1.04, -r * 0.05), hc + Vector2(r * 1.04, -r * 0.05),
+							hc + Vector2(r * 0.9, r * 1.1), hc + Vector2(-r * 0.9, r * 1.1)]), dark)
+					"domino":
+						draw_rect(Rect2(hc + Vector2(-r * 0.92, -r * 0.3), Vector2(r * 1.84, r * 0.42)), dark)
+						for sx in [-1.0, 1.0]:
+							draw_circle(hc + Vector2(sx * r * 0.42, -r * 0.08), r * 0.15, Color(0.95, 0.94, 0.9))
+					"balaclava":
+						draw_circle(hc, r * 1.1, dark)
+						draw_rect(Rect2(hc + Vector2(-r * 0.7, -r * 0.26), Vector2(r * 1.4, r * 0.34)), skin)
+					"respirator":
+						draw_colored_polygon(PackedVector2Array([hc + Vector2(-r * 0.7, r * 0.15), hc + Vector2(r * 0.7, r * 0.15),
+							hc + Vector2(r * 0.5, r * 0.85), hc + Vector2(-r * 0.5, r * 0.85)]), Color(0.3, 0.31, 0.33))
+						for sx in [-1.0, 1.0]:
+							draw_circle(hc + Vector2(sx * r * 0.75, r * 0.55), r * 0.2, Color(0.9, 0.45, 0.1))
+					_:
+						if it.get("slot", "") == "face":
+							draw_arc(c, s * 0.42, 0, TAU, 24, Color(1, 1, 1, 0.25), 2.0, true)
 
 
 ## The City Swing wordmark (assets/brand/wordmark_stacked.png, rendered by

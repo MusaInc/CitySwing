@@ -1,3 +1,327 @@
+# Status: 2026-11-05 (1.0.0 release pass)
+
+- **Version 1.0.0**, display name **CitySwing** (iOS keeps saves in the app's
+  Documents folder whatever the name is). App Store pack: `store/APP_STORE.md`
+  (metadata, reviewer notes, privacy label, age-rating answers), privacy page
+  source `store/privacy-cityswing.html`, screenshots `store/screenshots/`
+  (`tools/store_shots.sh` renders genuine captures at store sizes).
+- **Sound v2:** `tools/audio/gen_audio.py` rebuilt as layered foley synthesis
+  (transients, resonant noise, Karplus-Strong cable twang, bubbles, synthetic
+  room/city reverb) – needs numpy + scipy. Still no samples, no licences.
+  AudioDirector randomises pitch on repeated one-shots.
+- **Speed flight pose:** `CharacterRig._speedfly` – flying fast (13→24 m/s) the
+  wings fold: arms swept back, legs together and trailing with wind flutter,
+  body pitched ~60° into the air; dives keep the arms back. pose_lab `fastfly`.
+- **Homes:** Go/Visit from the in-game Homes menu left the touch controls hidden
+  (fixed). Indoors (`Player.indoors`) walking is a capped 4.6 m/s jog with
+  immediate turns and a quick stop.
+- **Saves are atomic** (temp file → verify → .bak → rename) and recover from
+  the backup if save.json is unreadable.
+- Retaining walls: coursed stone in ground.gdshader (were flat grey slabs up
+  to ~13 m tall). Free-roam tip moved to the lower centre (ran under the
+  minimap). Release builds: perf overlay off, "Performance test" wording.
+- Courses re-recorded for the shaped-building layout. Suite 159 + 2 known
+  flakes (expert street touches, ledge_dive ankle).
+- Not done on a device: no iPhone/iPad play-test or frame-rate measurement
+  has been possible from the VPS.
+
+# Status: 2026-11-03 (City Loop, coast, crashes, web reach, look)
+
+- **City Loop replaces the edge railways.** The coastal Loop Line viaduct,
+  the brick waterfront viaduct, the Valley shuttle and the dead-ended
+  Cross-City Line are gone. One closed, one-way line (`RailNetwork`, line
+  "city") runs north up the Spine through the CBD, west round the inner ring,
+  down Dock Road, west along Valley Road and over its own **rail-only bridge**
+  across the strait: a white steel through-arch (ribs take a web) to a turning
+  loop on Westbank's quay (`RailNetwork.TERMINUS`, kept clear by
+  `generate_mainland`), then back over the bridge and along Valley Road.
+  Six stations (stairs via `CityInfrastructure.station_access`), three trains
+  spaced through one timetable (`oneway`/`trains` in the line dict). Buildings
+  in its path are cleared (`_clear_corridor`, 1 today). The island layout now
+  generates Westbank itself (the line needs its ground); CityWorld reuses it.
+- **Edges:** `CoastLife` – North Beach (the shore apron widens to ~88 m of
+  sand between x 140–615: huts, steps, umbrellas/loungers, lifeguard towers,
+  volleyball, a 150 m pleasure pier with a domed pavilion) and the Marina off
+  the west quay (pontoons, fingers, piles, yachts whose masts take a web,
+  motor boats, gangways, harbour hut). Kits with their own RNG.
+- **Riding trains:** car collision is a hull of the drawn profile (curved roof)
+  plus the roof pods (was a flat box 18 cm under the pods / floating at the
+  edges); feet travel with the roof (`Gait.shift` from `Player.carry_velocity`);
+  landing on a train keeps at most 4 m/s of relative speed, leaving it keeps
+  the train's speed.
+- **Crashes:** a knocked-out body now lies flat on the ground (ragdoll pin
+  drops to lying height on the floor), `Player.slammed` → hit-stop beat,
+  shake, thud, dust (`ImpactFx.slam/dust`), 1–2 bounces and a skid (humans
+  only), limbs flung on impact. Cars and trains knock you out (`VehicleHits`,
+  `Player.hit_by`; HUD "HIT BY A CAR/TRAIN"). Humans only.
+- **Web reach from height:** `Player.reach_extra` (up to +50 m, humans only)
+  from height above ground and fall speed; `p_eff()` carries it into
+  targeting/attach/rope length; flatter fan rows (`LOW_ELEVATIONS`) while it
+  is on. Web half-width 0.012.
+- **Look:** richer blue sky, blue depth fog starting at 110 m (gradual, takes
+  distant contrast), warmer sun, cooler shade, soft daytime bloom, a little
+  more saturation and split toning. **Hills:** 45 m mesh, gullies/knolls in
+  `Hinterland.height_at`, ~5k instanced conifers in clumps, canopy/strata
+  detail and detail normals in hinterland.gdshader.
+- Merged `improvement/world-cleanup` (bridge approach ramp, public spaces,
+  station access, junction-clear piers, swing assist, touch/HUD fixes).
+- Known: `test_skinned_body_follows_the_rig` fails intermittently on cold
+  starts (394.2 mm) on the untouched pre-session commit too. `--cam` stills
+  come out pink/dim (capture path), gameplay captures are correct.
+
+# Status: 2026-11-02 (homes: 360° glass)
+
+- **Every home is a whole floor of its tower, glass on all four sides.**
+  The room is the storey's footprint inside 0.3 m outer walls; placement
+  picks towers whose floor plate is the home's size (up to +4.5 m, the
+  closest preferred): Studio 13×15 m, Apartment 16×16, Loft 22×17, Sky
+  25×18, Penthouse 30×23. The front window is still the open one you swing
+  through; the other three walls are glazed (`HomeInteriors.windows_for`):
+  reveals, sill, frame, mullions, a pane. Solid bays only where tall things
+  stand: the front door, a fireplace, the wine wall, the bar, wardrobes, the
+  stairs. The facade is cut to match (`BuildingMesher.walls` takes several
+  openings per face) and nothing is stuck on the home's storey outside.
+  Collision is unchanged in kind: the glass is the 0.3 m wall.
+- Furniture moved off the glass: the studio's kit rail is a free-standing
+  divider and the bike hangs by the front door; the apartment's book wall is
+  behind the sofa and the wardrobe on the hall wall; no wall cabinets over
+  kitchens (windows instead); the loft's neon and board on the brick bay, a
+  free-standing pull-up frame; the penthouse canvas above the stairs.
+- From beyond 380 m (the room isn't drawn) the openings show dark glass.
+- Placement also needs open air under the window (a neighbour's roof just
+  below the sill was where swing-ins landed): the City Apartment moved to a
+  113 m tower.
+- Courses waterfront, uptown and grand tour re-recorded (tower collision).
+  Camera probe routes take positions from the far walls (rooms vary in
+  size now). 147/147.
+
+![homes 360](qa/transformation/homes_360.jpg)
+
+# Status: 2026-11-02 (homes: things to use, trophies, finishes)
+
+The homes are what you work towards, so they now hold your progress and
+give you things to do:
+
+- **Things to use** (`HomeSystem.near_spot`, HUD/touch prompt, F / pad B):
+  - **Wardrobe** – the Wardrobe screen in your flat: the hero turns to face
+    the room under a soft key light and an orbit camera frames what you're
+    browsing (`WardrobeStudio`, the rooftop studio's controls).
+  - **Sleep** – fade out, wake at the other end of the day (evening →
+    morning, day → evening), rested.
+  - **Job screen** (desk laptop / bar tablet / study) – the Job Board.
+  - **Trophies** – the shelf close up with your stats beside it.
+  Only in homes you own; a touch button appears bottom centre.
+- **Trophy shelf** in every home (`HomeTrophies`): a medal on a stand for
+  each Time Trial course (empty glass until earned), a cup that grows and
+  changes metal with your contract rank, a jar that fills with tokens, a
+  fold of each suit colour you've unlocked. Rebuilt when progress changes.
+  The penthouse's is on the mezzanine by the Hall of Fame.
+- **Visit before you buy** – Homes screen: "Visit" on homes you don't own
+  (Free Swing). You can look round; nothing to use, no window re-entry.
+- **Homes screen** shows a real render of each home and its floor size
+  (`assets/ui/homes/*.jpg`).
+- **Finishes**: plaster on plain walls and corner shading on walls and
+  floors (no GI indoors: they read as stickers before); paintings (a
+  painting shader, framed) instead of colour blocks; recessed downlights;
+  lit ceiling coves in the apartment, sky apartment and penthouse;
+  full-height curtains on a track. (A reflection probe per room was tried
+  and dropped: the probe atlas took texture memory from 54 to 215 MB.)
+- Cost, same views as before this pass (software Vulkan, counts only):
+  studio 237 → 252 draw calls, 411k → 422k primitives; penthouse 325 →
+  313 (the view moved with the bigger room); texture memory unchanged
+  (54 MB). The trophy shelf is four batched meshes.
+- **Night**: lamps come up at dusk (×2.6 at night, `home_lights.gd`) so the
+  flat glows warm against the city instead of dimming with the sky; the
+  sky apartment and penthouse gained a light by the glass (8 lights each,
+  the Mobile renderer's per-mesh limit).
+- Fix: the window wall's inner face is 0.3 m in (`WIN_Z`); things placed
+  on it now sit on it, not inside it.
+- Tests: `test_homes.test_things_to_use_at_home` (four spots per home,
+  standing at each offers it, visiting offers nothing),
+  `test_trophies_follow_progress`.
+
+# Status: 2026-11-02 (homes pass: bigger rooms, indoor camera)
+
+- **Bigger homes** (`Apartments.TIERS`, W×D×ceiling):
+  Quay Studio 7.8×7.2×3.2 → 12×11×4.0 m, City Apartment 11×10×3.4 →
+  16×14×4.2, High-Rise Loft 14×12×4.4 → 20×16×6.2, Sky Apartment
+  18×14×4.2 → 24×18×5.2, Penthouse 24×18×5.2 → 26×20×7.2 (it now lives a
+  storey under the roof of a 302 m tower; the city's towers are ≤ ~30 m
+  wide, so 26 m is the widest that fits). Windows grew with them (4.2 →
+  22 m wide). Spawn 1.7 → 2.2 m in from the glass.
+- **Five layouts redrawn for the new sizes** (`HomeInteriors`): furniture
+  to the walls and corners, the middle left open, door openings 2.9 m tall
+  (`DOOR_H`) so the camera sees through them. Studio: sleeping platform
+  behind a curtain, galley kitchen, desk at the window, bike, bistro table,
+  front door with parcels. Apartment: bedroom, bathroom with walk-in
+  shower, an entrance hall with the front door, a wall of books with a
+  ladder, open kitchen + breakfast bar. Loft: 6 m ceiling, kitchen along the
+  brick, glass-walled bedroom on a plinth (with a slope, not a snag), a
+  training corner under neon, a record wall. Sky: lounge round the fire,
+  piano, dining for eight, gallery entrance, master suite with tub.
+  Penthouse: mezzanine at 3.4 m with the Hall of Fame and a study, bar and
+  bed beneath, pool, lounge and dining. Sky finishes toned down (was
+  glaring white); pendants hang ≥ 2.7 m away from tables so the lens
+  never meets them at eye level.
+- **Penthouse stairs** were 0.30 m blocks a slow walk-up snagged on; the
+  treads are now visual over one walkable 36° slope (`HomeInteriors.ramp`).
+- **Indoor camera** (`SwingCamera.indoor_ceiling`, set by `HomeSystem`):
+  closer (3.5–4.2 m vs 4.8–6.2) and lower; collides with partitions and big
+  furniture (human layer, ignored outdoors); crane limited and capped under
+  the ceiling; keeps the hero's chest in sight round door frames; pinned
+  close it looks past the hero into the room instead of down at them; the
+  window look-down only applies while facing the window.
+  Measured by `tools/home_cam_probe.gd` at 60 fps (walks every room,
+  bedrooms, bathrooms, up the stairs and along the mezzanine), frames,
+  old camera on the new rooms → new camera:
+
+  | home | frames | lens outside the room | hero hidden |
+  |---|---|---|---|
+  | studio | 201 | 0 → 0 | 0 → 0 |
+  | apartment | 353 | 6 → 0 | 25 → 1 |
+  | loft | 268 | 0 → 0 | 0 → 0 |
+  | sky | 276 | 0 → 0 | 67 → 0 |
+  | penthouse | 594 | 0 → 0 | 32 → 0 |
+
+- Fix: a 9.0 m/s window vault read as 8.9999 in float32 and fell back to the
+  slow grab (`VAULT_MIN - 0.05`).
+- Courses canyon, waterfront and spires re-recorded (the home towers'
+  collision changed with the bigger rooms).
+- Tests: `test_homes.test_indoor_camera_keeps_the_hero_in_view` (the
+  probe's routes, real camera, ≤ 2% hidden frames, never outside, climbs
+  the mezzanine); the mezzanine test checks the stair slope. 145/145.
+
+Not done: the camera can still end up close behind the hero when you stop
+facing a corner of a small room (it looks over the hero's head then); no
+furniture you can sit on or use.
+
+# Status: 2026-11-02 (character pass)
+
+- **No hoodie.** Skin-tight compression tops cut from the MakeHuman body
+  (so they fit and deform with the skin weights): Long Sleeve, Three-
+  Quarter, Short Sleeve, Sleeveless (shop "top"; colour still "suit").
+  Plane-cut hems (level waist, sleeves square to the arm), a knitted mock
+  neck, contrast side panels, a heathered knit albedo and fine knit normal.
+  Bare forearms/shoulders where the sleeves end. Cargo pants now end in a
+  clean level waistband.
+- **Faces** (shop "hero", free): Kai, Ade, Ren, Theo, Malik – MakeHuman
+  facial targets (`art/hero/sources/face_targets`, CC0), head-only and
+  normalised (shape, not size), each with eyes (iris tint), lashes, brows,
+  lips and a buzz/crop cut from the scalp with a clean hairline. Skin, hair
+  and eye colours are per face.
+- **Masks** (shop "face", now "Masks"): Courier (the original signature,
+  free), Runner gaiter, Domino, Balaclava, Respirator; shades, bandana and
+  visor kept and re-fitted to the real head (CharacterRig.GEAR_FIT).
+  Full masks hide the face (no draw calls under them); beanie/crown/
+  balaclava hide the hair.
+- **Running fixed**: the hips were dragged down every stride by a hip-drop
+  term that measured to the swinging foot's current position (still behind
+  on its way forward). Now vertical-only (kerbs, steps). Sprint: hip height
+  0.78 → 0.88 m, stance knee flexion 67° → 34–41° (`tools/gait_probe.gd`).
+- Drawn budget per outfit 41.8k triangles (was 43k); variants hidden.
+- Old saves: `head_hood` falls back to No Hat (the hood is gone); new slots
+  default (Kai, Long Sleeve).
+- Tests: test_shop (variants, masks, skin tints), test_hero_asset (drawn
+  budget, ≥15 hidden variants). 143/144: the failure is the known flaky
+  ledge_dive get-up joint check.
+
+Not done: `tools/blender/build_gear.py` no longer runs against the new
+character script (it imported removed helpers); gear is fitted in-game.
+No facial animation (blinks/expressions); hair is a short cut only.
+
+# Status: 2026-11-02 (world pass)
+
+- **Mountains round the bay** (`src/world/hinterland.gd`, `hinterland.gdshader`):
+  one heightfield mesh (~16k triangles, underwater cells skipped), shaded
+  by height/slope (sand, meadow, forest, rock, snow). Camera far plane
+  2400 → 6500 m (reversed-Z, no depth cost). Backdrop only: no collision.
+- **Power lines** (`power_lines.gd`): lattice pylons (MultiMesh) along the
+  foothills and up to a pass, catenary conductors in one mesh.
+- **Westbank** has its own coast landforms (`CityRoads.landform`): bays, a
+  cape, an inlet; 554 → 456 buildings.
+- **Cross-City Line** (`RailNetwork.build_cross`): elevated two-track
+  metro down the Spine boulevard, coast to coast through the CBD, deck 16 m
+  over the road, flyover over the Valley Line, four stations, two trains
+  calling at every station. The viaduct is solid but takes no web (world
+  layer only, `CityLayout.kit_solid_only`); grapple targeting now treats
+  such bodies as occluders (it used to pick anchors behind them).
+- **Stadium**: superellipse bowl (two tiers, concourse, back wall), ring
+  roof with a lamp band, four 80 m cable-stayed masts (anchors), fins, a
+  big screen, kiosks; site 96×82 → 150×130 m, moved 24 m west off the ring
+  road.
+- **Buildings**: new "tapered" (ziggurat) form; wider palettes (painted
+  terraces in Old Town, London stock / engineering brick, bronze and green
+  glass, terracotta / charcoal modern, jade / salmon deco); roof crowns on
+  supertall towers (spire, helipad, louvred plant crown + mast) and roof
+  gardens on some mid-rise blocks, kept to the edges.
+- **Roof edges**: airborne mantle onto ledges whose top is within 2 m of
+  the feet; deco/stone mid-edge roof piers lowered from ~2.6–4 m to 1.1 m
+  (they stood where you land).
+- Courses re-recorded on the new city (8/8 first try). Token spots are
+  derived from the buildings, so their positions moved; collected counts
+  are kept (ids), but a returning player's collected set maps to new spots.
+- Tests: `tests/test_world_pass.gd`; `test_trains` now expects five trains
+  and checks a Cross-City train calls at every station; the street-launch
+  test stands by the Spine's kerb (12 m out) instead of under the viaduct.
+
+Not done: facade window-grid repetition (shader work), mainland
+architecture beyond its outline, drones still don't avoid the new viaduct.
+
+# Status: 2026-11-01 (transformation pass: contracts, homes, light)
+
+Branch `feature/cityswing-transformation`. QA report and images:
+`docs/qa/TRANSFORMATION.md`.
+
+## What changed
+
+- **Contracts** (new gameplay loop, `src/core/contracts.gd` rules +
+  `src/modes/job_board.gd` in Free Swing): legal (Rooftop Delivery,
+  Express Courier, Gondola Rescue, Skyline Survey) and underworld (Hot
+  Drop, Getaway, Rooftop Heist) jobs, found as beacons on rooftops and
+  taken by landing there. Underworld pays ~2.4x and brings pursuit drones
+  (heat while seen, busted = 35% fine). Reputation ranks open tiers 1-5.
+  Job Board in pause, HUD card (clock, heat), beacon labels (max 3, fade at
+  swing speed), minimap icons, toast, results chip, first-session hint.
+- **Homes**: five distinct interiors instead of one recoloured plan (see
+  `home_interiors.gd` header); progress board on the wall (Hall of Fame in
+  the penthouse); penthouse mezzanine is walkable; "rested" coin
+  multiplier for starting at / climbing into a home (x1 .. x3).
+- **Bug fix: homes had no view.** Occlusion culling used each tower's full
+  box as an occluder, so the camera inside a home was inside its own
+  occluder and the whole city was culled (you saw the sea plane with cars
+  floating on it). Home towers' occluders now stop below the room.
+- **Lighting**: less flat ambient, sky-tinted shade, stronger sun, haze
+  pushed back (day fog from 220 m at 0.46 density), firmer grade.
+
+## Measured (VPS, software Vulkan: counts only, no device timing)
+
+| view | main | branch |
+|---|---|---|
+| free swing seed 4, 3 frames, HUD | 167-274 dc, 306-400k prims | 180-298 dc, 310-395k prims |
+| same, HUD hidden (3D only) | 201 dc, 364k | 207 dc, 365k |
+| penthouse interior | 170 dc, 185k | 307 dc, 302k |
+| street view (q2) | 199 dc, 674k | 199 dc, 679k |
+| endurance seed 4 (homes, no jobs) | 208-226 dc | 212-226 dc |
+
+The beacons cost ~6 draw calls; the interiors cost nothing measurable
+away from a home and ~+135 draw calls inside the penthouse (the most
+furnished room: glow/glass/feature planes, furniture GLBs). Interior
+pieces don't cast sun shadows. Not measured on an iPhone/iPad.
+
+## Not done / next
+
+- Swinging, camera and character were not retuned: the model is covered
+  by ~60 tests and the Courier was being worked on by another agent; any
+  feel change needs a device.
+- City architecture (window-grid repetition, silhouettes, district
+  identity) was not reworked in this pass beyond lighting.
+- Drones fly through thin geometry when cutting corners close to you
+  (they route round towers using a 20 m roof-height grid).
+- Interiors are procedural boxes/tubes plus the existing Blender furniture;
+  no new Blender assets (no Blender in this container).
+- Pre-existing: test_course_uptown_flyable and
+  test_course_switchback_flyable fail in this container on main too.
+
 # Status: 2026-11-01 (premium redesign, v0.14.0)
 
 ## Redesign pass (latest)

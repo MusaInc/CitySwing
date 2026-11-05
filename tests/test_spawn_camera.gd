@@ -306,7 +306,12 @@ func test_swing_launches_cleanly_from_the_street_and_rooftops(t) -> void:
 		var q: Vector2 = spine[k][0]
 		var nxt: Vector2 = spine[k][1]
 		var fwd := Vector3(q.x - nxt.x, 0.0, q.y - nxt.y).normalized()  # (the spine runs north → south)
-		spots.append([Vector3(q.x, world.layout.ground_y(q.x, q.y) + 1.2, q.y), fwd, true])
+		# The City Loop's viaduct runs down the spine's median now: stand
+		# by the kerb, clear of its deck (a swing straight up
+		# under an elevated railway meets the railway).
+		var side := Vector2(-fwd.z, fwd.x) * 12.0
+		var sq := q + side
+		spots.append([Vector3(sq.x, world.layout.ground_y(sq.x, sq.y) + 1.2, sq.y), fwd, true])
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 6
 	for k in 3:

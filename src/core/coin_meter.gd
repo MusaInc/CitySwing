@@ -86,6 +86,19 @@ func lose() -> void:
 		multiplier_changed.emit(1.0, false, was)
 
 
+## Rested at home (HomeSystem): the multiplier starts at least `levels`
+## steps up (a better home rests you better). Never lowers it. True if it rose.
+func rested(levels: int) -> bool:
+	if not active or levels <= level:
+		return false
+	var was := multiplier()
+	level = mini(levels, MAX_LEVEL)
+	progress = 0.0
+	best_mult = maxf(best_mult, multiplier())
+	multiplier_changed.emit(multiplier(), true, was)
+	return true
+
+
 ## A close call past a building (NearMiss): razor passes pay double.
 func close_call(razor: bool) -> int:
 	if not active:

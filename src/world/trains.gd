@@ -5,7 +5,8 @@ extends Node3D
 ## cars swing round curves and pitch on grades); players can land on a train
 ## and ride it (CharacterBody3D platform velocity). Timetable: accelerate,
 ## cruise, brake into each station, dwell, go – a pure function of the clock,
-## so it never drifts. Loop Line: one train each way; Valley Line: a shuttle.
+## so it never drifts. The City Loop runs one way round with trains spaced
+## evenly through the timetable.
 ##
 ## Collision is on TRAIN_LAYER, which only human players collide with (bots
 ## and recorded courses are unaffected by where the trains happen to be).
@@ -53,11 +54,18 @@ func setup(lines: Array, car_mesh: Mesh, cab_mesh: Mesh) -> void:
 		w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		w.loop_end = int(w.get_length() * w.mix_rate)
 	for line in lines:
-		if line["loop"]:
+		if line.get("oneway", false):
+			# One way round: trains spaced evenly through the timetable.
+			var nt: int = line.get("trains", 2)
+			for k in nt:
+				_add_train(line, 1, line["tracks"][0], float(k) / nt, stream)
+		elif line["loop"]:
 			_add_train(line, 1, line["tracks"][0], 0.0, stream)
 			_add_train(line, -1, -float(line["tracks"][0]), 0.5, stream)
 		else:
 			_add_train(line, 1, line["tracks"][0], 0.0, stream)
+			if (line["tracks"] as Array).size() > 1:
+				_add_train(line, 1, line["tracks"][1], 0.5, stream)  # the other track, half a cycle on
 	_place_all()
 
 
@@ -88,8 +96,11 @@ func _add_train(line: Dictionary, dir: int, offset: float, phase: float, stream:
 				var b: float = st[(n - i - 1 + n) % n]
 				legs.append([a, -fposmod(a - b, total)])
 	else:
-		legs.append([st[0], float(st[1]) - float(st[0])])
-		legs.append([st[1], float(st[0]) - float(st[1])])
+		# End to end through every station, then back.
+		for i in st.size() - 1:
+			legs.append([st[i], float(st[i + 1]) - float(st[i])])
+		for i in range(st.size() - 1, 0, -1):
+			legs.append([st[i], float(st[i - 1]) - float(st[i])])
 	var cycle := 0.0
 	for leg in legs:
 		leg.append(_leg_time(absf(leg[1])))
@@ -103,14 +114,17 @@ func _add_train(line: Dictionary, dir: int, offset: float, phase: float, stream:
 		body.sync_to_physics = false  # (moved in _physics_process already)
 		body.collision_layer = TRAIN_LAYER
 		body.collision_mask = 0
-		var cs := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(2.9, 2.95, CAR_LEN - 0.2)
-		cs.shape = box
-		cs.position = Vector3(0.0, 2.45, 0.0)
-		body.add_child(cs)
-		var mi := MeshInstance3D.new()
 		var cab := k == 0 or k == n_cars - 1
+		# Collision = the drawn body (its curved roof, the cab's raked nose)
+		# plus the roof's air-con pods, so a rider stands right on the roof.
+		for shape_xf in car_shapes(cab):
+			var cs := CollisionShape3D.new()
+			cs.shape = shape_xf[0]
+			cs.transform = shape_xf[1]
+			if k == n_cars - 1:
+				cs.transform = Transform3D(Basis(Vector3.UP, PI), Vector3.ZERO) * cs.transform
+			body.add_child(cs)
+		var mi := MeshInstance3D.new()
 		mi.mesh = _cab_mesh if cab else _car_mesh
 		if k == n_cars - 1:
 			mi.rotation.y = PI  # the rear cab faces backwards
@@ -129,6 +143,64 @@ func _add_train(line: Dictionary, dir: int, offset: float, phase: float, stream:
 		au.play()
 		tr["audio"] = au
 	_trains.append(tr)
+
+
+## The car body's cross-section (half, from the floor up): the same profile
+## tools/blender/build_kit.py lofts (TRAIN_PROFILE: x, height above rail).
+const PROFILE := [[1.40, 0.95], [1.45, 1.35], [1.46, 2.7], [1.40, 3.2], [1.2, 3.6], [0.75, 3.84], [0.0, 3.92]]
+## Cab nose rings (z from the centre toward the front, width and height scale).
+const NOSE := [[6.2, 1.0, 1.0], [7.4, 0.97, 0.94], [8.3, 0.88, 0.8], [8.8, 0.74, 0.62]]
+const ROOF_TOP := 3.92
+static var _shapes := {}
+
+
+## [Shape3D, Transform3D] pairs for a car (front = -Z, like the mesh).
+static func car_shapes(cab: bool) -> Array:
+	if _shapes.has(cab):
+		return _shapes[cab]
+	var rings: Array = [[-CAR_LEN * 0.5, 1.0, 1.0]]
+	if cab:
+		rings.append_array(NOSE)
+	else:
+		rings.append([CAR_LEN * 0.5, 1.0, 1.0])
+	var pts := PackedVector3Array()
+	for r in rings:
+		for q in PROFILE:
+			for sx: float in [-1.0, 1.0]:
+				var x: float = float(q[0]) * float(r[1]) * sx
+				var y: float = 0.95 + (float(q[1]) - 0.95) * float(r[2])
+				pts.append(Vector3(x, y, -float(r[0])))
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = pts
+	var out: Array = [[hull, Transform3D.IDENTITY]]
+	for ry: float in [-4.0, 3.0]:
+		var pod := BoxShape3D.new()
+		pod.size = Vector3(1.7, 0.2, 2.6)
+		out.append([pod, Transform3D(Basis.IDENTITY, Vector3(0.0, 4.11 - 0.1, -ry))])
+	_shapes[cab] = out
+	return out
+
+
+## Velocity of a moving train car the point is inside (beside or in front of
+## the car, not riding on its roof), or zero. For VehicleHits.
+func hit_test(p: Vector3) -> Vector3:
+	for tr in _trains:
+		var v: float = tr["v"]
+		if v < 3.0:
+			continue
+		var cars: Array = tr["cars"]
+		var mid: Vector3 = (cars[cars.size() / 2] as Node3D).global_position
+		if mid.distance_squared_to(p) > pow(CAR_PITCH * cars.size() * 0.5 + 10.0, 2.0):
+			continue
+		for car: AnimatableBody3D in cars:
+			var xf := car.global_transform
+			var lp := xf.affine_inverse() * p
+			# (The capsule's centre: 0.9 m above the feet, radius 0.35. Up
+			# to the shoulder of the roof: above that you're riding it.)
+			if absf(lp.x) < 1.46 + 0.4 and absf(lp.z) < CAR_LEN * 0.5 + 0.4 and lp.y > 0.2 \
+					and lp.y < 3.4:
+				return -xf.basis.z.normalized() * v
+	return Vector3.ZERO
 
 
 ## Time to cover d metres from rest to rest (trapezoid speed profile).

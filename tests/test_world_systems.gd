@@ -49,15 +49,38 @@ func test_rail_lines(t) -> void:
 	var names := {}
 	for line in l.rail.lines:
 		names[line["name"]] = line
-	t.check(names.has("loop") and names.has("valley"), "loop and valley lines")
-	var loop: Dictionary = names.get("loop", {})
+	t.check(names.size() == 1 and names.has("city"), "one line: the City Loop (%s)" % [names.keys()])
+	var loop: Dictionary = names.get("city", {})
 	if loop.is_empty():
 		return
 	var pts: PackedVector3Array = loop["pts"]
 	var total := pts.size() * RailNetwork.STEP
-	t.note("loop line %.0f m, %d stations" % [total, loop["stations"].size()])
-	t.check(total > 3000.0, "the loop goes right round the island")
-	t.check(loop["stations"].size() == 4, "four loop stations")
+	t.note("City Loop %.0f m, %d stations" % [total, loop["stations"].size()])
+	t.check(loop["loop"] and loop["oneway"], "a closed loop, one way round (no dead ends)")
+	t.check(total > 3000.0, "the loop runs through the city and over the strait")
+	t.check(loop["stations"].size() == RailNetwork.STATIONS.size(), "every station placed")
+	# Through the middle, not round the edge: the island part stays well
+	# inside the coast; and it crosses to Westbank.
+	var inland := Geometry2D.offset_polygon(l.coast, -120.0)[0]
+	var mid := 0
+	var west := false
+	for p in pts:
+		if Geometry2D.is_point_in_polygon(Vector2(p.x, p.z), inland):
+			mid += 1
+		west = west or p.x < CityLayout.FAR_SHORE - 60.0
+	t.check(mid > pts.size() / 2, "mostly through the middle of the city (%d of %d samples)" % [mid, pts.size()])
+	t.check(west, "crosses the strait to Westbank")
+	# The ends of the open turning loop never cross: no sample comes near
+	# another one far along the line (except the side-by-side runs, 7.2 m).
+	var close := 0
+	for i in range(0, pts.size(), 3):
+		for j in range(i + 40, pts.size(), 3):
+			if absf(i - j) > pts.size() - 40:
+				continue
+			var d := Vector2(pts[i].x - pts[j].x, pts[i].z - pts[j].z).length()
+			if d < RailNetwork.PAIR * 2.0 - 1.0 and absf(pts[i].y - pts[j].y) < 6.0:
+				close += 1
+	t.check(close == 0, "the line never runs into itself (%d)" % close)
 	var worst_grade := 0.0
 	var worst_turn := 0.0
 	for i in pts.size():
@@ -76,14 +99,12 @@ func test_rail_lines(t) -> void:
 	for i in range(0, pts.size(), 5):
 		var p := pts[i]
 		for b in l.buildings:
-			if b["kind"] == "invisible":
-				continue  # (the waterfront viaduct's own deck)
 			if CityLayout.inside(b, p + Vector3.UP * 2.0, 0.3):
 				hits += 1
 				break
 		if hits > 0:
 			break
-	t.check(hits == 0, "the loop line runs clear of buildings")
+	t.check(hits == 0, "the City Loop runs clear of buildings")
 
 
 func test_trains_run_and_stop_at_stations(t) -> void:
@@ -92,7 +113,7 @@ func test_trains_run_and_stop_at_stations(t) -> void:
 	add_child(trains)
 	var car := BoxMesh.new()
 	trains.setup(l.rail.lines, car, car)
-	t.check(trains._trains.size() == 3, "two loop trains and a valley shuttle")
+	t.check(trains._trains.size() == 3, "three trains on the City Loop (%d)" % trains._trains.size())
 	var s0: Array = []
 	for tr in trains._trains:
 		s0.append(tr["cars"][0].global_position)
@@ -103,7 +124,7 @@ func test_trains_run_and_stop_at_stations(t) -> void:
 	for i in trains._trains.size():
 		if (trains._trains[i]["cars"][0] as Node3D).global_position.distance_to(s0[i]) > 5.0:
 			moved += 1
-	t.check(moved >= 2, "trains move (%d of 3 after 20 s)" % moved)
+	t.check(moved >= 3, "trains move (%d of %d after 20 s)" % [moved, trains._trains.size()])
 	# Cars stay coupled: neighbours ~CAR_PITCH apart.
 	var tr0: Dictionary = trains._trains[0]
 	var gap := (tr0["cars"][0] as Node3D).global_position.distance_to((tr0["cars"][1] as Node3D).global_position)
@@ -120,6 +141,22 @@ func test_trains_run_and_stop_at_stations(t) -> void:
 			break
 		s += 1.0
 	t.check(stopped, "trains stop at stations (cycle %.0f s)" % cyc)
+	# A train calls at every station round the loop.
+	for tr in trains._trains:
+		var called := {}
+		var c2: float = tr["cycle"]
+		var tt := 0.0
+		while tt < c2:
+			trains._clock = tt
+			trains._place_all()
+			if float(tr["v"]) == 0.0:
+				for st: float in tr["line"]["stations"]:
+					if absf(float(tr["s"]) - st) < 3.0:
+						called[st] = true
+			tt += 0.5
+		t.check(called.size() == (tr["line"]["stations"] as Array).size(),
+			"a train calls at all %d stations (%d)" % [(tr["line"]["stations"] as Array).size(), called.size()])
+		break
 	trains.queue_free()
 
 

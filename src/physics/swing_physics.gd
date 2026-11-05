@@ -22,6 +22,9 @@ class State:
 	var snap_speed := 0.0
 
 
+const INDOOR_SPEED := 4.6  # m/s top speed walking about inside a home
+
+
 class Controls:
 	extends RefCounted
 	## Desired direction in world space, horizontal, length 0..1.
@@ -36,6 +39,9 @@ class Controls:
 	var turn_assist := false
 	## A human is running (player_run_speed). Bots and the model tests leave it off.
 	var human := false
+	## Inside a home: a calm, precise walk/jog (rooms are ~15 m across –
+	## city sprint speed and wide momentum turns overshoot the furniture).
+	var indoors := false
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -78,17 +84,20 @@ static func _substep(s: State, c: Controls, p: SwingParams, h: float) -> void:
 		v.y -= p.gravity * c.gravity_scale * h
 		if s.attached and s.taut:
 			v = _swing_steer(s, v, c, p, h)
+			if c.human:
+				v = _flow(v, p, h)
 		else:
 			v = _air_steer(v, c, p, h)
 
 	var spd := v.length()
 	if spd > 0.0001:
-		var dec := (p.air_drag * spd * spd + p.linear_drag * spd) * h
+		var drag := p.air_drag * (p.flow_drag_scale if c.human else 1.0)
+		var dec := (drag * spd * spd + p.linear_drag * spd) * h
 		v -= v / spd * minf(dec, spd)
 	v.y = maxf(v.y, -p.max_fall_speed)
 
 	if s.attached and c.reel != 0.0:
-		v = _reel(s, v, c.reel, p, h)
+		v = _reel(s, v, c.reel, p, h, c.human)
 
 	var moved_on_arc := false
 	if s.attached and s.taut:
@@ -144,7 +153,7 @@ static func _substep(s: State, c: Controls, p: SwingParams, h: float) -> void:
 	s.velocity = v
 
 
-static func _reel(s: State, v: Vector3, reel: float, p: SwingParams, h: float) -> Vector3:
+static func _reel(s: State, v: Vector3, reel: float, p: SwingParams, h: float, carry_pull := false) -> Vector3:
 	var old_len := s.rope_length
 	var rate := p.reel_in_speed if reel > 0.0 else p.reel_out_speed
 	var new_len := clampf(old_len - reel * rate * h, p.min_rope_length, p.max_rope_length)
@@ -162,9 +171,30 @@ static func _reel(s: State, v: Vector3, reel: float, p: SwingParams, h: float) -
 			var target := minf(vt_len * old_len / new_len, maxf(vt_len, p.reel_speed_cap))
 			if vt_len > 0.0001:
 				vt = vt / vt_len * target
-			v = vt + nrm * minf(vr, 0.0)
+			# The winch's upward motion must remain in release velocity, rather
+			# than existing only as a positional constraint correction.
+			var radial := minf(vr, 0.0)
+			if carry_pull:
+				var pull := -(old_len - new_len) / maxf(h, 0.0001)
+				if radial > pull:
+					radial = move_toward(radial, pull, p.auto_climb_accel * h)
+			v = vt + nrm * radial
 	s.rope_length = new_len
 	return v
+
+
+## Player flow assist on a taut web: a push along the direction of travel,
+## strongest through the low, fast part of the arc and fading on a steep climb
+## (so it carries you through the swing without winching you up the wall),
+## easing off towards the cruise speed.
+static func _flow(v: Vector3, p: SwingParams, h: float) -> Vector3:
+	var spd := v.length()
+	if spd < 2.0 or p.flow_accel <= 0.0:
+		return v
+	var dir := v / spd
+	var climb := clampf(dir.y / 0.55, 0.0, 1.0)  # 0 level/descending .. 1 at ~33° up
+	var ease := clampf(1.0 - (spd / p.flow_cruise_speed) * (spd / p.flow_cruise_speed), 0.0, 1.0)
+	return v + dir * p.flow_accel * ease * (1.0 - climb) * h
 
 
 static func _swing_steer(s: State, v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:
@@ -223,6 +253,13 @@ static func _turn(v: Vector3, move: Vector3, rate_deg: float, h: float) -> Vecto
 static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:
 	var vh := Vector3(v.x, 0.0, v.z)
 	var m := Vector3(c.move.x, 0.0, c.move.z).limit_length(1.0)
+	if c.indoors:
+		# Indoors: speed follows the stick directly (top 4.6 m/s, a brisk
+		# jog), turns are immediate and letting go stops within a step.
+		var goal := m * INDOOR_SPEED
+		var rate := 34.0 if m.length_squared() > 0.01 else 30.0
+		vh = vh.move_toward(goal, rate * h)
+		return Vector3(vh.x, minf(v.y, 0.0), vh.z)
 	var speed := vh.length()
 	var run_speed := p.player_run_speed if c.human else p.run_speed
 	var run_accel := p.player_run_accel if c.human else p.run_accel
@@ -261,7 +298,22 @@ static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> V
 ## and the swing gains speed and lifts the body. It never pulls the line below
 ## auto_tighten_min_fraction of its attach length, and it winches harder when
 ## the lowest point of the arc would come too close to the street.
-static func auto_tighten(s: State, p: SwingParams, attach_length: float) -> float:
+static func auto_tighten(s: State, p: SwingParams, attach_length: float, assisted := false) -> float:
+	var pump := _arc_tighten(s, p, attach_length)
+	if not assisted or not s.attached:
+		return pump
+	var delta := s.anchor - s.position
+	var stop := maxf(p.min_rope_length, p.auto_climb_stop_distance)
+	var end_ease := smoothstep(stop, stop + 5.0, s.rope_length)
+	var above := smoothstep(0.0, 5.0, delta.y)
+	var rising := smoothstep(0.0, 10.0, s.velocity.y)
+	var rate := (p.auto_climb_speed + p.auto_climb_upswing_bonus * rising) / maxf(p.reel_in_speed, 0.01)
+	# Even a stationary hang climbs; slack is taken up, and approaching the
+	# anchor eases to a safe standoff. Never winch down toward a lower anchor.
+	return maxf(pump, rate * above) * end_ease
+
+
+static func _arc_tighten(s: State, p: SwingParams, attach_length: float) -> float:
 	if not (s.attached and s.taut):
 		return 0.0
 	var shortfall := p.swing_ground_clearance - (s.anchor.y - s.rope_length)

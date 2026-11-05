@@ -1,29 +1,52 @@
-# City Swing identity
+# CitySwing identity — "Sunset Swing" (v3, 2026-11-05)
 
 ![Identity sheet](brand_sheet.png)
 
-The main menu sets the visual language: Outfit lettering, Signal Gold actions,
-warm white text and Night Ink. The city and player provide the imagery.
-The launch artwork uses the same restrained palette, without the old cartoon
-hero, sun, outlined lettering or coloured gradients.
+**Why it changed.** The v1 mark (a gold open "C" with a white stick) read as a
+power button or a settings dial: nothing in it said city, character or
+swinging, so the icon under-sold the game in App Store charts.
 
-## Logo and icon
+**Directions considered.** (1) *Hero in the Arc* – the real hero mid-swing,
+the real dusk skyline, the gold swing arc. (2) *Skyline Arc* – symbol over a
+stylised skyline (elegant, but the hero vanishes at small sizes). (3) *Masked
+Portrait* – a close-up of the mask (superhero-poster feel; the mask is only one
+of nine face options). **Chosen: 1** – most readable at 40 px and the most
+truthful: every raster comes from the game.
 
-An open gold C describes a swinging arc; a rising white cable ends at an anchor.
-The lockup pairs this ascent mark with upright CITY / SWING lettering. It appears
-at bottom left in the live title and main menu. The app icon uses the same mark
-on an opaque Night Ink square, with generous space for platform corner masks.
-The horizontal wordmark is available for wider placements.
+**Truthfulness rule.** Brand art is rendered by the game: the hero
+(`tools/brand/hero_render.gd`: the real CharacterRig and default look, flown by
+the real swing physics on a real web, transparent background, studio key +
+Signal Gold rim) and the city (`tools/store_shots.sh --cam … --nohud`: the
+downtown towers at sunset from street level). No stock art, no painted
+character, no effects the game doesn't have.
 
-| Colour | Hex | Use |
+## The system
+
+| Asset | Source | Output |
 |---|---|---|
-| Signal Gold | `#FFC93C` | Mark, SWING, primary actions and focus |
-| Web White | `#F7F3EA` | CITY, cable, primary text |
-| Night Ink | `#110D26` | Launch background, menu shading |
+| App icon | `tools/brand/icon_compose.py` (art/skyline_sea.png, art/hero_swing.png) | `assets/icon_1024.png`, `assets/icon.png` (256, web) |
+| Emblem | `tools/brand/mark.html` → `wordmark.js` `emblemSVG()` (art/hero_silhouette_ink.png) | `assets/brand/mark.png` |
+| Wordmark | `wordmark.html` → `drawWordmark({horizontal})` | `assets/brand/wordmark.png` |
+| Lockup (title, splash) | `wordmark_stacked.html` → `drawWordmark()` | `assets/brand/wordmark_stacked.png` |
+| Boot artwork | `splash.html` (real towers, deep-graded) | `assets/brand/splash.png` |
+| Sheet | `sheet.html` | `docs/brand_sheet.png` |
 
-Outfit Black is used for the logo and titles, Bold for actions, SemiBold for
-supporting text. The existing licensed fonts live in `assets/fonts`.
-Gameplay's teal collectibles and red warnings retain their existing meanings.
+* **Icon (v3):** a hard-edged sunset disc behind the real downtown skyline
+  (rendered from the sea at sunset; the sky is keyed out column by column so
+  the sun sits behind the towers, which go to near-silhouette with their lit
+  windows), and the hero crossing the disc in silhouette, white web line out of
+  frame. Reads at 40 px: one bold disc, one figure.
+* **Wordmark:** one word, CITYSWING – Outfit Black skewed −10°, CITY Web White,
+  SWING Signal Gold; the swing path runs under the word and rises to a web
+  anchor after the G (never through the letters).
+* **Emblem:** the icon reduced – the hero's silhouette (render alpha, Night
+  Ink) inside the gold sun disc, the white web line breaking out to its anchor
+  dot. Legible down to ~40 px.
+* **Title screen:** lockup bottom-left over the live cinematics (nine 12 s
+  shots of the real game) on a soft Night Ink pool; gold actions on the right.
+
+Palette: Signal Gold `#FFC93C` (action, arc), Web White `#F7F3EA` (type, web),
+Night Ink `#110D26` (ground); Sunset `#FF9A4D` only as light.
 
 ## Startup
 
@@ -42,21 +65,15 @@ readable retry action. Desktop shows “PRESS TO START”; touch devices show
 
 ## Editable sources
 
-Run `node tools/brand/render.mjs`, or append an asset name to render just that
-asset. This uses the existing Playwright renderer; set `PLAYWRIGHT` to override
-its local module location. No remote fonts, stock artwork or generated imagery.
+`node tools/brand/render.mjs [asset]` renders everything above (Playwright;
+set `PLAYWRIGHT` to override the module). Re-shoot the art with:
 
-| Asset | Source | Runtime output |
-|---|---|---|
-| App icon | `tools/brand/icon.svg` | `assets/icon_1024.png`, `assets/icon.png` |
-| Ascent mark | `tools/brand/mark.svg` | `assets/brand/mark.png` |
-| Logos | `tools/brand/wordmark.js`, HTML wrappers | `assets/brand/wordmark*.png` |
-| Boot artwork | `tools/brand/splash.html` | `assets/brand/splash.png` |
-| Identity sheet | `tools/brand/sheet.html` | `docs/brand_sheet.png` |
-
-Preserve flat colours and the authored clear space. Do not add shadows, outlines,
-character illustrations or gradients to the logo. Update the shared symbol
-geometry in mark, icon and wordmark together.
+```sh
+xvfb-run -a -s "-screen 0 1400x1400x24" godot --rendering-method mobile \
+  --resolution 1024x1024 --fixed-fps 60 -s res://tools/brand/hero_render.gd -- <dir>
+bash tools/store_shots.sh <dir> 1024x1024 sky "4" --mode=free --time=18.4 \
+  --weather=clear --seed=3 --cam=640,30,-80,560,280,-160 --fov=62 --nohud
+```
 
 ## Verification
 

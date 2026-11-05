@@ -7,7 +7,7 @@ extends RefCounted
 ## to the west, a waterfront of three domed/clock-towered landmarks, a dense
 ## glass business district peaking around a radio beacon, brick docks with
 ## basins and cranes to the north, low Georgian terraces to the east under a
-## huge sandstone cathedral, and an elevated railway along the waterfront.
+## huge sandstone cathedral, and a metro loop on viaducts through the middle.
 ## Heights are shaped for swinging: tall clusters, wide avenues as launch gaps,
 ## low-rise districts as technical terrain.
 ## Compact (~0.94 x 1.24 km) so every street is worth swinging down: a
@@ -46,14 +46,20 @@ const APPROACH_END := -800.0
 enum Style { STONE, BRICK, GLASS, WAREHOUSE, MODERN, SANDSTONE, DARK_GLASS, DECO }
 
 const STYLE_COLORS := {
-	Style.STONE: [Color(0.80, 0.77, 0.70), Color(0.74, 0.72, 0.68), Color(0.86, 0.82, 0.74)],
-	Style.BRICK: [Color(0.56, 0.28, 0.21), Color(0.63, 0.35, 0.25), Color(0.47, 0.3, 0.25), Color(0.7, 0.5, 0.38)],
-	Style.GLASS: [Color(0.36, 0.44, 0.5), Color(0.55, 0.62, 0.66), Color(0.3, 0.38, 0.36)],
-	Style.WAREHOUSE: [Color(0.5, 0.25, 0.18), Color(0.44, 0.24, 0.2)],
-	Style.MODERN: [Color(0.88, 0.88, 0.86), Color(0.36, 0.38, 0.42), Color(0.78, 0.72, 0.62)],
-	Style.SANDSTONE: [Color(0.66, 0.42, 0.33), Color(0.72, 0.5, 0.38)],
-	Style.DARK_GLASS: [Color(0.18, 0.2, 0.23), Color(0.25, 0.27, 0.3)],
-	Style.DECO: [Color(0.87, 0.81, 0.69), Color(0.8, 0.74, 0.64)],
+	Style.STONE: [Color(0.80, 0.77, 0.70), Color(0.74, 0.72, 0.68), Color(0.86, 0.82, 0.74), Color(0.82, 0.72, 0.55),
+		Color(0.68, 0.69, 0.68)],
+	Style.BRICK: [Color(0.56, 0.28, 0.21), Color(0.63, 0.35, 0.25), Color(0.47, 0.3, 0.25), Color(0.7, 0.5, 0.38),
+		Color(0.72, 0.62, 0.42), Color(0.32, 0.3, 0.32), Color(0.66, 0.3, 0.18)],
+	Style.GLASS: [Color(0.36, 0.44, 0.5), Color(0.55, 0.62, 0.66), Color(0.3, 0.38, 0.36), Color(0.42, 0.36, 0.28),
+		Color(0.33, 0.45, 0.42), Color(0.28, 0.36, 0.52)],
+	Style.WAREHOUSE: [Color(0.5, 0.25, 0.18), Color(0.44, 0.24, 0.2), Color(0.58, 0.46, 0.32)],
+	Style.MODERN: [Color(0.88, 0.88, 0.86), Color(0.36, 0.38, 0.42), Color(0.78, 0.72, 0.62), Color(0.75, 0.45, 0.32),
+		Color(0.24, 0.25, 0.27), Color(0.72, 0.8, 0.74), Color(0.94, 0.93, 0.9)],
+	# Painted render on the terraces: pastel streets give Old Town its colour.
+	Style.SANDSTONE: [Color(0.66, 0.42, 0.33), Color(0.72, 0.5, 0.38), Color(0.86, 0.66, 0.64), Color(0.9, 0.82, 0.58),
+		Color(0.66, 0.74, 0.62), Color(0.66, 0.76, 0.84), Color(0.92, 0.9, 0.84)],
+	Style.DARK_GLASS: [Color(0.18, 0.2, 0.23), Color(0.25, 0.27, 0.3), Color(0.2, 0.17, 0.14)],
+	Style.DECO: [Color(0.87, 0.81, 0.69), Color(0.8, 0.74, 0.64), Color(0.55, 0.7, 0.62), Color(0.86, 0.62, 0.52)],
 }
 
 var seed := 1207
@@ -74,13 +80,16 @@ var coast := PackedVector2Array()  # the island outline (sea wall), from CityRoa
 var sea: Array = []            # Rect2 (also in `water`); the island is cut out by is_water
 var reserved: Array = []       # Rect2 footprints owned by landmarks and set pieces (world, axis-aligned)
 var structures: Array = []     # Dictionary specs for BuildingMesher.add_structure (cranes, bridge)
+var bridge_ramp := PackedVector3Array()  # island approach, deck centreline
+var public_furniture: Array = []  # authored public spaces, merged with street furniture
+var public_gardens: Array[Vector3] = []
 var anchor_lines: Array = []   # [from:Vector3, to:Vector3] web anchors on thin structures (jibs, cables)
 ## Set-piece collision that isn't an axis-aligned box: [Transform3D, size]
 ## oriented boxes (beams) and convex hulls (PackedVector3Array).
 var kit_obbs: Array = []
 var kit_hulls: Array = []
 var pieces: SetPieces
-## Railways the trains run on (and the Loop Line's viaduct and stations).
+## The railway the trains run on (and the City Loop's viaduct, stations and bridge).
 var rail: RailNetwork
 ## The five homes (Apartments.place, after everything else is laid out).
 var apartments: Apartments
@@ -121,16 +130,26 @@ func generate(p_seed := 1207) -> CityLayout:
 	_bridge()
 	_blocks()
 	_construction()
-	_viaduct()
-	_skybridges()
+	# Westbank first: the City Loop crosses the strait and turns round on its
+	# quay (its ground, its buildings kept clear of the turning loop).
+	mainland = CityLayout.new().generate_mainland(p_seed)
 	rail = RailNetwork.new(self)
-	pieces.elevated_rail()
-	rail.build_loop()
+	rail.build_city_loop()
+	_skybridges()  # (after the line: it may have cleared a tower from its path)
 	pieces.lighthouse()
+	CoastLife.new(self).build()  # North Beach and the Marina
 	_traffic()
 	_sea()
+	CityInfrastructure.public_spaces(self)
 	_place_plant()
 	apartments = Apartments.place(self)
+	# Last: plazas and parks on both shores, clear of the City Loop.
+	var rail_lines: Array = []
+	for ln in rail.lines:
+		rail_lines.append(ln["pts"])
+	CityInfrastructure.open_ground(self, rail_lines)
+	if mainland != null:
+		CityInfrastructure.open_ground(mainland, rail_lines)
 	return self
 
 
@@ -180,8 +199,10 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	rail = RailNetwork.new(self)
 	var under := Rect2(APPROACH_END, BRIDGE_Z - 13.0, FAR_SHORE - 62.0 - APPROACH_END, 26.0)
 	reserved.append(under)
+	reserved.append(RailNetwork.TERMINUS)  # the City Loop's turning loop on the quay
 	roads = CityRoads.new()
 	roads.inner_radius = 0.0
+	roads.landform = "westbank"
 	var px := func(x: float) -> float: return MIRROR - x  # world x <-> plan x
 	var N := MAINLAND_PLAN.position.y - 60.0
 	var S := MAINLAND_PLAN.end.y + 60.0
@@ -199,21 +220,23 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 		"shore": [Vector2(W, -300.0), Vector2(160.0, -330.0), Vector2(300.0, -420.0), Vector2(400.0, N)],
 		"harbour": [Vector2(W, 250.0), Vector2(170.0, 235.0), Vector2(320.0, 300.0), Vector2(430.0, S)],
 	}
-	var keep: Array = [_rect_poly(Rect2(float(px.call(under.end.x)), under.position.y, under.size.x, under.size.y))]
+	var term := RailNetwork.TERMINUS
+	var keep: Array = [_rect_poly(Rect2(float(px.call(under.end.x)), under.position.y, under.size.x, under.size.y)),
+		_rect_poly(Rect2(float(px.call(term.end.x)), term.position.y, term.size.x, term.size.y))]
 	roads.generate(seed, func(x: float, z: float) -> String: return district(MIRROR - x, z), MAINLAND_PLAN, keep)
 	roads.mirror_x(MIRROR)
-	# The strip under the approach viaduct: cut out of the blocks it crosses
-	# and kept as an open plaza.
-	var cut := _rect_poly(under)
-	var kept: Array = []
-	for b in roads.blocks:
-		for q in Geometry2D.clip_polygons(b["poly"], cut):
-			if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 60.0:
-				kept.append({"poly": q, "district": b["district"], "kind": b["kind"]})
-		for q in Geometry2D.intersect_polygons(b["poly"], cut):
-			if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 30.0:
-				kept.append({"poly": q, "district": b["district"], "kind": "plaza"})
-	roads.blocks = kept
+	# The strip under the approach viaduct and the railway's turning loop:
+	# cut out of the blocks they cross and kept as open plazas.
+	for cut in [_rect_poly(under), _rect_poly(term)]:
+		var kept: Array = []
+		for b in roads.blocks:
+			for q in Geometry2D.clip_polygons(b["poly"], cut):
+				if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 60.0:
+					kept.append({"poly": q, "district": b["district"], "kind": b["kind"]})
+			for q in Geometry2D.intersect_polygons(b["poly"], cut):
+				if not Geometry2D.is_polygon_clockwise(q) and CityRoads._area(q) > 30.0:
+					kept.append({"poly": q, "district": b["district"], "kind": "plaza"})
+		roads.blocks = kept
 	roads.bake_field(2.0)
 	coast = roads.coast
 	island = _bbox(coast)
@@ -229,6 +252,7 @@ func generate_mainland(p_seed := 1207) -> CityLayout:
 	_construction()
 	_skybridges()
 	_traffic()
+	CityInfrastructure.public_spaces(self)
 	_place_plant()
 	return self
 
@@ -1236,19 +1260,21 @@ func _form_for(dist: String, h: float, r: Rect2, frng: RandomNumberGenerator) ->
 	var opts: Array = []  # [form, weight]
 	match dist:
 		"cbd":
-			opts = [["pencil", 0.08], ["twin", 0.1], ["cantilever", 0.1], ["crown", 0.16], ["offset", 0.2]]
+			opts = [["pencil", 0.08], ["twin", 0.1], ["cantilever", 0.1], ["crown", 0.16], ["offset", 0.2], ["tapered", 0.12]]
 		"midtown":
 			opts = [["pencil", 0.12], ["twin", 0.1], ["slab", 0.1], ["cantilever", 0.14], ["crown", 0.12],
-				["offset", 0.18]]
+				["offset", 0.18], ["tapered", 0.1]]
 		"waterfront":
-			opts = [["slab", 0.18], ["pencil", 0.1], ["cantilever", 0.1], ["campanile", 0.06], ["offset", 0.16]]
+			opts = [["slab", 0.18], ["pencil", 0.1], ["cantilever", 0.1], ["campanile", 0.06], ["offset", 0.16],
+				["tapered", 0.1]]
 		"docks":
 			if h < 45.0:
 				opts = [["silos", 0.24]]
 			else:
 				opts = [["cantilever", 0.2], ["slab", 0.15], ["twin", 0.1], ["offset", 0.15]]
 		_:
-			opts = [["campanile", 0.2 if h < 75.0 else 0.0], ["crown", 0.1], ["twin", 0.05], ["offset", 0.2]]
+			opts = [["campanile", 0.2 if h < 75.0 else 0.0], ["crown", 0.1], ["twin", 0.05], ["offset", 0.2],
+				["tapered", 0.08]]
 	var x := frng.randf()
 	for o in opts:
 		x -= float(o[1])
@@ -1269,6 +1295,8 @@ func _form_for(dist: String, h: float, r: Rect2, frng: RandomNumberGenerator) ->
 					return f if lo > 22.0 else "box"
 				"silos":
 					return f if hi > 30.0 and lo > 14.0 else "box"
+				"tapered":
+					return f if h > 80.0 and lo > 28.0 else "box"
 			return f
 	return "box"
 
@@ -1284,12 +1312,48 @@ func _style_for(dist: String, h: float, form: String, brng: RandomNumberGenerato
 	if dist == "georgian" and h < 110.0:
 		return [Style.STONE, Style.DECO, Style.SANDSTONE, Style.BRICK][brng.randi() % 4]
 	if h > 115.0:
-		return Style.GLASS if brng.randf() < 0.6 else Style.DARK_GLASS
+		# (one draw, as before: the layout's stream doesn't shift)
+		var g := brng.randf()
+		return Style.GLASS if g < 0.4 else (Style.DARK_GLASS if g < 0.62 else (Style.DECO if g < 0.82 else Style.MODERN))
 	if h > 65.0:
 		return [Style.MODERN, Style.DECO, Style.GLASS, Style.STONE][brng.randi() % 4]
 	if h > 35.0:
 		return [Style.STONE, Style.BRICK, Style.MODERN, Style.DECO][brng.randi() % 4]
 	return [Style.BRICK, Style.STONE, Style.SANDSTONE][brng.randi() % 3]
+
+
+## Silhouettes for plain towers (one tier, 45 m+): about four in five get a
+## stepped top – one setback, two setbacks, or a slimmer crown block above
+## the roof – so the skyline isn't a field of flat-topped boxes. Picked from
+## the lot's position (its own RNG: the layout's streams are untouched); the
+## main body below ~60 % of the height never changes.
+func _stepped_top(tiers: Array, h: float, c: Vector2) -> void:
+	# (Not the very tallest: the penthouse wants one broad top up there.)
+	if tiers.size() != 1 or h < 45.0 or h > 150.0:
+		return
+	var t: Array = tiers[0]
+	var w := minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	if w < 14.0:
+		return
+	var srng := RandomNumberGenerator.new()
+	srng.seed = hash(Vector2i(int(c.x * 3.0), int(c.y * 3.0))) ^ 0x57e9
+	var pick := srng.randf()
+	var cut := func(at: float, si: float) -> void:
+		var last: Array = tiers[-1]
+		# (tops stay 14 m+ across: still a roof to land on and start from)
+		if float(last[2]) - float(last[0]) - si * 2.0 < 14.0 or float(last[3]) - float(last[1]) - si * 2.0 < 14.0:
+			return
+		var top: float = last[5]
+		last[5] = at
+		tiers.append([float(last[0]) + si, float(last[1]) + si, float(last[2]) - si, float(last[3]) - si, at, top])
+	if pick < 0.32 or (pick < 0.52 and h <= 75.0):
+		cut.call(h * srng.randf_range(0.72, 0.84), srng.randf_range(2.0, 4.5))
+	elif pick < 0.52 and h > 75.0:
+		cut.call(h * srng.randf_range(0.6, 0.68), srng.randf_range(2.0, 3.5))
+		cut.call(h * srng.randf_range(0.82, 0.9), srng.randf_range(2.0, 3.5))
+	elif pick < 0.8 and w > 21.0:
+		var si := srng.randf_range(3.5, minf(w * 0.22, (w - 14.0) * 0.5))
+		tiers.append([float(t[0]) + si, float(t[1]) + si, float(t[2]) - si, float(t[3]) - si, h, h + srng.randf_range(6.0, 12.0)])
 
 
 func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void:
@@ -1381,6 +1445,20 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 		var y_top := maxf(h - top_h, 24.0)
 		tiers.append([body[0], body[1], body[2], body[3], 0.0, y_top])
 		tiers.append([x0, z0, x1, z1, y_top, h])
+	elif form == "tapered":
+		# A ziggurat: the tower narrows in 5–8 bands all the way up (a
+		# skyline silhouette, and every band's ledge is a place to land).
+		var n := frng.randi_range(5, 8)
+		var band := h / n
+		var si := clampf(minf(r.size.x, r.size.y) * 0.3 / n, 1.2, 3.2)
+		var y := 0.0
+		for k in n:
+			tiers.append([x0, z0, x1, z1, y, h if k == n - 1 else y + band])
+			y += band
+			x0 += si
+			z0 += si
+			x1 -= si
+			z1 -= si
 	elif h > 70.0 and min(r.size.x, r.size.y) > 30.0 and (form == "offset" or brng.randf() < 0.7):
 		# Podium + slimmer tower, then setbacks (stepped to one side for "offset").
 		var dx := 0.0
@@ -1448,17 +1526,154 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 		var mz := cz + side * 0.5
 		extra.append(_building([[mx - sp, mz - sp, mx + sp, mz + sp, th + 0.5, th + frng.randf_range(9.0, 16.0)]],
 			style, col.lightened(0.15), "spire"))
+	var box_tiers := tiers.duplicate(true)
+	_stepped_top(tiers, h, c)
 	var b := _building(tiers, style, col, "normal")
 	b["seed"] = brng.randf()
+	var shape := _shape_for(form, style, h, tiers, c)
+	if not shape.is_empty():
+		b["shape"] = shape
 	if not blocked.is_empty():
 		b["roof_blocked"] = true  # (no rooftop spawns: towers stand on it)
 	_add(b)
 	for e in extra:
 		_add(e)
-	_roof_furniture(b, tiers, style, h, col, brng, blocked)
+	# Roof kit on a shaped plan keeps to the square in its middle (nothing
+	# hangs over a cut or rounded corner).
+	var dress := tiers if shape.is_empty() else _shape_inset(tiers, shape)
+	if tiers.size() == box_tiers.size() and shape.is_empty():
+		_roof_furniture(b, tiers, style, h, col, brng, blocked)
+	else:
+		# A stepped top: dress the real roof, but advance the layout's random
+		# streams exactly as the plain box would have (a dry run, thrown
+		# away), so every building after this one stays where it was.
+		var b_state := brng.state
+		var r_state := rng.state
+		var sizes := [props.size(), buildings.size(), _plant_candidates.size(), reserved.size()]
+		var dry := b.duplicate()
+		dry["tiers"] = box_tiers
+		_roof_furniture(dry, box_tiers, style, h, col, brng, blocked)
+		props.resize(sizes[0])
+		buildings.resize(sizes[1])
+		_plant_candidates.resize(sizes[2])
+		reserved.resize(sizes[3])
+		var b_after := brng.state
+		var r_after := rng.state
+		var real := RandomNumberGenerator.new()
+		real.state = b_state
+		rng.state = r_state
+		_roof_furniture(b, dress, style, h, col, real, blocked)
+		brng.state = b_after
+		rng.state = r_after
 	for e in extra:
 		if e["kind"] == "normal" and form == "twin":
 			_roof_furniture(e, e["tiers"], style, float(e["tiers"][-1][5]), col, frng, [])
+
+
+## Share of each shape's weight actually used (about half the towers end up
+## shaped: more and the expert bot runs out of corner anchors).
+const SHAPE_SHARE := 0.55
+
+## Plan shapes, so the city isn't a field of rectangles: chamfered corners
+## (octagonal towers), rounded corners, round drums / stadium plans, a
+## flatiron prow, L and stepped plans (notched corners), bullnose fronts.
+## Glass towers lean to curves, masonry to chamfered corner blocks and
+## notches. Own position-hashed RNG: the layout's streams are untouched.
+## Returns {} (a plain box) or {"c": [[kind, size], ×4], "segs": n}.
+func _shape_for(form: String, style: int, h: float, tiers: Array, c: Vector2) -> Dictionary:
+	if form in ["silos", "campanile", "twin"] or style == Style.WAREHOUSE or h < 20.0:
+		return {}
+	if OS.has_environment("NO_SHAPES"):
+		return {}
+	if c.distance_to(AdScreens.DISTRICT) < AdScreens.DISTRICT_R + 25.0:
+		return {}  # Lumen Circus: flat facades carry the screens
+	var t: Array = tiers[0]
+	var w := float(t[2]) - float(t[0])
+	var d := float(t[3]) - float(t[1])
+	var short := minf(w, d)
+	var top: Array = tiers[-1]
+	if short < 16.0 or minf(float(top[2]) - float(top[0]), float(top[3]) - float(top[1])) < 14.0:
+		return {}
+	var r := RandomNumberGenerator.new()
+	r.seed = hash(Vector2i(int(c.x * 5.0), int(c.y * 5.0))) ^ 0x3a9d
+	var glassy := style in [Style.GLASS, Style.DARK_GLASS, Style.MODERN]
+	var opts: Array
+	if glassy:
+		opts = [["drum", 0.2 if maxf(w, d) / short < 1.7 and h > 45.0 else 0.0], ["rounded", 0.24], ["chamfer", 0.16],
+			["prow", 0.1], ["bullnose", 0.1], ["notch", 0.08]]
+	elif style == Style.DECO:
+		opts = [["chamfer", 0.3], ["rounded", 0.14], ["notch", 0.16], ["prow", 0.12], ["bullnose", 0.1]]
+	else:
+		opts = [["chamfer", 0.26], ["notch", 0.2], ["prow", 0.1], ["rounded", 0.08], ["bullnose", 0.06]]
+	var x := r.randf()
+	var pick := ""
+	for o in opts:
+		x -= float(o[1]) * SHAPE_SHARE
+		if x < 0.0:
+			pick = o[0]
+			break
+	if pick == "":
+		return {}
+	var cs := [[0, 0.0], [0, 0.0], [0, 0.0], [0, 0.0]]
+	var k0 := r.randi() % 4
+	match pick:
+		"chamfer":
+			var f := r.randf_range(0.16, 0.28)
+			for k in 4:
+				cs[k] = [BuildingMesher.SHAPE_CHAMFER, f]
+		"rounded":
+			var f := r.randf_range(0.2, 0.34)
+			for k in 4:
+				cs[k] = [BuildingMesher.SHAPE_ROUND, f]
+		"drum":
+			for k in 4:
+				cs[k] = [BuildingMesher.SHAPE_ROUND, 0.5]
+		"prow":
+			cs[k0] = [BuildingMesher.SHAPE_CHAMFER, r.randf_range(0.42, 0.6)]
+			if r.randf() < 0.5:
+				cs[(k0 + 2) % 4] = [BuildingMesher.SHAPE_CHAMFER, 0.12]
+		"bullnose":
+			cs[k0] = [BuildingMesher.SHAPE_ROUND, 0.5]
+			cs[(k0 + 1) % 4] = [BuildingMesher.SHAPE_ROUND, 0.5]
+		"notch":
+			cs[k0] = [BuildingMesher.SHAPE_NOTCH, r.randf_range(0.3, 0.42)]
+			if r.randf() < 0.4:
+				cs[(k0 + 2) % 4] = [BuildingMesher.SHAPE_NOTCH, r.randf_range(0.25, 0.35)]
+	var segs := 0
+	for q in cs:
+		if int(q[0]) == BuildingMesher.SHAPE_ROUND:
+			segs += BuildingMesher.ARC_SEGS
+	# Notches must leave a roof on every tier (upper tiers are smaller).
+	if pick == "notch":
+		for tt in tiers:
+			var s2 := minf(float(tt[2]) - float(tt[0]), float(tt[3]) - float(tt[1]))
+			if s2 * (1.0 - 0.42) < 9.0:
+				return {}
+	return {"c": cs, "segs": segs, "kind": pick}
+
+
+## How far in from a shaped tier's bounding rect its clear square starts.
+static func shape_margin(shape: Dictionary, t: Array) -> float:
+	var short := minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	var m := 0.0
+	for q in shape["c"]:
+		var k := 0.3 if int(q[0]) == BuildingMesher.SHAPE_ROUND else 0.55
+		if int(q[1] * 100.0) >= 50 and int(q[0]) == BuildingMesher.SHAPE_ROUND:
+			k = 0.3  # (a drum: the square inside a circle is ~0.29 of the diameter in)
+		m = maxf(m, float(q[1]) * short * k)
+	return minf(m, short * 0.3)
+
+
+## The tiers with the top one shrunk to the clear square inside its shape.
+func _shape_inset(tiers: Array, shape: Dictionary) -> Array:
+	var out := tiers.duplicate(true)
+	var t: Array = out[-1]
+	var m := shape_margin(shape, t)
+	t[0] = float(t[0]) + m
+	t[1] = float(t[1]) + m
+	t[2] = float(t[2]) - m
+	t[3] = float(t[3]) - m
+	return out
 
 
 ## Grain silos (docks): a row of tall concrete bins under a headhouse.
@@ -1596,6 +1811,13 @@ func _anchor(a: Vector3, b: Vector3) -> void:
 
 ## A kit: one structure spec the mesher draws ("solids", "beams", "prisms")
 ## whose collision is made from the very same list.
+## While set, kit beams collide but take no web (world layer only, like the
+## street): the City Loop viaduct right over a boulevard would otherwise be
+## every street launch's anchor (a short, low swing).
+var kit_solid_only := false
+var kit_obbs_solid: Array = []
+
+
 func _kit(name: String) -> Dictionary:
 	var k := {"type": "kit", "name": name, "solids": [], "beams": [], "prisms": []}
 	structures.append(k)
@@ -1613,7 +1835,8 @@ func _ksolid(k: Dictionary, x0: float, z0: float, x1: float, z1: float, y0: floa
 func _kbeam(k: Dictionary, a: Vector3, b: Vector3, w: float, h: float, col: Color, collide := true) -> void:
 	k["beams"].append([a, b, w, h, col])
 	if collide and a.distance_to(b) > 0.01:
-		kit_obbs.append([Transform3D(BuildingMesher.beam_basis(a, b), (a + b) * 0.5), Vector3(w, h, a.distance_to(b))])
+		var ob := [Transform3D(BuildingMesher.beam_basis(a, b), (a + b) * 0.5), Vector3(w, h, a.distance_to(b))]
+		(kit_obbs_solid if kit_solid_only else kit_obbs).append(ob)
 
 
 ## Vertical prism over a convex polygon (x, z) from y0 to y1.
@@ -1677,6 +1900,7 @@ func _billboard(t: Array, roof: float, brng: RandomNumberGenerator) -> void:
 	var b := _building([[r[0], r[1], r[2], r[3], y0, y1]], Style.MODERN, cols[brng.randi() % cols.size()], "sign")
 	b["roof"] = roof
 	b["seed"] = brng.randf()
+	b["face"] = [Vector2(0, -1), Vector2(0, 1), Vector2(-1, 0), Vector2(1, 0)][side]  # outward (the advert side)
 	_add(b)
 
 
@@ -1710,15 +1934,18 @@ func _tower_crane(lot: Rect2, site_top: float, brng: RandomNumberGenerator) -> v
 	_box(m.x - 1.6, m.y - 1.6, m.x + 1.6, m.y + 1.6, 1.2, mh)  # lattice mast (chords included)
 	_box(m.x - 1.8, m.y - 1.8, m.x + 1.8, m.y + 1.8, mh, mh + 1.2)  # slewing unit
 	var side := Vector2(-d.y, d.x)
-	var j0 := m - side * 1.2
-	var j1 := tip + side * 1.2
-	_box(j0.x, j0.y, j1.x, j1.y, mh + 1.0, mh + 3.6)
-	var c0 := m - side * 1.8
-	var c1 := back + side * 1.8
-	_box(c0.x, c0.y, c1.x, c1.y, mh + 1.0, mh + 3.2)
-	var w0 := back + d * 4.0 - side * 1.8
-	var w1 := back + side * 1.8
-	_box(w0.x, w0.y, w1.x, w1.y, mh - 2.6, mh + 1.2)
+	# Collide with the three longitudinal chords, not an invisible cuboid
+	# spanning the triangular girder. Thin diagonal braces remain decorative.
+	for span in [[tip, 1.0, 2.2], [back, 1.5, 1.8]]:
+		for chord: Vector2 in [Vector2(-float(span[1]), 0), Vector2(float(span[1]), 0), Vector2(0, float(span[2]))]:
+			var a := m + side * chord.x
+			var b: Vector2 = span[0] + side * chord.x
+			var extent := side.abs() * 0.2
+			_box(minf(a.x, b.x) - extent.x, minf(a.y, b.y) - extent.y,
+				maxf(a.x, b.x) + extent.x, maxf(a.y, b.y) + extent.y, mh + 1.0 + chord.y, mh + 1.4 + chord.y)
+	var weight := back + d * 2.0
+	_box(minf(weight.x, back.x) - 1.8 * absf(side.x) - 0.1, minf(weight.y, back.y) - 1.8 * absf(side.y) - 0.1,
+		maxf(weight.x, back.x) + 1.8 * absf(side.x) + 0.1, maxf(weight.y, back.y) + 1.8 * absf(side.y) + 0.1, mh - 2.6, mh + 1.2)
 	_box(m.x - 1.0, m.y - 1.0, m.x + 1.0, m.y + 1.0, mh + 3.4, mh + 13.0)
 	_anchor(Vector3(m.x + d.x * 4.0, mh + 0.9, m.y + d.y * 4.0), Vector3(tip.x, mh + 0.9, tip.y))
 	_anchor(Vector3(m.x - d.x * 3.0, mh + 0.9, m.y - d.y * 3.0), Vector3(back.x + d.x * 4.0, mh + 0.9, back.y + d.y * 4.0))
@@ -1756,24 +1983,12 @@ func _bridge() -> void:
 		for yy in [[deck - 6.0, deck - 2.0], [88.0, 92.0], [top - 6.0, top - 2.0]]:
 			_box(tx - 2.5, zc - 9.5, tx + 2.5, zc + 9.5, yy[0], yy[1])
 			_anchor(Vector3(tx, yy[0] - 0.1, zc - 9.0), Vector3(tx, yy[0] - 0.1, zc + 9.0))
-	# Anchorages (solid stone blocks at both ends).
-	_add(_building([[x_east - 2.0, zc - 14.0, x_east + 14.0, zc + 14.0, 0.0, deck + 6.0]], Style.STONE,
-		Color(0.62, 0.58, 0.52), "plain"))
-	# The roadway runs into the east anchorage through a tunnel portal (it
-	# carries on under the waterfront to the city), so the deck doesn't just
-	# stop at a blank wall: a dark mouth in a dressed-stone surround. Drawn
-	# only – it's flush with the block, which already collides.
-	var portal := _kit("bridge_portal")
-	var fx := x_east - 2.0
-	var mouth := Color(0.035, 0.035, 0.04)
-	var dressed := Color(0.7, 0.66, 0.58)
-	_ksolid(portal, fx - 0.06, zc - 8.4, fx + 0.02, zc + 8.4, deck, deck + 5.2, mouth, false)
-	_ksolid(portal, fx - 0.45, zc - 9.4, fx + 0.02, zc + 9.4, deck + 5.2, deck + 6.4, dressed, false)
+	# Cable anchor housings flank a genuinely open roadway.
 	for sz: float in [-1.0, 1.0]:
-		_ksolid(portal, fx - 0.45, zc + sz * 8.4, fx + 0.02, zc + sz * 9.4, deck, deck + 5.2, dressed, false)
-	# Tunnel lamps glow inside the mouth.
-	for lz: float in [-6.0, -2.0, 2.0, 6.0]:
-		_ksolid(portal, fx - 0.1, zc + lz - 0.35, fx - 0.05, zc + lz + 0.35, deck + 4.6, deck + 4.8, Color(1.0, 0.85, 0.55), false)
+		_add(_building([[x_east - 2.0, minf(zc + sz * 10.5, zc + sz * 15.0), x_east + 14.0,
+			maxf(zc + sz * 10.5, zc + sz * 15.0), -2.0, deck + 6.0]], Style.STONE,
+			Color(0.5, 0.47, 0.42), "plain"))
+	CityInfrastructure.bridge_landing(self)
 	# West anchorage: the roadway runs over it onto the approach viaduct; the
 	# cables go down into stone housings either side.
 	_add(_building([[x_west - 16.0, zc - 10.5, x_west + 2.0, zc + 10.5, -2.0, deck - 2.0]], Style.STONE,
@@ -1865,13 +2080,3 @@ func _bridge_approach(x0: float, zc: float, deck: float) -> void:
 
 
 
-func _viaduct() -> void:
-	# Elevated railway along the waterfront – a long, low, grappleable line.
-	var z := MIN_Z + 20.0
-	while z < MAX_Z - 25.0:
-		landmarks.append(["viaduct", Transform3D(Basis(Vector3.UP, PI), Vector3(48, 0, z + 25.0))])
-		z += 25.0
-	# (Its walkable deck: the arches and girders collide from the mesh itself;
-	# the Loop Line's trains run on top, so this stops at the deck.)
-	_add(_building([[43.5, MIN_Z + 20.0, 52.5, z, 9.8, RailNetwork.VIADUCT_DECK]], Style.MODERN, Color(0.2, 0.24, 0.26),
-		"invisible"))

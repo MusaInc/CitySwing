@@ -15,7 +15,8 @@ extends Control
 ##    few objective markers picked by priority and distance (pinned to the rim
 ##    when off the map) – never dozens of icons.
 ## Objectives are supplied by the mode: `markers` = [[world pos, kind], ...]
-## with kind "token", "ring", "next" (the next ring/goal) or "poi".
+## with kind "token", "ring", "next" (the next ring/goal), "job" / "crime"
+## (contract offers) or "poi".
 
 const BOUNDS := Rect2(-1180.0, -720.0, 2260.0, 1420.0)  # world x/z covered by the texture
 const M_PER_PX := 1.5
@@ -177,7 +178,7 @@ func _house(ov: Control, p: Vector2, sel: bool) -> void:
 
 
 static func _prio(kind: String) -> int:
-	return {"next": 3, "ring": 2, "token": 1}.get(kind, 0)
+	return {"next": 3, "ring": 2, "job": 2, "crime": 2, "token": 1}.get(kind, 0)
 
 
 func _marker(ov: Control, p: Vector2, kind: String, pinned: bool) -> void:
@@ -185,6 +186,12 @@ func _marker(ov: Control, p: Vector2, kind: String, pinned: bool) -> void:
 		"token":
 			ov.draw_circle(p, 5.0, Color(0.05, 0.05, 0.06, 0.8))
 			ov.draw_circle(p, 3.6, UiStyle.TEAL)
+		"job", "crime":
+			# Contract offers: a briefcase-ish rounded square, teal or red.
+			var jc := JobBoard.COL_LEGAL if kind == "job" else JobBoard.COL_CRIME
+			ov.draw_circle(p, 6.5, Color(0.05, 0.05, 0.06, 0.85))
+			ov.draw_rect(Rect2(p + Vector2(-4.0, -2.5), Vector2(8.0, 6.0)), jc)
+			ov.draw_rect(Rect2(p + Vector2(-1.8, -4.2), Vector2(3.6, 1.8)), jc, false, 1.2)
 		"ring", "next":
 			var col := UiStyle.GOLD if kind == "next" else Color(1, 1, 1, 0.75)
 			ov.draw_arc(p, 6.0, 0.0, TAU, 20, Color(0.05, 0.05, 0.06, 0.8), 4.0, true)
@@ -277,7 +284,10 @@ class MapPainter:
 				var rot: float = b.get("rot", 0.0)
 				var pv: Vector2 = b.get("pivot", Vector2.ZERO)
 				var quad := PackedVector2Array()
-				for c in [Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]:
+				# (shaped towers: their real plan – round, chamfered, notched)
+				var pts: Array = Array(BuildingMesher.footprint(b, t)) if BuildingMesher.shaped(b) else \
+					[Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]
+				for c in pts:
 					quad.append(c if rot == 0.0 else CityLayout.to_world2(c, rot, pv))
 				_poly(quad, col)
 			if L.rail:
