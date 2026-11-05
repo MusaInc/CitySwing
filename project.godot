@@ -5,7 +5,7 @@ config_version=5
 
 config/name="CitySwing"
 config/description="Skill-based physics swinging through a stylised procedural city."
-config/version="0.27.0"
+config/version="1.0.0"
 run/main_scene="res://scenes/boot.tscn"
 config/features=PackedStringArray("4.5", "Mobile")
 config/icon="res://assets/icon_1024.png"
