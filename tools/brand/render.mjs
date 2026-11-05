@@ -15,9 +15,8 @@ fs.mkdirSync(out, { recursive: true });
 
 // name, source, width, height, transparent, extra copies
 const JOBS = [
-  ["icon_1024", "icon.svg", 1024, 1024, false, ["assets/icon_1024.png"]],
-  ["icon_256", "icon.svg", 256, 256, false, ["assets/icon.png"]],
-  ["mark", "mark.svg", 512, 512, true, []],
+  ["icon_1024", "icon.html", 1024, 1024, false, ["assets/icon_1024.png"]],
+  ["mark", "mark.html", 512, 512, true, []],
   ["wordmark", "wordmark.html", 1470, 240, true, []],
   ["wordmark_stacked", "wordmark_stacked.html", 1120, 440, true, []],
   ["splash", "splash.html", 2340, 1080, false, []],

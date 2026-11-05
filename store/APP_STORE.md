@@ -29,48 +29,8 @@ coastal city to fly through — time trials, rooftop jobs and homes to earn.
 
 ## Description
 
-CitySwing is about one thing: the thrill of moving through a city at speed.
-
-Fire a web at any tower, swing through the bottom of the arc, let go at the
-top and fly. Chain swings between skyscrapers, run along a facade, scramble
-over a ledge and launch off again. The physics are real — momentum is
-earned, a perfect release flings you higher, and a mistimed line puts you
-into a wall.
-
-A WHOLE CITY
-• A coastal city to explore: a downtown of glass towers, an animated
-  entertainment district, brick neighbourhoods, a waterfront, beaches,
-  a marina and a mainland across the strait
-• Ride the City Loop trains, swing under the bridges, climb the tallest
-  towers for the view
-• Day and night cycle and changing weather — clear skies, sunsets, fog,
-  rain and storms
-
-PLAY YOUR WAY
-• Open City — go anywhere, collect 40 hidden tokens, take on jobs
-• Time Trial — 8 courses through the city, bronze, silver and gold medals
-• Endurance — stay in the air as long as you can
-• Training — learn the moves step by step
-
-JOBS AND A LIFE IN THE CITY
-• Rooftop deliveries, rescues and surveys for honest pay — or riskier work
-  for the Fence, with drones on your tail
-• Earn coins and buy five homes, from a bedsit to a penthouse, each a real
-  floor of a real tower: swing in through the window, sleep, change clothes,
-  see your trophies
-• Make the courier your own: suits, hair, tops, trousers, shoes, gloves,
-  masks, web colours and four gadgets (jet boots, glider, chrono watch,
-  coin magnet)
-
-MADE FOR TOUCH
-• Move with the left thumb, jump and swing with the right; the aim assist
-  picks your line, or switch on tap-to-aim in Settings and tap the exact
-  building you want
-• Drag anywhere on the right to look around
-• Graphics quality options and a built-in performance test
-
-No ads. No in-app purchases. No account. No tracking. Buy it once and the
-whole city is yours.
+The developer's own text (5 Nov 2026) — kept verbatim in `store/description.txt`,
+which the listing workflow uploads. Every feature it lists exists in 1.0.
 
 ## Keywords (≤100 chars)
 

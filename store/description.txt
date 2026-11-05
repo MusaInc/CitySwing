@@ -1,26 +1,48 @@
-CitySwing is about one thing: the thrill of moving through a city at speed.
+CITYSWING — A GAME SHAPED BY ITS PLAYERS
 
-Fire a web at any tower, swing through the bottom of the arc, let go at the top and fly. Chain swings between skyscrapers, run along a facade, scramble over a ledge and launch off again. The physics are real — momentum is earned, a perfect release flings you higher, and a mistimed line puts you into a wall.
+Swing through an open city of skyscrapers, rooftops and bridges. Build momentum, chase speed, explore freely and find your own way around.
 
-A WHOLE CITY
-• A coastal city to explore: a downtown of glass towers, an animated entertainment district, brick neighbourhoods, a waterfront, beaches, a marina and a mainland across the strait
-• Ride the City Loop trains, swing under the bridges, climb the tallest towers for the view
-• Day and night cycle and changing weather — clear skies, sunsets, fog, rain and storms
+But CitySwing is about more than swinging.
 
-PLAY YOUR WAY
-• Open City — go anywhere, collect 40 hidden tokens, take on jobs
-• Time Trial — 8 courses through the city, bronze, silver and gold medals
-• Endurance — stay in the air as long as you can
-• Training — learn the moves step by step
+I built the game. You decide where it goes next.
 
-JOBS AND A LIFE IN THE CITY
-• Rooftop deliveries, rescues and surveys for honest pay — or riskier work for the Fence, with drones on your tail
-• Earn coins and buy five homes, from a bedsit to a penthouse, each a real floor of a real tower: swing in through the window, sleep, change clothes, see your trophies
-• Make the courier your own: suits, hair, tops, trousers, shoes, gloves, masks, web colours and four gadgets (jet boots, glider, chrono watch, coin magnet)
+Hi, I'm the independent developer behind CitySwing.
 
-MADE FOR TOUCH
-• Move with the left thumb, jump and swing with the right; the aim assist picks your line, or switch on tap-to-aim in Settings and tap the exact building you want
-• Drag anywhere on the right to look around
-• Graphics quality options and a built-in performance test
+I started this project because I wanted to create a swinging game that feels genuinely fun to play. No ads, no interruptions. Just a city, your movement and the freedom to explore.
 
-No ads. No in-app purchases. No account. No tracking. Buy it once and the whole city is yours.
+But I don't want to spend the next few years deciding everything on my own.
+
+I want you to help build CitySwing.
+
+Have an idea for a new feature? Think the swinging could feel better? Want different buildings, challenges, locations, outfits or ways to explore?
+
+Tell me in your App Store review.
+
+I'll personally read your feedback and work to reply with a real answer. If your idea is going into a future update, I'll tell you. If I'm considering it, I'll say so. And if I don't think it'll work, I'll explain why.
+
+Not every suggestion will make it into the game, but every thoughtful suggestion deserves consideration.
+
+You don't have to leave five stars. I want your genuine opinion, including what needs fixing.
+
+WHAT YOU CAN DO
+
+• Swing through a sprawling city of skyscrapers and bridges.
+• Build speed, chain swings and master your movement.
+• Explore rooftops, streets and waterfronts.
+• Take on challenges and discover your favourite routes.
+• Experience the freedom of an open-world swinging game.
+
+THIS IS JUST THE BEGINNING
+
+Every update is an opportunity to make CitySwing better, and I want the people actually playing it to help decide what comes next.
+
+The review section isn't just somewhere to leave a rating. I want it to become a place where ideas are shared, improvements are discussed and players can see their feedback making a difference.
+
+I'm not here to tell you what CitySwing should become.
+
+I'm here to build it with you.
+
+Your ideas. My code. Our game.
+
+— The developer behind CitySwing
+Musa Studios

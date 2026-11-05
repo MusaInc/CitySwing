@@ -173,14 +173,31 @@ func _brand(root: Control, studio := false) -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(MenuParts.Logo.new(0.64 if studio else 0.48))
+	box.add_child(MenuParts.Logo.new(0.95 if studio else 0.62))
 	if studio:
 		box.add_child(_label("A MUSA STUDIOS GAME", 12, FAINT, "semibold", HORIZONTAL_ALIGNMENT_LEFT))
+	# A soft pool of Night Ink behind the lockup: it sits in the shot (and
+	# stays legible over a bright sky) instead of floating on top of it.
+	var pool := TextureRect.new()
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	g.colors = PackedColorArray([Color(UiStyle.INK, 0.62), Color(UiStyle.INK, 0.3), Color(UiStyle.INK, 0.0)])
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	pool.texture = gt
+	pool.stretch_mode = TextureRect.STRETCH_SCALE
+	pool.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pool.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(pool)
 	root.add_child(box)
 	var place := func():
-		var vp := get_viewport_rect().size
 		var sa := _safe_rect()
 		box.position = Vector2(sa.position.x + 34.0, sa.end.y - box.size.y - 26.0)
+		pool.size = box.size * Vector2(1.7, 2.4)
+		pool.position = box.position + box.size * 0.5 - pool.size * 0.5
 	place.call_deferred()
 	root.resized.connect(place)
 
