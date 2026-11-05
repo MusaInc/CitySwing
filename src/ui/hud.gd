@@ -289,10 +289,12 @@ func _draw() -> void:
 	if _ko_t > 0.0:
 		_draw_knockout()
 	if hint != "":
-		var hs := 24
+		# Lower centre, between the thumbs and above the home "use" prompt:
+		# up top it ran under the minimap and the PERFECT callout.
+		var hs := 21
 		var hw := _font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, hs).x
-		var hp := Vector2(size.x / 2.0 - hw / 2.0, 132.0)  # under the mode readout, clear of thumbs
-		UiStyle.pill(self, Rect2(hp + Vector2(-26, -34), Vector2(hw + 52, 48)), Color(0, 0, 0, 0.5))
+		var hp := Vector2(size.x / 2.0 - hw / 2.0, _safe_rect().end.y - 132.0)
+		UiStyle.pill(self, Rect2(hp + Vector2(-22, -30), Vector2(hw + 44, 42)), Color(0, 0, 0, 0.45))
 		_text(hp, hint, hs, white, shadow)
 	if _banner_t > 0.0:
 		var a := clampf(_banner_t * 2.0, 0.0, 1.0)

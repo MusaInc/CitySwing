@@ -959,7 +959,7 @@ func _capture_series(path: String, times: Array[float]) -> void:
 		var img := get_viewport().get_texture().get_image()
 		var out := path if times.size() == 1 else path.get_basename() + "_%d.png" % i
 		img.save_png(out)
-		print("SCREENSHOT ", out)
+		print("SCREENSHOT ", out, " pos=", player.global_position.snapped(Vector3.ONE * 0.1) if player else Vector3.ZERO, " yaw=", snappedf(rad_to_deg(camera.yaw), 1.0) if camera else 0.0)
 		if args.has("stats"):
 			var ri := func(k): return RenderingServer.get_rendering_info(k)
 			print("RENDER_STATS ", JSON.stringify({"shot": out.get_file(),
