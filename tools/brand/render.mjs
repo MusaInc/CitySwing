@@ -15,7 +15,7 @@ fs.mkdirSync(out, { recursive: true });
 
 // name, source, width, height, transparent, extra copies
 const JOBS = [
-  ["icon_1024", "icon.html", 1024, 1024, false, ["assets/icon_1024.png"]],
+  // App icon: tools/brand/icon_compose.py (composited from game renders).
   ["mark", "mark.html", 512, 512, true, []],
   ["wordmark", "wordmark.html", 1470, 240, true, []],
   ["wordmark_stacked", "wordmark_stacked.html", 1120, 440, true, []],

@@ -1,4 +1,4 @@
-# CitySwing identity v2 — "Hero in the Arc" (2026-11-05)
+# CitySwing identity — "Sunset Swing" (v3, 2026-11-05)
 
 ![Identity sheet](brand_sheet.png)
 
@@ -24,21 +24,24 @@ character, no effects the game doesn't have.
 
 | Asset | Source | Output |
 |---|---|---|
-| App icon | `tools/brand/icon.html` (art/sky_canyon.png, art/hero_swing.png) | `assets/icon_1024.png`, `assets/icon.png` (256, web) |
-| Emblem | `tools/brand/mark.html` → `wordmark.js` `emblemSVG()` (art/hero_silhouette.png) | `assets/brand/mark.png` |
+| App icon | `tools/brand/icon_compose.py` (art/skyline_sea.png, art/hero_swing.png) | `assets/icon_1024.png`, `assets/icon.png` (256, web) |
+| Emblem | `tools/brand/mark.html` → `wordmark.js` `emblemSVG()` (art/hero_silhouette_ink.png) | `assets/brand/mark.png` |
 | Wordmark | `wordmark.html` → `drawWordmark({horizontal})` | `assets/brand/wordmark.png` |
 | Lockup (title, splash) | `wordmark_stacked.html` → `drawWordmark()` | `assets/brand/wordmark_stacked.png` |
 | Boot artwork | `splash.html` (real towers, deep-graded) | `assets/brand/splash.png` |
 | Sheet | `sheet.html` | `docs/brand_sheet.png` |
 
-* **Icon:** the hero's dark silhouette against a low sun, web line to an
-  anchor off-frame, the gold pendulum arc (centred on that anchor) through the
-  hips. Keep the figure inside the iOS corner mask.
+* **Icon (v3):** a hard-edged sunset disc behind the real downtown skyline
+  (rendered from the sea at sunset; the sky is keyed out column by column so
+  the sun sits behind the towers, which go to near-silhouette with their lit
+  windows), and the hero crossing the disc in silhouette, white web line out of
+  frame. Reads at 40 px: one bold disc, one figure.
 * **Wordmark:** one word, CITYSWING – Outfit Black skewed −10°, CITY Web White,
   SWING Signal Gold; the swing path runs under the word and rises to a web
   anchor after the G (never through the letters).
-* **Emblem:** the hero silhouette (from the render's alpha) riding the arc,
-  with the anchor dot. Legible down to ~40 px.
+* **Emblem:** the icon reduced – the hero's silhouette (render alpha, Night
+  Ink) inside the gold sun disc, the white web line breaking out to its anchor
+  dot. Legible down to ~40 px.
 * **Title screen:** lockup bottom-left over the live cinematics (nine 12 s
   shots of the real game) on a soft Night Ink pool; gold actions on the right.
 

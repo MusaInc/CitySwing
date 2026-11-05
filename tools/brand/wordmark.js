@@ -6,13 +6,21 @@
 // Flat colours, local Outfit only, no stock art.
 const GOLD = "#FFC93C", WEB = "#F7F3EA";
 
-// Emblem in a 512 box. The arc is the swing's pendulum path (centre = the
-// web's anchor, up and to the right); the silhouette hangs on the line.
+// Emblem in a 512 box – the app icon reduced to its essentials: the hero's
+// silhouette (from the in-game render) cut out of the gold sunset disc, the
+// white web line running up to its anchor.
 function emblemSVG(size = 512, x = 0, y = 0) {
+  const W = 372, ix = 74, iy = 70;
+  const hx = ix + 760 * W / 1024, hy = iy + 298 * W / 1024;   // the web hand
+  const ax = hx + 0.363 * 150, ay = hy - 0.932 * 150;          // along the web
   return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="0 0 512 512">
-    <path d="M23 248 A452 452 0 0 0 430 474" fill="none" stroke="${GOLD}" stroke-width="40" stroke-linecap="round"/>
-    <image href="art/hero_silhouette.png" x="44" y="18" width="430" height="430"/>
-    <circle cx="414" cy="22" r="17" fill="${WEB}"/>
+    <defs><radialGradient id="sun" cx="50%" cy="55%" r="55%">
+      <stop offset="0" stop-color="#FFE7A0"/><stop offset=".55" stop-color="${GOLD}"/><stop offset="1" stop-color="#FF9A4D"/>
+    </radialGradient></defs>
+    <circle cx="252" cy="268" r="182" fill="url(#sun)"/>
+    <image href="art/hero_silhouette_ink.png" x="${ix}" y="${iy}" width="${W}" height="${W}"/>
+    <line x1="${hx}" y1="${hy}" x2="${ax}" y2="${ay}" stroke="${WEB}" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="${ax}" cy="${ay}" r="15" fill="${WEB}"/>
   </svg>`;
 }
 
@@ -38,6 +46,6 @@ function drawWordmark(svg, opts = {}) {
     // Lockup (title screen, splash): emblem, then the word in one line.
     svg.setAttribute("viewBox", "0 0 1120 440");
     svg.innerHTML = `${emblemSVG(400, 0, 20)}
-      ${word(400, 290, 132)}`;
+      ${word(410, 288, 118)}`;
   }
 }
