@@ -43,6 +43,8 @@ PRIVACY = "https://musastudios.co.uk/privacy/cityswing"
 COPYRIGHT = "2026 Musa Studios"
 NOTES = open(os.path.join(ROOT, "store", "review_notes.txt")).read().strip()
 SETS = {"iphone69": "APP_IPHONE_67", "ipad13": "APP_IPAD_PRO_3GEN_129"}
+BOOL_HINTS = ("gambling", "unrestrictedWebAccess", "lootBox", "messagingAndChat", "parentalControls",
+              "ageAssurance", "userGeneratedContent", "advertising", "healthOrWellnessTopics")
 
 
 def token():
@@ -181,6 +183,95 @@ def main():
                     print("SHOT STATE", s["attributes"]["screenshotDisplayType"], x["attributes"]["fileName"],
                           st.get("state"), st.get("errors") or "")
 
+    # --- content rights (third-party CC assets, licensed and credited) --------
+    try:
+        patch("apps", app_id, {"contentRightsDeclaration": "USES_THIRD_PARTY_CONTENT"})
+        print("CONTENT RIGHTS uses third-party content (licensed, credited in game)")
+    except urllib.error.HTTPError:
+        print("CONTENT RIGHTS not set")
+
+    # --- age rating: every content descriptor "none" ---------------------------
+    try:
+        ar = get(f"/v1/appInfos/{info['id']}/ageRatingDeclaration")["data"]
+        attrs = {}
+        for k, v in ar["attributes"].items():
+            if k in ("kidsAgeBand", "ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride",
+                     "developerAgeRatingInfoUrl"):
+                continue
+            if isinstance(v, bool) or (v is None and k in BOOL_HINTS):
+                attrs[k] = False
+            elif isinstance(v, str) or v is None:
+                attrs[k] = "NONE"
+        try:
+            patch("ageRatingDeclarations", ar["id"], attrs)
+        except urllib.error.HTTPError:
+            # Unknown enum for some new field: retry one key at a time.
+            for k, v in attrs.items():
+                try:
+                    patch("ageRatingDeclarations", ar["id"], {k: v})
+                except urllib.error.HTTPError:
+                    try:
+                        patch("ageRatingDeclarations", ar["id"], {k: not v if isinstance(v, bool) else False})
+                    except urllib.error.HTTPError:
+                        print("AGE RATING could not set", k)
+        now = get(f"/v1/appInfos/{info['id']}/ageRatingDeclaration")["data"]["attributes"]
+        print("AGE RATING", json.dumps(now))
+    except urllib.error.HTTPError:
+        print("AGE RATING not set (fill the questionnaire in App Store Connect)")
+
+    # --- price: £2.99, base territory United Kingdom ------------------------------
+    try:
+        point = None
+        url = f"/v1/apps/{app_id}/appPricePoints?filter[territory]=GBR&limit=200"
+        while url and point is None:
+            page = call("GET", "", url=url if url.startswith("http") else API + url)
+            for pp in page["data"]:
+                if pp["attributes"].get("customerPrice") in ("2.99", "2.990"):
+                    point = pp["id"]
+                    break
+            url = page.get("links", {}).get("next")
+        if point:
+            call("POST", "/v1/appPriceSchedules", {"data": {"type": "appPriceSchedules", "relationships": {
+                "app": {"data": {"type": "apps", "id": app_id}},
+                "baseTerritory": {"data": {"type": "territories", "id": "GBR"}},
+                "manualPrices": {"data": [{"type": "appPrices", "id": "${price0}"}]}}},
+                "included": [{"type": "appPrices", "id": "${price0}", "attributes": {"startDate": None},
+                              "relationships": {"appPricePoint": {"data": {"type": "appPricePoints", "id": point}}}}]})
+            print("PRICE £2.99 (GBR base, other territories follow Apple's equalisation)")
+        else:
+            print("PRICE point £2.99 not found")
+    except urllib.error.HTTPError:
+        print("PRICE not set (Paid Apps agreement must be active; set it in Pricing and Availability)")
+
+    # --- availability -----------------------------------------------------------
+    try:
+        av = call("GET", f"/v1/apps/{app_id}/appAvailabilityV2")
+        print("AVAILABILITY exists:", av["data"]["attributes"])
+    except urllib.error.HTTPError:
+        try:
+            terrs = []
+            url = API + "/v1/territories?limit=200"
+            while url:
+                page = call("GET", "", url=url)
+                terrs += [t["id"] for t in page["data"]]
+                url = page.get("links", {}).get("next")
+            inc = [{"type": "territoryAvailabilities", "id": f"${{t{i}}}", "attributes": {"available": True},
+                    "relationships": {"territory": {"data": {"type": "territories", "id": t}}}}
+                   for i, t in enumerate(terrs)]
+            call("POST", "/v2/appAvailabilities", {"data": {"type": "appAvailabilities",
+                 "attributes": {"availableInNewTerritories": True},
+                 "relationships": {"app": {"data": {"type": "apps", "id": app_id}},
+                                   "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": x["id"]} for x in inc]}}},
+                 "included": inc})
+            print("AVAILABILITY all", len(terrs), "territories")
+        except urllib.error.HTTPError:
+            print("AVAILABILITY not set (Pricing and Availability page)")
+
+    # --- what Apple still needs ---------------------------------------------------
+    rd = get(f"/v1/appStoreVersions/{vid}/appStoreReviewDetail").get("data") or {}
+    ra = rd.get("attributes", {})
+    missing = [k for k in ("contactFirstName", "contactLastName", "contactPhone") if not ra.get(k)]
+    print("STILL NEEDED: App Privacy questionnaire (not in the API)" + (", review contact " + ", ".join(missing) if missing else ""))
     print("DONE – draft only; nothing was submitted for review.")
 
 
