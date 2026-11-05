@@ -284,7 +284,10 @@ class MapPainter:
 				var rot: float = b.get("rot", 0.0)
 				var pv: Vector2 = b.get("pivot", Vector2.ZERO)
 				var quad := PackedVector2Array()
-				for c in [Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]:
+				# (shaped towers: their real plan – round, chamfered, notched)
+				var pts: Array = Array(BuildingMesher.footprint(b, t)) if BuildingMesher.shaped(b) else \
+					[Vector2(t[0], t[1]), Vector2(t[2], t[1]), Vector2(t[2], t[3]), Vector2(t[0], t[3])]
+				for c in pts:
 					quad.append(c if rot == 0.0 else CityLayout.to_world2(c, rot, pv))
 				_poly(quad, col)
 			if L.rail:

@@ -334,6 +334,10 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 		l.props.resize(p0)
 		l.props.append_array(keep_p)
 		built_on += keep_b.size()
+	var piece_rects: Array = []
+	if l.pieces and not l.is_mainland:
+		piece_rects = l.pieces.rects().values()
+		built_on += _fill_piece_blocks(l, piece_rects, kit_rects)
 	var grid := l._building_grid()
 	var free := func(q: Vector2, r: float, inner: PackedVector2Array) -> bool:
 		if not Geometry2D.is_point_in_polygon(q, inner) or l.roads.on_road(q) or l.is_water(Vector3(q.x, 0, q.y)):
@@ -345,6 +349,9 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 		for kr: Rect2 in kit_rects:
 			if kr.grow(r).has_point(q):
 				return false
+		for pr: Rect2 in piece_rects:
+			if pr.grow(r + 2.0).has_point(q):
+				return false  # (never a planter on the pitch or in the gasholder)
 		for p2: PackedVector2Array in rail2:
 			for k in p2.size() - 1:
 				if Geometry2D.get_closest_point_to_segment(q, p2[k], p2[k + 1]).distance_to(q) < 9.0 + r:
@@ -371,7 +378,7 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 	var parks := 0
 	for blk in l.blocks:
 		var kind: String = blk["kind"]
-		if kind not in ["plaza", "park"]:
+		if kind not in ["plaza", "park", "piece"]:
 			continue
 		var poly: PackedVector2Array = blk["poly"]
 		var area := CityRoads._area(poly)
@@ -385,6 +392,40 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 		var az := Vector2(-ax.y, ax.x)
 		var bb := CityLayout._bbox(poly)
 		var span := bb.size.length() * 0.5 + 4.0
+		if kind == "piece":
+			# The set piece's forecourt: a tree-lined green round it.
+			for pr: Rect2 in piece_rects:
+				if not Geometry2D.is_point_in_polygon(pr.get_center(), poly):
+					continue
+				var ring := pr.grow(7.0)
+				var corners := [ring.position, Vector2(ring.end.x, ring.position.y), ring.end, Vector2(ring.position.x, ring.end.y)]
+				var ins0 := Geometry2D.offset_polygon(poly, -3.0)
+				if ins0.is_empty():
+					break
+				for e in 4:
+					var a: Vector2 = corners[e]
+					var b: Vector2 = corners[(e + 1) % 4]
+					var L := a.distance_to(b)
+					var d := (b - a) / L
+					var t := 4.0
+					var k := 0
+					while t < L - 3.0:
+						var q := a + d * t
+						if k % 3 == 2:
+							if free.call(q, 1.0, ins0[0]):
+								l.props.append(["streetlight", Transform3D(Basis(Vector3.UP, atan2(d.x, d.y)), at.call(q))])
+								mark.call(q, 1.2)
+						elif free.call(q, 1.8, ins0[0]):
+							l.props.append(["tree", Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(
+								Vector3.ONE * rng.randf_range(0.9, 1.25)), at.call(q))])
+							mark.call(q, 2.4)
+							var bq := q - Vector2(d.y, -d.x) * 2.2
+							if k % 3 == 1 and free.call(bq, 1.0, ins0[0]):
+								furniture(l, "bench", at.call(bq), atan2(d.x, d.y) + PI * 0.5)
+								mark.call(bq, 1.0)
+						t += 8.0
+						k += 1
+			kind = "plaza"  # …and the rest of its paving is dressed like a square
 		if kind == "plaza":
 			var ins := Geometry2D.offset_polygon(poly, -3.0)
 			if ins.is_empty():
@@ -484,6 +525,138 @@ static func open_ground(l: CityLayout, rail_lines: Array) -> void:
 			parks += 1
 	print("OpenGround: %d squares, %d parks dressed, %d buildings on bare squares%s" % [squares, parks, built_on,
 		" (mainland)" if l.is_mainland else ""])
+
+
+## Set-piece blocks (the gasholder, the stadium, the wheel, the container
+## yards) are superblocks: the streets route round the piece, and the lot
+## packer left most of the land as one bare plaza. Build up what the piece
+## doesn't use, like any block: the land minus a 14 m forecourt round the
+## piece and 6 m lanes round what already stands, then drop anything that
+## still lands on the piece, an existing building or another new one.
+## Returns how many buildings were added.
+static func _fill_piece_blocks(l: CityLayout, piece_rects: Array, kit_rects: Array) -> int:
+	var added := 0
+	var quads_all: Array = []
+	for b in l.buildings:
+		if b.get("kind", "") in ["normal", "landmark", "plain", "frame"]:
+			var q := footprint(b)
+			if not q.is_empty():
+				quads_all.append(q)
+	for blk in l.blocks:
+		if blk["kind"] != "piece" or CityRoads._area(blk["poly"]) < 20000.0:
+			continue
+		# The gasholder's superblock (Old Town) only: the stadium, the wheel
+		# and the container yards fill their blocks with the piece itself.
+		if not Geometry2D.is_point_in_polygon(SetPieces.GASHOLDER_AT, blk["poly"]):
+			continue
+		var poly: PackedVector2Array = blk["poly"]
+		var obst: Array = []      # what the new land must stay clear of
+		var hard: Array = []      # what a new building may never touch
+		for pr: Rect2 in piece_rects:
+			if Geometry2D.is_point_in_polygon(pr.get_center(), poly):
+				obst.append(_rq(pr.grow(14.0)))
+				hard.append(_rq(pr.grow(8.0)))
+		for kr: Rect2 in kit_rects:
+			if Geometry2D.is_point_in_polygon(kr.get_center(), poly):
+				hard.append(_rq(kr))
+		for q: PackedVector2Array in quads_all:
+			if Geometry2D.is_point_in_polygon(CityRoads._centroid(q), poly):
+				obst.append(Geometry2D.offset_polygon(q, 6.0)[0])
+				hard.append(Geometry2D.offset_polygon(q, 3.0)[0])
+		var ins := Geometry2D.offset_polygon(poly, -4.0)
+		if ins.is_empty():
+			continue
+		var c0 := CityRoads._centroid(poly)
+		var brng := RandomNumberGenerator.new()
+		brng.seed = hash(Vector2i(int(c0.x), int(c0.y))) ^ 0x9a5e
+		var b0 := l.buildings.size()
+		var p0 := l.props.size()
+		# A planned grid of lots (34 m cells: ~26 m lots, 8 m lanes between,
+		# so the new blocks read as streets of their own), each lot built by
+		# the city's normal builder (_make_building: heights, forms, shapes,
+		# roofs) where it is clear of the forecourt and what already stands.
+		var bb := CityLayout._bbox(ins[0])
+		const CELL := 34.0
+		var nx := int(bb.size.x / CELL)
+		var nz := int(bb.size.y / CELL)
+		var ox := bb.position.x + (bb.size.x - nx * CELL) * 0.5
+		var oz := bb.position.y + (bb.size.y - nz * CELL) * 0.5
+		for gx in nx:
+			for gz in nz:
+				var w := brng.randf_range(20.0, 27.0)
+				var d := brng.randf_range(20.0, 27.0)
+				var cx := ox + (gx + 0.5) * CELL + brng.randf_range(-1.5, 1.5)
+				var cz := oz + (gz + 0.5) * CELL + brng.randf_range(-1.5, 1.5)
+				var r := Rect2(cx - w * 0.5, cz - d * 0.5, w, d)
+				var rq := _rq(r)
+				var ok := true
+				for v in rq:
+					if not Geometry2D.is_point_in_polygon(v, ins[0]):
+						ok = false
+						break
+				if ok:
+					for oi in obst.size():
+						var o: PackedVector2Array = obst[oi]
+						if not Geometry2D.intersect_polygons(rq, o).is_empty():
+							ok = false
+							break
+				if ok and l.is_water(Vector3(cx, 0.0, cz)):
+					ok = false
+				if ok:
+					l._make_building(r, blk["district"], brng)
+		var keep_b: Array = []
+		var kept: Array = []
+		var dropped: Array = []
+		var i := b0
+		while i < l.buildings.size():
+			var nb: Dictionary = l.buildings[i]
+			var q := footprint(nb)
+			var bad := q.is_empty()
+			if not bad and nb.get("kind", "") in ["normal", "landmark", "plain", "frame"]:
+				var q2: PackedVector2Array = Geometry2D.offset_polygon(q, -0.3)[0]
+				for h: PackedVector2Array in hard + kept:
+					if not Geometry2D.intersect_polygons(q2, h).is_empty():
+						bad = true
+						break
+				if not bad:
+					kept.append(q)
+			if bad:
+				dropped.append(q)
+			else:
+				keep_b.append(nb)
+			i += 1
+		# Roof furniture of a dropped building goes with it (it sits inside its footprint).
+		var keep2: Array = []
+		for nb in keep_b:
+			var q := footprint(nb)
+			var on_dropped := false
+			if nb.get("kind", "") not in ["normal", "landmark", "plain", "frame"]:
+				for dq: PackedVector2Array in dropped:
+					if not dq.is_empty() and Geometry2D.is_point_in_polygon(CityRoads._centroid(q), dq):
+						on_dropped = true
+			if not on_dropped:
+				keep2.append(nb)
+		l.buildings.resize(b0)
+		l.buildings.append_array(keep2)
+		var keep_p: Array = []
+		for pi in range(p0, l.props.size()):
+			var o: Vector3 = (l.props[pi][1] as Transform3D).origin
+			var on_dropped := false
+			for dq: PackedVector2Array in dropped:
+				if not dq.is_empty() and Geometry2D.is_point_in_polygon(Vector2(o.x, o.z), Geometry2D.offset_polygon(dq, 1.0)[0]):
+					on_dropped = true
+			if not on_dropped:
+				keep_p.append(l.props[pi])
+		l.props.resize(p0)
+		l.props.append_array(keep_p)
+		added += kept.size()
+	if added > 0:
+		print("PieceBlocks: %d buildings round the set pieces" % added)
+	return added
+
+
+static func _rq(r: Rect2) -> PackedVector2Array:
+	return PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
 
 
 ## A round stone fountain: basin, water, a pedestal and a bowl.

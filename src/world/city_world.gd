@@ -61,6 +61,7 @@ const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var furniture_mat: StandardMaterial3D
 var trains: Trains
+var sea_sky: SeaAndSky   # port ships, boats, helicopter, airliner, gulls (visual only)
 var ads: AdScreens
 var _lamp_mat: BaseMaterial3D   # the streetlight head's emissive material (brightened at night)
 var _lamp_base := 1.0
@@ -143,6 +144,10 @@ func _ready() -> void:
 	trains.name = "Trains"
 	add_child(trains)
 	trains.setup(layout.rail.lines, _load_mesh("train_car"), _load_mesh("train_cab"))
+	sea_sky = SeaAndSky.new()
+	sea_sky.name = "SeaAndSky"
+	add_child(sea_sky)
+	sea_sky.setup(layout)
 	_bake_street_maps()
 	if secondary:
 		print("Mainland: %d buildings, %d chunks, %d ms" % [layout.buildings.size(), _all_keys.size(),
@@ -423,10 +428,20 @@ func _clear_spot(t: Array, roof_props: Dictionary, b: Dictionary = {}) -> Dictio
 			nearby.append_array(roof_props.get(c + Vector2i(dx, dz), []))
 	var best := {}
 	var best_margin := 0.0
+	# A shaped roof (round, chamfered, notched): only spots inside its real
+	# outline, the edge clearance in from it.
+	var roof_poly := PackedVector2Array()
+	if not b.is_empty() and BuildingMesher.shaped(b):
+		var ins := Geometry2D.offset_polygon(BuildingMesher.footprint(b, t), -ROOF_EDGE_CLEARANCE)
+		if ins.is_empty():
+			return {}
+		roof_poly = ins[0]
 	for i in 5:
 		for j in 5:
 			var x := lerpf(x0, x1, i / 4.0)
 			var z := lerpf(z0, z1, j / 4.0)
+			if not roof_poly.is_empty() and not Geometry2D.is_point_in_polygon(Vector2(x, z), roof_poly):
+				continue
 			var margin := 30.0
 			for pr in nearby:
 				var o: Vector3 = to_local * (pr[1].origin as Vector3)
@@ -580,6 +595,8 @@ func set_sky_colors(_top: Color, _horizon: Color) -> void:
 func set_night(n: float) -> void:
 	if trains:
 		trains.set_night(n)
+	if sea_sky:
+		sea_sky.set_night(n)
 	if ads:
 		ads.set_night(n)
 	if mainland:
@@ -872,6 +889,13 @@ func _build_collision() -> void:
 					_add_box_xf(body, box, X)
 				else:
 					_add_box(body, box)
+			for hull: PackedVector3Array in BuildingMesher.collision_hulls(b):
+				var cs := CollisionShape3D.new()
+				var cp := ConvexPolygonShape3D.new()
+				cp.points = hull
+				cs.shape = cp
+				cs.transform = X
+				body.add_child(cs)
 			if b["kind"] == "normal":
 				for box: AABB in BuildingMesher.features(b)["col_human"]:
 					_add_box_xf(soft, box, X)

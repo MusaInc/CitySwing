@@ -248,7 +248,7 @@ func _bid(b: Dictionary) -> int:
 
 
 func _usable(b: Dictionary) -> bool:
-	return b["kind"] == "normal" and not b.has("apt") and (b["tiers"] as Array).size() > 0
+	return b["kind"] == "normal" and not b.has("apt") and not b.has("shape") and (b["tiers"] as Array).size() > 0
 
 
 # ------------------------------------------------------------ Lumen Circus

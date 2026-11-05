@@ -73,7 +73,14 @@ const GEAR_FIT := {
 
 var player: Player
 var bones := {}
-var launcher: Node3D  # the web hand; RopeVisual starts here
+var launcher: Node3D  # marker on the web hand; RopeVisual starts here (moves hand to hand)
+## Which hand shoots and holds the web ("r"/"l"): picked per web from the
+## side the anchor is on (straight ahead: hands alternate). The swing pose is
+## written for the right hand and mirrored for the left (_pose_rope).
+var web_side := "r"
+var _mir := false
+var _mir_o := Vector3.ZERO
+var _mir_n := Vector3.RIGHT
 var ragdoll := VerletRagdoll.new()
 var ragdolling := false
 var _rag_low := 0.0  # 0 = pelvis at the capsule's centre, 1 = lying on the ground
@@ -255,7 +262,9 @@ func _ready() -> void:
 		gm.visible = false
 		bones[GEAR_BONES.get(key, "head")].add_child(gm)
 	apply_look(Shop.look())
-	launcher = bones["hand_r"]
+	launcher = Node3D.new()
+	launcher.name = "Launcher"
+	bones["hand_r"].add_child(launcher)
 	_bind_skeleton()
 	for i in (3 if parts.has("scarf_0") else 0):  # optional cloth tail
 		var seg := Node3D.new()
@@ -446,6 +455,7 @@ func _connect_player() -> void:
 	player.wall_topped.connect(func(): _takeoff_t = 0.3; _jump_t = 0.0)
 	player.bumped.connect(_on_bumped)
 	player.staggered.connect(_on_staggered)
+	player.grapple_fired.connect(func(t: Vector3, _h: bool) -> void: _pick_web_hand(t))
 	player.attached.connect(func(_a) -> void:
 		_swing_lead = "r" if _swing_lead == "l" else "l"
 		_jolt(0.6))
@@ -909,8 +919,8 @@ func debug_state() -> Dictionary:
 				gap = maxf(gap, absf(p.y - (hit.position as Vector3).y - ANKLE_H))
 	var hand_off := -1.0
 	if player.line_state == Player.Line.ATTACHED and player.s.taut:
-		var sh := (bones["upper_arm_r"] as Node3D).global_position
-		var hand := (bones["hand_r"] as Node3D).global_position
+		var sh := (bones["upper_arm_" + web_side] as Node3D).global_position
+		var hand := (bones["hand_" + web_side] as Node3D).global_position
 		var dir := (player.s.anchor - sh).normalized()
 		hand_off = ((hand - sh) - dir * (hand - sh).dot(dir)).length()
 	return {"skinned": skeleton != null and not _skel_idx.is_empty(), "planted": _plant.size(),
@@ -939,8 +949,9 @@ func _process(dt: float) -> void:
 	# Gliding, the free hands open flat like wing tips.
 	var fists := not player.is_on_floor() or player.speed() > 3.5 or ragdolling
 	var wing := maxf(_glide, _glide_rope) > 0.5 and not ragdolling
-	_set_grip("r", player.line_state != Player.Line.IDLE or (fists and not wing))
-	_set_grip("l", (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
+	var free_side := "l" if web_side == "r" else "r"
+	_set_grip(web_side, player.line_state != Player.Line.IDLE or (fists and not wing))
+	_set_grip(free_side, (player.line_state == Player.Line.ATTACHED and player.s.tension > 25.0 and _lgrip > 0.5) or (fists and not wing))
 	posed.emit()
 
 
@@ -1347,7 +1358,7 @@ func _update_animated(dt: float) -> void:
 			var wh := get_world_3d().direct_space_state.intersect_ray(wq)
 			reach = clampf(sh.distance_to(wh["position"]) - 0.02, 0.2, 0.53) if not wh.is_empty() else 0.5
 		for sd in ["l", "r"]:
-			if (sd == "r" and on_rope) or (sd == "l" and _lgrip > 0.5):
+			if (sd == web_side and on_rope) or (sd != web_side and _lgrip > 0.5):
 				continue
 			var sgn := -1.0 if sd == "l" else 1.0
 			var ik := _two_bone(chest_b, (into - chest_b.x * sgn * -0.25 * _press).normalized(), reach,
@@ -1528,16 +1539,33 @@ func _pose_ground(q: Dictionary, dt: float, hs: float, la: Vector3) -> float:
 ## side-bends toward the rope arm, legs stretch out when the line is taut and
 ## tuck when it goes slack, and lag the body's acceleration.
 func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float, speed: float) -> void:
+	if web_side == "r":
+		_pose_rope_r(q, dt, body, la, twist, speed)
+		return
+	# Left hand on the web: solve the right-handed swing in the world mirrored
+	# through the body's mid-plane, then mirror the pose back (left ↔ right).
+	_mir = true
+	_mir_o = player.global_position
+	_mir_n = body.x.normalized()
+	_mirror_pose(q)
+	_pose_rope_r(q, dt, body, Vector3(-la.x, la.y, la.z), -twist, speed)
+	_mirror_pose(q)
+	_mir = false
+
+
+## The swing as it would be with the web in the right hand; in mirror mode
+## every world input is reflected (see _mp / _bone_pos).
+func _pose_rope_r(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float, speed: float) -> void:
 	var s := player.s
 	var attached := player.line_state == Player.Line.ATTACHED
-	var target := s.anchor if attached else player.line_tip
+	var target := _mp(s.anchor if attached else player.line_tip)
 	var L := _load
 	q["spine"] = _rx(-0.06 * L + 0.18 * (1.0 - L) * float(attached)) * _ry(twist * 0.5) * _rz(-0.06 * L)
 	q["chest"] = _ry(twist * 0.6) * _rz(-0.12 - 0.1 * L) * _rx(-0.05 * L)
 	q["neck"] = _rz(0.06 * L)
 	q["head"] = _rx(-0.15 - 0.15 * L) * _ry(-twist * 0.4)  # eyes ahead along the swing
-	var chest_basis := body * Basis(_rot["spine"]) * Basis(_rot["chest"])
-	var shoulder := (bones["upper_arm_r"] as Node3D).global_position
+	var chest_basis := body * Basis(_mq(_rot["spine"])) * Basis(_mq(_rot["chest"]))
+	var shoulder := _bone_pos("upper_arm_r")
 	var reach := (0.29 + 0.26) * lerpf(0.86, 0.985, L if attached else 0.9)
 	var dir := (target - shoulder).normalized()
 	var ik_r := _two_bone(chest_basis, dir, reach, Vector3(0.75, -0.2, 0.6))
@@ -1550,7 +1578,7 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	var bal_up := _rz(-0.55 - (1.0 - L) * 0.35) * _rx(clampf(-la.z * 0.025, -0.9, 0.9) + 0.2)
 	var bal_fore := _rx(0.7 + (1.0 - L) * 0.3)
 	if _lgrip > 0.01:
-		var sh_l := (bones["upper_arm_l"] as Node3D).global_position
+		var sh_l := _bone_pos("upper_arm_l")
 		var hand_r := shoulder + dir * reach
 		var grip := hand_r - dir * 0.11  # just below the web hand
 		var dl := grip - sh_l
@@ -1581,7 +1609,7 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 		var qa := {}
 		for b in BONES:
 			qa[b] = Quaternion.IDENTITY
-		_pose_air(qa, s.velocity, speed, la, 0.0, twist)
+		_pose_air(qa, _md(s.velocity), speed, la, 0.0, twist)
 		for b in BONES:
 			if b == "upper_arm_r" or b == "forearm_r" or (b.ends_with("_l") and b.contains("arm") and _lgrip > 0.01):
 				continue
@@ -1632,8 +1660,8 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 			if tg and tg.pick_ok:
 				# Toward the web it would actually take next (above the line
 				# of travel), not just "up".
-				var sh_l := (bones["upper_arm_l"] as Node3D).global_position
-				var dn := (tg.pick - sh_l).normalized()
+				var sh_l := _bone_pos("upper_arm_l")
+				var dn := (_mp(tg.pick) - sh_l).normalized()
 				if dn.y > -0.2:
 					var ik_n := _two_bone(chest_basis, dn, 0.5, Vector3(-0.75, -0.2, 0.6))
 					ru = ik_n[0]
@@ -1645,12 +1673,85 @@ func _pose_rope(q: Dictionary, dt: float, body: Basis, la: Vector3, twist: float
 	# free arm spreads out wide and a little back like a wing – dipping or
 	# lifting with the turn.
 	var gw := _glide_rope * (1.0 - _lgrip)
+	var turn := -_turn if _mir else _turn
 	if gw > 0.01:
 		var flap := sin(_time * 2.3) * 0.05
-		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-1.28 - _turn * 0.3 - flap) * _rx(-0.5) * _ry(0.4), gw * 0.9)
+		q["upper_arm_l"] = (q["upper_arm_l"] as Quaternion).slerp(_rz(-1.28 - turn * 0.3 - flap) * _rx(-0.5) * _ry(0.4), gw * 0.9)
 		q["forearm_l"] = (q["forearm_l"] as Quaternion).slerp(_rx(0.3), gw * 0.9)
 		q["chest"] = (q["chest"] as Quaternion) * _rx(0.08 * _glide_rope)
-		q["head"] = (q["head"] as Quaternion) * _rx(0.22 * _glide_rope) * _ry(-_turn * 0.3)
+		q["head"] = (q["head"] as Quaternion) * _rx(0.22 * _glide_rope) * _ry(-turn * 0.3)
+
+
+## Web hand for a line fired at `t`: the hand on the anchor's side; an
+## anchor about straight ahead/above takes the other hand from last time, so
+## a run of webs alternates hands like a real swinger.
+func _pick_web_hand(t: Vector3) -> void:
+	if not bones.has("upper_arm_l"):
+		return
+	var sl := (bones["upper_arm_l"] as Node3D).global_position
+	var sr := (bones["upper_arm_r"] as Node3D).global_position
+	var across := sr - sl
+	# Moving: "right" is right of the direction of travel (what the player
+	# sees); standing, the body's own right.
+	var vh := Vector3(player.s.velocity.x, 0.0, player.s.velocity.z)
+	if vh.length() > 2.0:
+		across = vh.cross(Vector3.UP)
+	across.y = 0.0
+	if across.length_squared() < 1e-6:
+		return
+	var to := t - player.global_position
+	to.y = 0.0
+	var side_k := to.normalized().dot(across.normalized()) if to.length_squared() > 1e-4 else 0.0
+	var side := web_side
+	if side_k > 0.26:
+		side = "r"
+	elif side_k < -0.26:
+		side = "l"
+	else:
+		side = "l" if web_side == "r" else "r"
+	if side != web_side:
+		web_side = side
+		_lgrip = 0.0
+		if launcher and launcher.get_parent():
+			launcher.reparent(bones["hand_" + side], false)
+
+
+## Mirror helpers for the left-handed swing (identity when not mirroring).
+func _mp(p: Vector3) -> Vector3:
+	return p - _mir_n * 2.0 * (p - _mir_o).dot(_mir_n) if _mir else p
+
+
+func _md(v: Vector3) -> Vector3:
+	return v - _mir_n * 2.0 * v.dot(_mir_n) if _mir else v
+
+
+## Bone-local rotation reflected through the x = 0 plane (the rig is
+## symmetric: offsets are ±x).
+func _mq(r: Quaternion) -> Quaternion:
+	return Quaternion(r.x, -r.y, -r.z, r.w) if _mir else r
+
+
+## World position of `b` as seen in the (possibly mirrored) frame.
+func _bone_pos(b: String) -> Vector3:
+	if not _mir:
+		return (bones[b] as Node3D).global_position
+	return _mp((bones[_swap_side(b)] as Node3D).global_position)
+
+
+static func _swap_side(b: String) -> String:
+	if b.ends_with("_l"):
+		return b.substr(0, b.length() - 2) + "_r"
+	if b.ends_with("_r"):
+		return b.substr(0, b.length() - 2) + "_l"
+	return b
+
+
+## Reflect a whole pose left ↔ right (applied on the way in and out).
+func _mirror_pose(q: Dictionary) -> void:
+	var src := q.duplicate()
+	for b in src:
+		var r: Quaternion = src[b]
+		q[_swap_side(b)] = Quaternion(r.x, -r.y, -r.z, r.w)
 
 
 ## Two-bone IK in the parent's frame (chest for arms, hips for legs). `dir`
@@ -1967,7 +2068,7 @@ func _guard_limbs() -> void:
 	for sd in ["l", "r"]:
 		var sgn := -1.0 if sd == "l" else 1.0
 		# The web hand stays on the line (the drawn web bends round edges instead).
-		if not (sd == "r" and player.line_state != Player.Line.IDLE and not ragdolling):
+		if not (sd == web_side and player.line_state != Player.Line.IDLE and not ragdolling):
 			_guard_chain(space, q, chest, "upper_arm_" + sd, "forearm_" + sd, "hand_" + sd, 0.29, 0.26,
 				Vector3(0, -0.12, 0), 1.0, false, Vector3(0.75 * sgn, -0.2, 0.6), dt)
 		# Feet stand on floors (foot IK owns that): legs are only kept out of
@@ -2450,7 +2551,7 @@ func _drive_springs(q: Dictionary, dt: float, rope_arm: bool, grounded := true) 
 	var lw := _loco if grounded else 0.0
 	for b in BONES:
 		var grp := _group(b)
-		if rope_arm and (b == "upper_arm_r" or b == "forearm_r"):
+		if rope_arm and (b == "upper_arm_" + web_side or b == "forearm_" + web_side):
 			grp = "rope_arm"
 		var k: float = SPRINGS[grp][0]
 		var c: float = SPRINGS[grp][1]

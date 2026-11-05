@@ -277,12 +277,12 @@ func _draw() -> void:
 		draw_circle(nub, 23.0, Color(1, 1, 1, 0.42))
 	else:
 		var hint := Vector2(_safe.position.x + 150, _safe.end.y - 150)
-		draw_circle(hint, STICK_DRAW_RADIUS, Color(1, 1, 1, 0.05))
-		draw_arc(hint, STICK_DRAW_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.22), 2.0, true)
-		draw_circle(hint, 30.0, Color(1, 1, 1, 0.12))  # resting thumb nub
-		draw_arc(hint, 30.0, 0, TAU, 32, Color(1, 1, 1, 0.3), 1.5, true)
+		draw_circle(hint, STICK_DRAW_RADIUS, Color(1, 1, 1, 0.025))
+		draw_arc(hint, STICK_DRAW_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.14), 1.5, true)
+		draw_circle(hint, 26.0, Color(1, 1, 1, 0.08))  # resting thumb nub
+		draw_arc(hint, 26.0, 0, TAU, 32, Color(1, 1, 1, 0.2), 1.5, true)
 		var lw := _font.get_string_size("MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(_font, hint + Vector2(-lw / 2.0, STICK_DRAW_RADIUS - 14.0), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.38))
+		draw_string(_font, hint + Vector2(-lw / 2.0, STICK_DRAW_RADIUS - 14.0), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.26))
 	var web_down := _has_kind("web")
 	var jump_down := false
 	for t in touches.values():
@@ -296,20 +296,22 @@ func _draw() -> void:
 		# Same family as the HUD panels: Night Ink glass, a hairline ring, and
 		# gold only to say "a web will land" (ring + label), filled when held.
 		var hot: bool = action == "grapple" and ready and Settings.aim_mode != "tap"
-		var visual_r: float = 64.0 if action == "grapple" else 44.0
-		var fill := Color(UiStyle.INK, 0.46 if down else 0.23)
+		# Drawn smaller than the touch target and faint at rest: the city
+		# behind stays readable; a press or "a web will land" brings it up.
+		var visual_r: float = 54.0 if action == "grapple" else 38.0
+		var fill := Color(UiStyle.INK, 0.46 if down else 0.12)
 		if down and action == "grapple":
 			fill = Color(UiStyle.GOLD, 0.5)
 		draw_circle(c, visual_r, fill)
-		var ring := Color(UiStyle.WEB, 0.9 if down else 0.38)
+		var ring := Color(UiStyle.WEB, 0.9 if down else 0.26)
 		if hot:
 			ring = Color(UiStyle.GOLD, 0.95)
 			draw_arc(c, visual_r + 7.0, -PI * 0.75, -PI * 0.25, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
 			draw_arc(c, visual_r + 7.0, PI * 0.25, PI * 0.75, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
 		draw_arc(c, visual_r, 0, TAU, 48, ring, 1.5 if not hot else 2.0, true)
-		var fs := 17 if action == "grapple" else 13
+		var fs := 15 if action == "grapple" else 12
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var label_col := UiStyle.GOLD if hot and not down else white
+		var label_col := UiStyle.GOLD if hot and not down else (white if down else Color(1, 1, 1, 0.55))
 		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, label_col)
 	if _gadget_shown():
 		_draw_gadget(_safe.end + GADGET_POS, white, shade)

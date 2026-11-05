@@ -905,9 +905,12 @@ func _selftest() -> void:
 		problems.append("character model")
 	if not ResourceLoader.exists(CharacterRig.GEAR_PATH):
 		problems.append("shop gear")
-	for piece in ["cap", "beanie", "headphones", "crown", "shades", "mask", "visor"]:
+	for piece in ["cap", "beanie", "headphones", "crown", "shades", "visor"]:
 		if not rig._gear.has(piece):
 			problems.append("shop gear " + piece)
+	# Face masks are skinned meshes on the character model (Mask_<id>), not head gear.
+	if rig.skeleton == null or rig.skeleton.find_child("Mask_courier*", true, false) == null:
+		problems.append("character masks")
 	if not is_instance_valid(rig._glove_mesh):
 		problems.append("character grip morphs")
 	for sh in ["building", "ground", "water", "sky", "traffic"]:

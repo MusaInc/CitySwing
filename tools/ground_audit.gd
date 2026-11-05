@@ -43,7 +43,7 @@ func _go() -> void:
 				if Geometry2D.is_point_in_polygon(CityRoads._centroid(q), poly):
 					built += CityRoads._area(q)
 			var bare := area - built
-			if bare >= min_bare and blk["kind"] not in ["park", "basin", "esplanade", "piece"]:
+			if bare >= min_bare and blk["kind"] not in ["park", "basin", "esplanade"]:
 				rows.append([bare, "mainland" if L.is_mainland else "island", bi, blk["kind"], blk["district"], area, built,
 					CityRoads._centroid(poly)])
 	rows.sort_custom(func(a, b): return a[0] > b[0])

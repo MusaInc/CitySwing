@@ -114,7 +114,7 @@ func _candidates(spec: Dictionary, used: Dictionary) -> Array:
 		order.sort_custom(func(a, b): return tall.call(a) > tall.call(b))
 		order = order.slice(0, 60)  # (a 26 m penthouse needs a broad top: the slimmest supertalls can't hold it)
 	for b in order:
-		if b["kind"] != "normal" or b.has("apt"):
+		if b["kind"] != "normal" or b.has("apt") or b.has("shape"):
 			continue
 		var base := BuildingMesher.base_of(b)
 		var tiers: Array = b["tiers"]

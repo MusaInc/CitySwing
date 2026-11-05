@@ -336,6 +336,9 @@ func _add_building(b: Dictionary, detailed: bool) -> void:
 		# building stands on a dressed-stone base course to the street.
 		var stone := Color(0.56, 0.53, 0.48) if _glassy(b) else trim.darkened(0.18)
 		solid(bc.position.x, bc.position.z, bc.end.x, bc.end.z, bc.position.y, bc.end.y, stone, KIND_WALL)
+	if shaped(b):
+		_add_shaped(b, detailed, style, seed, col, wall_kind, trim, roof, base, glassy)
+		return
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var x0: float = t[0]
@@ -521,7 +524,7 @@ static func crown_h(b: Dictionary) -> float:
 	if b.has("_crown"):
 		return b["_crown"]
 	var h := 0.0
-	if b["kind"] == "normal" and _glassy(b) and float(b["tiers"][-1][5]) > 100.0:
+	if b["kind"] == "normal" and _glassy(b) and float(b["tiers"][-1][5]) > 100.0 and not b.has("shape"):
 		var r := RandomNumberGenerator.new()
 		r.seed = int(float(b["seed"]) * 6151.0 * 1000.0) ^ 0xc20
 		if r.randf() < 0.7:
@@ -574,6 +577,10 @@ static func collision_boxes(b: Dictionary) -> Array[AABB]:
 	if bc.has_volume():
 		out.append(bc)
 	var apt: Dictionary = b.get("apt", {})
+	if shaped(b):
+		# (the walls themselves collide as convex prisms: collision_hulls)
+		out.append_array(features(b)["col"])
+		return out
 	for i in tiers.size():
 		var t: Array = tiers[i]
 		var y1: float = t[5]
@@ -676,8 +683,8 @@ static func _features(b: Dictionary) -> Dictionary:
 	# (CityWorld.HUMAN_LAYER) – detail added after the courses were recorded,
 	# so bots and recorded flights don't depend on it.
 	var out := {"draw": [], "beams": [], "col": [], "col_human": []}
-	if not _parapeted(b) or b["kind"] != "normal":
-		return out
+	if not _parapeted(b) or b["kind"] != "normal" or b.has("shape"):
+		return out  # (shaped plans: the form is the feature; nothing hangs off a cut corner)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(float(b["seed"]) * 7919.0 * 1000.0) ^ 0x5f3
 	var style := int(b["style"])
@@ -1141,7 +1148,7 @@ func _ledges(x0: float, z0: float, x1: float, z1: float, y0: float, y1: float, c
 ## Solid: collision_boxes() makes a slab of each, so you can land on them.
 static func awning_runs(b: Dictionary) -> Array:
 	var out_runs: Array = []
-	if not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
+	if b.has("shape") or not _has_plinth(b, 0) or not _parapeted(b) or int(b["style"]) not in [CityLayout.Style.BRICK,
 			CityLayout.Style.STONE, CityLayout.Style.SANDSTONE, CityLayout.Style.DECO]:
 		return out_runs
 	var t: Array = b["tiers"][0]
@@ -2075,3 +2082,398 @@ func _inner_walls(r: Rect2, y0: float, y1: float, col: Color, kind := KIND_WALL)
 		quad(Vector3(a.x, y1, a.y), Vector3(b.x, y1, b.y), Vector3(b.x, y0, b.y), Vector3(a.x, y0, a.y), ns[k],
 			Vector2(0, y1), Vector2(w, y1), Vector2(w, y0), Vector2(0, y0), col, kind, 3, 0.5)
 
+
+func _add_shaped(b: Dictionary, detailed: bool, style: float, seed: float, col: Color, wall_kind: float,
+		trim: Color, roof: Color, base: float, glassy: bool) -> void:
+	var tiers: Array = b["tiers"]
+	var light := int(b["shape"].get("segs", 0)) > 8  # curved plans: no stone courses (vertex cost)
+	for i in tiers.size():
+		var t: Array = tiers[i]
+		var y0: float = t[4]
+		var y1: float = t[5]
+		var fp := footprint(b, t)
+		walls_poly(fp, y0, y1, col, wall_kind, style, seed, y0 - base)
+		if _overhangs(tiers, i) or not _on_ground(b, t) and i == 0:
+			cap_poly(fp, y0, col.darkened(0.25), KIND_TRIM, style, seed, false)
+		if not detailed:
+			cap_poly(fp, y1, roof, KIND_ROOF, style, seed, true, true)
+			continue
+		var o := cornice_out(b)
+		var ch := cornice_h(b)
+		var co := footprint(b, t, o)
+		walls_poly(co, y1 - ch * 0.5, y1 + ch * 0.5, trim, KIND_TRIM, style, seed)
+		cap_poly(co, y1 - ch * 0.5, trim, KIND_TRIM, style, seed, false)
+		var ry := y1 + ch * 0.5
+		cap_poly(co, ry, roof, KIND_ROOF, style, seed, true, true)
+		# Parapet: outer face, inner face, top ring.
+		var inner := offset_poly(co, -PARAPET_T)
+		walls_poly(co, ry, ry + PARAPET, trim, KIND_TRIM, 0, 0)
+		walls_poly(inner, ry, ry + PARAPET, trim.darkened(0.15), KIND_TRIM, 0, 0, -1.0, true)
+		ring_poly(co, inner, ry + PARAPET, trim)
+		if not glassy and not light:
+			var ly := base + (floorf((y0 - base) / LEDGE_EVERY) + 1.0) * LEDGE_EVERY
+			var lo := offset_poly(fp, LEDGE_OUT)
+			while ly < y1 - 4.0:
+				walls_poly(lo, ly, ly + 0.32, trim, KIND_TRIM, style, seed)
+				ring_poly(lo, fp, ly, trim.darkened(0.25), false)
+				ring_poly(lo, fp, ly + 0.32, trim.lightened(0.1))
+				ly += LEDGE_EVERY
+		if _has_plinth(b, i):
+			var pp := offset_poly(fp, PLINTH_OUT)
+			walls_poly(pp, base, base + PLINTH_H, col.darkened(0.3), KIND_TRIM, style, seed)
+			ring_poly(pp, fp, base + PLINTH_H, col.darkened(0.3))
+
+
+# ------------------------------------------------------------ shaped towers
+## Buildings with b["shape"] (CityLayout._shape_for) are not boxes: each
+## tier's rect is the bounding box of a footprint with chamfered, rounded or
+## notched corners, round drums or a flatiron prow. shape = {"c": [corner
+## treatments for corners 0..3]}, corner = [kind, size as a fraction of the
+## tier's short side]: kind 0 sharp, 1 chamfer, 2 round, 3 notch.
+## Corners run (x0,z1) → (x1,z1) → (x1,z0) → (x0,z0), the order walls() uses
+## (negative shoelace area; outward normal of edge d is (-d.y, d.x)).
+const SHAPE_SHARP := 0
+const SHAPE_CHAMFER := 1
+const SHAPE_ROUND := 2
+const SHAPE_NOTCH := 3
+const ARC_SEGS := 5          # per quarter circle (18° steps: smooth-shaded)
+const SMOOTH_TURN := 0.55    # rad: vertices turning less than this shade smooth
+
+
+static func shaped(b: Dictionary) -> bool:
+	return b.has("shape") and b["kind"] == "normal"
+
+
+## The footprint of one tier (building-local xz), in walls() order.
+static func footprint(b: Dictionary, t: Array, grow := 0.0) -> PackedVector2Array:
+	var x0: float = float(t[0]) - grow
+	var z0: float = float(t[1]) - grow
+	var x1: float = float(t[2]) + grow
+	var z1: float = float(t[3]) + grow
+	var cs := [Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0), Vector2(x0, z0)]
+	var short := minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	var spec: Array = b["shape"]["c"]
+	var out := PackedVector2Array()
+	for k in 4:
+		var p: Vector2 = cs[k]
+		var din: Vector2 = (p - (cs[(k + 3) % 4] as Vector2)).normalized()
+		var dout: Vector2 = ((cs[(k + 1) % 4] as Vector2) - p).normalized()
+		var kind: int = spec[k][0]
+		var s: float = float(spec[k][1]) * short
+		if kind == SHAPE_ROUND:
+			s = minf(s + grow, short * 0.5 + grow - 0.001)
+		elif kind == SHAPE_CHAMFER:
+			s += grow * 0.414  # (keeps an outset chamfer parallel)
+		match kind:
+			SHAPE_CHAMFER:
+				out.append(p - din * s)
+				out.append(p + dout * s)
+			SHAPE_ROUND:
+				var c := p - din * s + dout * s
+				var a0 := (-dout).angle()  # from the centre back to the incoming edge
+				var a1 := din.angle()
+				var da := wrapf(a1 - a0, -PI, PI)
+				for i in ARC_SEGS + 1:
+					var a := a0 + da * i / float(ARC_SEGS)
+					out.append(c + Vector2.from_angle(a) * s)
+			SHAPE_NOTCH:
+				# A square bite out of the corner (an L / stepped plan); the
+				# inner corner moves with the outset, so cornices follow it.
+				var sn := s - grow * 2.0
+				out.append(p - din * sn)
+				out.append(p - din * sn + dout * sn)
+				out.append(p + dout * sn)
+			_:
+				out.append(p)
+	# Drop doubled points (a drum's arcs meet mid-face).
+	var clean := PackedVector2Array()
+	for q in out:
+		if clean.is_empty() or q.distance_to(clean[-1]) > 0.02:
+			clean.append(q)
+	if clean.size() > 2 and clean[0].distance_to(clean[-1]) < 0.02:
+		clean.remove_at(clean.size() - 1)
+	return clean
+
+
+## Mitre offset (d > 0 outward) keeping the vertex count (rings pair up).
+static func offset_poly(pts: PackedVector2Array, d: float) -> PackedVector2Array:
+	var n := pts.size()
+	var out := PackedVector2Array()
+	out.resize(n)
+	for i in n:
+		var a := pts[(i + n - 1) % n]
+		var p := pts[i]
+		var c := pts[(i + 1) % n]
+		var e0 := (p - a).normalized()
+		var e1 := (c - p).normalized()
+		var n0 := Vector2(-e0.y, e0.x)
+		var n1 := Vector2(-e1.y, e1.x)
+		var m := (n0 + n1)
+		if m.length_squared() < 1e-6:
+			m = n0
+		m = m.normalized()
+		var k := maxf(m.dot(n0), 0.35)
+		out[i] = p + m * (d / k)
+	return out
+
+
+## Walls round a footprint. Straight runs between sharp turns are faces
+## (UV2 0..1 across each, like walls()); curved runs shade smooth.
+func walls_poly(pts: PackedVector2Array, y0: float, y1: float, col: Color, kind: float, style: float,
+		seed: float, uv_y0 := -1.0, inward := false) -> void:
+	var n := pts.size()
+	if n < 3:
+		return
+	var vy0 := y0 if uv_y0 < 0.0 else uv_y0
+	var vy1 := vy0 + (y1 - y0)
+	var en: Array[Vector2] = []  # outward normal of edge i (pts[i] → pts[i+1])
+	var el: Array[float] = []
+	for i in n:
+		var d := pts[(i + 1) % n] - pts[i]
+		el.append(d.length())
+		var nn := Vector2(-d.y, d.x).normalized()
+		en.append(-nn if inward else nn)
+	# A vertex is a crease when the edges either side turn sharply there.
+	var crease: Array[bool] = []
+	var any := false
+	for i in n:
+		var turn := absf(en[(i + n - 1) % n].angle_to(en[i]))
+		crease.append(turn > SMOOTH_TURN)
+		any = any or crease[i]
+	var start := 0
+	if any:
+		while not crease[start]:
+			start += 1
+	var u := 0.0
+	var i := start
+	var done := 0
+	while done < n:
+		# One face: edges from a crease to the next crease.
+		var run: Array[int] = []
+		var j := i
+		while true:
+			run.append(j)
+			j = (j + 1) % n
+			if crease[j] or j == start or run.size() >= n:
+				break
+		var L := 0.0
+		for e in run:
+			L += el[e]
+		var acc := 0.0
+		for e in run:
+			var a := pts[e]
+			var b := pts[(e + 1) % n]
+			var na := en[e]
+			var nb := en[e]
+			if not crease[e]:
+				na = (en[(e + n - 1) % n] + en[e]).normalized()
+			if not crease[(e + 1) % n]:
+				nb = (en[e] + en[(e + 1) % n]).normalized()
+			var w := el[e]
+			var t0 := acc / maxf(L, 0.001)
+			var t1 := (acc + w) / maxf(L, 0.001)
+			var A := Vector3(a.x, y1, a.y)
+			var B := Vector3(b.x, y1, b.y)
+			var C := Vector3(b.x, y0, b.y)
+			var D := Vector3(a.x, y0, a.y)
+			if inward:
+				_quad_n(B, A, D, C, Vector3(nb.x, 0, nb.y), Vector3(na.x, 0, na.y),
+					Vector2(u + w, vy1), Vector2(u, vy1), Vector2(u, vy0), Vector2(u + w, vy0), col, kind, style, seed)
+			else:
+				_quad_n(A, B, C, D, Vector3(na.x, 0, na.y), Vector3(nb.x, 0, nb.y),
+					Vector2(u, vy1), Vector2(u + w, vy1), Vector2(u + w, vy0), Vector2(u, vy0), col, kind, style, seed)
+			var wy := floorf(L * 4.0) + (floorf(seed * 256.0) + 0.5) / 256.0
+			var m := uv2s.size()
+			var ta := minf(t0, 0.999)
+			var tb := minf(t1, 0.999)
+			if inward:
+				uv2s[m - 4] = Vector2(style + tb, wy)
+				uv2s[m - 3] = Vector2(style + ta, wy)
+				uv2s[m - 2] = Vector2(style + ta, wy)
+				uv2s[m - 1] = Vector2(style + tb, wy)
+			else:
+				uv2s[m - 4] = Vector2(style + ta, wy)
+				uv2s[m - 3] = Vector2(style + tb, wy)
+				uv2s[m - 2] = Vector2(style + tb, wy)
+				uv2s[m - 1] = Vector2(style + ta, wy)
+			acc += w
+			u += w
+		done += run.size()
+		i = j
+
+
+## A quad whose left edge (a, d) and right edge (b, c) carry their own normals.
+func _quad_n(a: Vector3, b: Vector3, c: Vector3, d: Vector3, na: Vector3, nb: Vector3, ua: Vector2, ub: Vector2,
+		uc: Vector2, ud: Vector2, col: Color, kind: float, style: float, seed: float) -> void:
+	if _xf_on:
+		a = xf * a
+		b = xf * b
+		c = xf * c
+		d = xf * d
+		na = xf.basis * na
+		nb = xf.basis * nb
+	var i := verts.size()
+	verts.append_array([a, b, c, d])
+	normals.append_array([na, nb, nb, na])
+	var cc := Color(col.r, col.g, col.b, kind / 8.0)
+	colors.append_array([cc, cc, cc, cc])
+	uvs.append_array([ua, ub, uc, ud])
+	var s2 := Vector2(style, seed)
+	uv2s.append_array([s2, s2, s2, s2])
+	indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
+
+
+## Flat cap over (up) or under (down) a footprint, triangulated (L plans are
+## concave). Roofs pack the bounding half-extents like roof_top().
+func cap_poly(pts: PackedVector2Array, y: float, col: Color, kind: float, style: float, seed: float, up := true,
+		roof := false) -> void:
+	var tri := Geometry2D.triangulate_polygon(pts)
+	if tri.is_empty():
+		return
+	var lo := pts[0]
+	var hi := pts[0]
+	for p in pts:
+		lo = Vector2(minf(lo.x, p.x), minf(lo.y, p.y))
+		hi = Vector2(maxf(hi.x, p.x), maxf(hi.y, p.y))
+	var c := (lo + hi) * 0.5
+	var s2 := Vector2(style, seed)
+	if roof:
+		var hx := minf(floorf((hi.x - lo.x) * 2.0), 4095.0)
+		var hz := minf(floorf((hi.y - lo.y) * 2.0), 4095.0)
+		s2 = Vector2(-(1.0 + hx + hz * 4096.0), seed)
+		kind = KIND_ROOF
+	var nrm := Vector3.UP if up else Vector3.DOWN
+	var nw := xf.basis * nrm if _xf_on else nrm
+	var cc := Color(col.r, col.g, col.b, kind / 8.0)
+	var base := verts.size()
+	for p in pts:
+		var v := Vector3(p.x, y, p.y)
+		verts.append(xf * v if _xf_on else v)
+		normals.append(nw)
+		colors.append(cc)
+		uvs.append(p - c if roof else p)
+		uv2s.append(s2)
+	for k in range(0, tri.size(), 3):
+		var ia := tri[k]
+		var ib := tri[k + 1]
+		var ic := tri[k + 2]
+		var pa := Vector3(pts[ia].x, y, pts[ia].y)
+		var pb := Vector3(pts[ib].x, y, pts[ib].y)
+		var pc := Vector3(pts[ic].x, y, pts[ic].y)
+		# Godot's front faces wind clockwise: pick the order that faces nrm.
+		if (pb - pa).cross(pc - pa).dot(nrm) > 0.0:
+			indices.append_array([base + ia, base + ic, base + ib])
+		else:
+			indices.append_array([base + ia, base + ib, base + ic])
+
+
+## Horizontal ring between two footprints with the same vertex count.
+func ring_poly(outer: PackedVector2Array, inner: PackedVector2Array, y: float, col: Color, up := true) -> void:
+	var n := outer.size()
+	var nrm := Vector3.UP if up else Vector3.DOWN
+	for i in n:
+		var j := (i + 1) % n
+		var a := Vector3(outer[i].x, y, outer[i].y)
+		var b := Vector3(outer[j].x, y, outer[j].y)
+		var c := Vector3(inner[j].x, y, inner[j].y)
+		var d := Vector3(inner[i].x, y, inner[i].y)
+		_tri(a, b, c, nrm, col)
+		_tri(a, c, d, nrm, col)
+
+
+## Collision for shaped buildings: one convex prism per convex piece of each
+## tier's footprint (walls, the cornice/roof slab, the plinth), exactly the
+## drawn faces – no stair-steps for the rope to catch on. Points are in the
+## building's frame (CityWorld applies its rotation).
+static func collision_hulls(b: Dictionary) -> Array[PackedVector3Array]:
+	var out: Array[PackedVector3Array] = []
+	if not shaped(b):
+		return out
+	var o := cornice_out(b)
+	var ch := cornice_h(b)
+	var tiers: Array = b["tiers"]
+	for i in tiers.size():
+		var t: Array = tiers[i]
+		var y1: float = t[5]
+		_hulls_of(footprint(b, t), t[4], y1 - ch * 0.5, out)
+		_hulls_of(footprint(b, t, o), y1 - ch * 0.5, y1 + ch * 0.5, out)
+		if _has_plinth(b, i):
+			_hulls_of(footprint(b, t, PLINTH_OUT), base_of(b), base_of(b) + PLINTH_H, out)
+	return out
+
+
+static func _hulls_of(fp: PackedVector2Array, y0: float, y1: float, out: Array[PackedVector3Array]) -> void:
+	var parts: Array = [fp]
+	if not _convex(fp):
+		parts = Geometry2D.decompose_polygon_in_convex(fp)
+	for part: PackedVector2Array in parts:
+		var pts := PackedVector3Array()
+		for v in part:
+			pts.append(Vector3(v.x, y0, v.y))
+			pts.append(Vector3(v.x, y1, v.y))
+		out.append(pts)
+
+
+static func _convex(p: PackedVector2Array) -> bool:
+	var n := p.size()
+	var sgn := 0.0
+	for i in n:
+		var a := p[(i + 1) % n] - p[i]
+		var b := p[(i + 2) % n] - p[(i + 1) % n]
+		var c := a.cross(b)
+		if absf(c) < 1e-6:
+			continue
+		if sgn == 0.0:
+			sgn = signf(c)
+		elif signf(c) != sgn:
+			return false
+	return true
+
+
+## (Old) collision for a shaped tier: vertical slices along x, each the footprint's
+## z-extent there (exact on straight runs, within ~0.4 m on curves and
+## chamfers). Notched plans give two intervals in a slice.
+static func shape_boxes(pts: PackedVector2Array, y0: float, y1: float) -> Array[AABB]:
+	var out: Array[AABB] = []
+	var xs: Array[float] = []
+	for p in pts:
+		xs.append(p.x)
+	xs.sort()
+	var cuts: Array[float] = [xs[0]]
+	for x in xs:
+		if x - cuts[-1] > 0.05:
+			cuts.append(x)
+	var edges: Array[float] = []
+	for k in cuts.size() - 1:
+		var a: float = cuts[k]
+		var b: float = cuts[k + 1]
+		var za := _span_at(pts, a + 0.01)
+		var zb := _span_at(pts, b - 0.01)
+		var flat := za.size() == zb.size()
+		if flat:
+			for q in za.size():
+				flat = flat and absf(za[q] - zb[q]) < 0.05
+		var steps := 1 if flat else maxi(1, ceili((b - a) / 1.6))
+		for s in steps:
+			edges.append(lerpf(a, b, s / float(steps)))
+	edges.append(cuts[-1])
+	for k in edges.size() - 1:
+		var a := edges[k]
+		var b := edges[k + 1]
+		var zs := _span_at(pts, (a + b) * 0.5)
+		for q in range(0, zs.size() - 1, 2):
+			out.append(AABB(Vector3(a, y0, zs[q]), Vector3(b - a, y1 - y0, zs[q + 1] - zs[q])))
+	return out
+
+
+## Sorted z where the vertical line x crosses the footprint's edges.
+static func _span_at(pts: PackedVector2Array, x: float) -> Array[float]:
+	var zs: Array[float] = []
+	var n := pts.size()
+	for i in n:
+		var a := pts[i]
+		var b := pts[(i + 1) % n]
+		if (a.x <= x and b.x > x) or (b.x <= x and a.x > x):
+			zs.append(lerpf(a.y, b.y, (x - a.x) / (b.x - a.x)))
+	zs.sort()
+	return zs

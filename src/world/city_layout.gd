@@ -1530,12 +1530,18 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 	_stepped_top(tiers, h, c)
 	var b := _building(tiers, style, col, "normal")
 	b["seed"] = brng.randf()
+	var shape := _shape_for(form, style, h, tiers, c)
+	if not shape.is_empty():
+		b["shape"] = shape
 	if not blocked.is_empty():
 		b["roof_blocked"] = true  # (no rooftop spawns: towers stand on it)
 	_add(b)
 	for e in extra:
 		_add(e)
-	if tiers.size() == box_tiers.size():
+	# Roof kit on a shaped plan keeps to the square in its middle (nothing
+	# hangs over a cut or rounded corner).
+	var dress := tiers if shape.is_empty() else _shape_inset(tiers, shape)
+	if tiers.size() == box_tiers.size() and shape.is_empty():
 		_roof_furniture(b, tiers, style, h, col, brng, blocked)
 	else:
 		# A stepped top: dress the real roof, but advance the layout's random
@@ -1556,12 +1562,118 @@ func _make_building(r: Rect2, dist: String, brng: RandomNumberGenerator) -> void
 		var real := RandomNumberGenerator.new()
 		real.state = b_state
 		rng.state = r_state
-		_roof_furniture(b, tiers, style, h, col, real, blocked)
+		_roof_furniture(b, dress, style, h, col, real, blocked)
 		brng.state = b_after
 		rng.state = r_after
 	for e in extra:
 		if e["kind"] == "normal" and form == "twin":
 			_roof_furniture(e, e["tiers"], style, float(e["tiers"][-1][5]), col, frng, [])
+
+
+## Share of each shape's weight actually used (about half the towers end up
+## shaped: more and the expert bot runs out of corner anchors).
+const SHAPE_SHARE := 0.55
+
+## Plan shapes, so the city isn't a field of rectangles: chamfered corners
+## (octagonal towers), rounded corners, round drums / stadium plans, a
+## flatiron prow, L and stepped plans (notched corners), bullnose fronts.
+## Glass towers lean to curves, masonry to chamfered corner blocks and
+## notches. Own position-hashed RNG: the layout's streams are untouched.
+## Returns {} (a plain box) or {"c": [[kind, size], ×4], "segs": n}.
+func _shape_for(form: String, style: int, h: float, tiers: Array, c: Vector2) -> Dictionary:
+	if form in ["silos", "campanile", "twin"] or style == Style.WAREHOUSE or h < 20.0:
+		return {}
+	if OS.has_environment("NO_SHAPES"):
+		return {}
+	if c.distance_to(AdScreens.DISTRICT) < AdScreens.DISTRICT_R + 25.0:
+		return {}  # Lumen Circus: flat facades carry the screens
+	var t: Array = tiers[0]
+	var w := float(t[2]) - float(t[0])
+	var d := float(t[3]) - float(t[1])
+	var short := minf(w, d)
+	var top: Array = tiers[-1]
+	if short < 16.0 or minf(float(top[2]) - float(top[0]), float(top[3]) - float(top[1])) < 14.0:
+		return {}
+	var r := RandomNumberGenerator.new()
+	r.seed = hash(Vector2i(int(c.x * 5.0), int(c.y * 5.0))) ^ 0x3a9d
+	var glassy := style in [Style.GLASS, Style.DARK_GLASS, Style.MODERN]
+	var opts: Array
+	if glassy:
+		opts = [["drum", 0.2 if maxf(w, d) / short < 1.7 and h > 45.0 else 0.0], ["rounded", 0.24], ["chamfer", 0.16],
+			["prow", 0.1], ["bullnose", 0.1], ["notch", 0.08]]
+	elif style == Style.DECO:
+		opts = [["chamfer", 0.3], ["rounded", 0.14], ["notch", 0.16], ["prow", 0.12], ["bullnose", 0.1]]
+	else:
+		opts = [["chamfer", 0.26], ["notch", 0.2], ["prow", 0.1], ["rounded", 0.08], ["bullnose", 0.06]]
+	var x := r.randf()
+	var pick := ""
+	for o in opts:
+		x -= float(o[1]) * SHAPE_SHARE
+		if x < 0.0:
+			pick = o[0]
+			break
+	if pick == "":
+		return {}
+	var cs := [[0, 0.0], [0, 0.0], [0, 0.0], [0, 0.0]]
+	var k0 := r.randi() % 4
+	match pick:
+		"chamfer":
+			var f := r.randf_range(0.16, 0.28)
+			for k in 4:
+				cs[k] = [BuildingMesher.SHAPE_CHAMFER, f]
+		"rounded":
+			var f := r.randf_range(0.2, 0.34)
+			for k in 4:
+				cs[k] = [BuildingMesher.SHAPE_ROUND, f]
+		"drum":
+			for k in 4:
+				cs[k] = [BuildingMesher.SHAPE_ROUND, 0.5]
+		"prow":
+			cs[k0] = [BuildingMesher.SHAPE_CHAMFER, r.randf_range(0.42, 0.6)]
+			if r.randf() < 0.5:
+				cs[(k0 + 2) % 4] = [BuildingMesher.SHAPE_CHAMFER, 0.12]
+		"bullnose":
+			cs[k0] = [BuildingMesher.SHAPE_ROUND, 0.5]
+			cs[(k0 + 1) % 4] = [BuildingMesher.SHAPE_ROUND, 0.5]
+		"notch":
+			cs[k0] = [BuildingMesher.SHAPE_NOTCH, r.randf_range(0.3, 0.42)]
+			if r.randf() < 0.4:
+				cs[(k0 + 2) % 4] = [BuildingMesher.SHAPE_NOTCH, r.randf_range(0.25, 0.35)]
+	var segs := 0
+	for q in cs:
+		if int(q[0]) == BuildingMesher.SHAPE_ROUND:
+			segs += BuildingMesher.ARC_SEGS
+	# Notches must leave a roof on every tier (upper tiers are smaller).
+	if pick == "notch":
+		for tt in tiers:
+			var s2 := minf(float(tt[2]) - float(tt[0]), float(tt[3]) - float(tt[1]))
+			if s2 * (1.0 - 0.42) < 9.0:
+				return {}
+	return {"c": cs, "segs": segs, "kind": pick}
+
+
+## How far in from a shaped tier's bounding rect its clear square starts.
+static func shape_margin(shape: Dictionary, t: Array) -> float:
+	var short := minf(float(t[2]) - float(t[0]), float(t[3]) - float(t[1]))
+	var m := 0.0
+	for q in shape["c"]:
+		var k := 0.3 if int(q[0]) == BuildingMesher.SHAPE_ROUND else 0.55
+		if int(q[1] * 100.0) >= 50 and int(q[0]) == BuildingMesher.SHAPE_ROUND:
+			k = 0.3  # (a drum: the square inside a circle is ~0.29 of the diameter in)
+		m = maxf(m, float(q[1]) * short * k)
+	return minf(m, short * 0.3)
+
+
+## The tiers with the top one shrunk to the clear square inside its shape.
+func _shape_inset(tiers: Array, shape: Dictionary) -> Array:
+	var out := tiers.duplicate(true)
+	var t: Array = out[-1]
+	var m := shape_margin(shape, t)
+	t[0] = float(t[0]) + m
+	t[1] = float(t[1]) + m
+	t[2] = float(t[2]) - m
+	t[3] = float(t[3]) - m
+	return out
 
 
 ## Grain silos (docks): a row of tall concrete bins under a headhouse.

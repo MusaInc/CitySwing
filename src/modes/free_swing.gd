@@ -12,14 +12,14 @@ var _session_tokens := 0
 
 
 func mode_name() -> String:
-	return "Free Swing"
+	return "Open City"
 
 
 func start() -> void:
 	super.start()
 	hud.mode_text = ""
 	hud.mode_sub = ""
-	hud.flash("FREE SWING", 1.6)
+	hud.flash("OPEN CITY", 1.6)
 	_suits_before = Progress.unlocked_ids()
 	if world is CityWorld:
 		tokens = TokenField.new()
