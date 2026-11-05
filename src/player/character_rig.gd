@@ -168,6 +168,7 @@ var _release_t := 0.0      # launch stretch after letting go of a web (s left)
 var _hard_t := 0.0         # hard-landing crouch remaining (s)
 var _glide := 0.0          # 0..1 flying forward off a web: chest leads, arms out like wings
 var _glide_rope := 0.0     # 0..1 the same lean while swinging forward on the web
+var _speedfly := 0.0       # 0..1 flying fast (≳60 km/h): streamline – arms swept back, legs together
 var _bank := Vector3.ZERO  # smoothed sideways lean into an air turn (world, horizontal)
 var _turn := 0.0           # -1..1 how hard the body is turning (+ = right); head and arms lead it
 const HARD_TIME := 0.62
@@ -870,6 +871,7 @@ func _on_respawned() -> void:
 		_heel[sd] = 0.0
 	_hard_t = 0.0
 	_glide = 0.0
+	_speedfly = 0.0
 	_glide_rope = 0.0
 	_bank = Vector3.ZERO
 	_turn = 0.0
@@ -1129,6 +1131,12 @@ func _update_animated(dt: float) -> void:
 	var glide_go := not grounded and not on_rope and not _off_ledge and _trick == "" \
 		and hs > 6.0 and v.y > -16.0 and (_ground_h == INF or _ground_h > 5.0)
 	_glide = move_toward(_glide, clampf((hs - 6.0) / 6.0, 0.0, 1.0) if glide_go else 0.0, dt * (2.5 if glide_go else 4.0))
+	# Speed flight: fast and free in the air the wings fold – arms sweep back
+	# along the body, legs close up and trail. Wings at 120 km/h read as a
+	# T-pose with the legs hanging.
+	var fast_go := not grounded and not on_rope and _trick == "" and not wall_run and not ragdolling \
+		and (_ground_h == INF or _ground_h > 4.0)
+	_speedfly = move_toward(_speedfly, smoothstep(13.0, 24.0, hs) if fast_go else 0.0, dt * (3.0 if fast_go else 5.0))
 	var rope_go := attached and speed > 7.0
 	_glide_rope = move_toward(_glide_rope, clampf((speed - 7.0) / 9.0, 0.0, 1.0) if rope_go else 0.0, dt * 3.0)
 
@@ -1176,10 +1184,13 @@ func _update_animated(dt: float) -> void:
 		up = Vector3.UP.lerp(v.normalized() if speed > 1.0 else Vector3.UP, lean).normalized()
 		if v.y < -6.0:
 			up = up.lerp(Vector3.UP, 0.5).normalized()  # dropping: feet stay under the body
-		if _glide > 0.0 and hs > 0.1:
-			# Gliding: pitched ~35° forward over the direction of travel.
-			var gl := (Vector3.UP * cos(0.62) + vh / hs * sin(0.62)).normalized()
-			up = up.slerp(gl, _glide).normalized()
+		var gw := maxf(_glide, _speedfly)
+		if gw > 0.0 and hs > 0.1:
+			# Gliding: pitched ~35° forward over the direction of travel; flying
+			# fast, flatter still (~60°) – the body lies into the airflow.
+			var pa := lerpf(0.62, 1.05, _speedfly)
+			var gl := (Vector3.UP * cos(pa) + vh / hs * sin(pa)).normalized()
+			up = up.slerp(gl, gw).normalized()
 		up = (up + _bank).normalized()  # banked into the turn
 		# Freefall arch: falling fast with height to spare, the body lies
 		# belly-down, head toward the travel direction.
@@ -2287,6 +2298,30 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"thigh_" + tr: _rx(-0.22) * _rz(0.04 * sg[tr] - tn * 0.2),
 		"shin_" + ld: _rx(-0.75), "shin_" + tr: _rx(-0.22), "foot_" + ld: _rx(-0.55), "foot_" + tr: _rx(-0.7),
 	}, _glide)
+	# Speed flight: the streamline a body takes in fast air. Arms swept back
+	# along the sides (elbows soft, the lead one a touch higher and bent),
+	# chest leading, chin up to see ahead, legs together and long behind with
+	# one knee loose and the toes pointed. The air works on it: a quick
+	# flutter in the legs and forearms that grows with speed, and banking the
+	# arms tip with the turn. Weighted out near the ground, in a dive and in
+	# the freefall arch (those layers follow).
+	var sp := _speedfly * (1.0 - 0.6 * rising)
+	if sp > 0.001:
+		var buff := clampf((speed - 15.0) / 25.0, 0.0, 1.0)
+		var fl := sin(_time * 13.0) * 0.035 * buff
+		var fl2 := sin(_time * 11.3 + 1.7) * 0.035 * buff
+		var ab := 1.0 - 0.75 * dive  # head-down the arms lie along the sides
+		_put(q, {
+			"spine": _rx(0.08) * _ry(-tn * 0.15), "chest": _rx(0.1) * _ry(-tn * 0.12), "neck": _rx(0.14),
+			"head": _rx(0.36) * _ry(-tn * 0.35),
+			"upper_arm_" + ld: _rz((0.4 + tn * sg[ld] * 0.2) * sg[ld]) * _rx((-0.3 + fl) * ab),
+			"upper_arm_" + tr: _rz((0.3 + tn * sg[tr] * 0.2) * sg[tr]) * _rx((-0.5 - fl) * ab),
+			"forearm_" + ld: _rx(0.55 + fl2), "forearm_" + tr: _rx(0.28 - fl2),
+			"thigh_" + ld: _rx(0.12 + fl) * _rz(0.03 * sg[ld] - tn * 0.12),
+			"thigh_" + tr: _rx(-0.12 - fl) * _rz(0.02 * sg[tr] - tn * 0.12),
+			"shin_" + ld: _rx(-0.6 - fl2), "shin_" + tr: _rx(-0.2 + fl2),
+			"foot_" + ld: _rx(-0.65), "foot_" + tr: _rx(-0.75),
+		}, sp)
 	# Freefall arch.
 	_put(q, {
 		"spine": _rx(-0.3), "chest": _rx(-0.15), "neck": _rx(-0.2), "head": _rx(-0.45),
@@ -2306,11 +2341,15 @@ func _pose_air(q: Dictionary, v: Vector3, speed: float, la: Vector3, dive: float
 		"thigh_l": _rx(0.55) * _rz(-0.08), "thigh_r": _rx(0.45) * _rz(0.08),
 		"shin_l": _rx(-0.75), "shin_r": _rx(-0.65), "foot_l": _rx(0.2), "foot_r": _rx(0.2),
 	}, near)
-	# Dive: streamlined, arms together overhead, toes pointed.
+	# Dive: streamlined, arms together overhead, toes pointed. Already flying
+	# fast with the arms swept back, they stay back (a tracking dive): blending
+	# back-swept into overhead passes through "arm hanging down".
 	_put(q, {
-		"spine": _rx(0.08), "chest": _rx(0.0), "neck": _rx(0.15), "head": _rx(-0.35),
 		"upper_arm_l": _rx(2.85) * _rz(0.12), "upper_arm_r": _rx(2.85) * _rz(-0.12),
 		"forearm_l": _rx(0.15), "forearm_r": _rx(0.15),
+	}, dive * (1.0 - _speedfly))
+	_put(q, {
+		"spine": _rx(0.08), "chest": _rx(0.0), "neck": _rx(0.15), "head": _rx(-0.35),
 		"thigh_l": _rx(0.05) * _rz(0.03), "thigh_r": _rx(-0.05) * _rz(-0.03),
 		"shin_l": _rx(-0.15), "shin_r": _rx(-0.25), "foot_l": _rx(-0.7), "foot_r": _rx(-0.7),
 	}, dive)

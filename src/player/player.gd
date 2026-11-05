@@ -82,6 +82,8 @@ var view: Node3D
 ## Optional autopilot (tests / attract mode): object with drive(player, dt) -> Dictionary.
 var bot: Object = null
 var input_enabled := true
+## Standing in a home (HomeSystem sets it): indoor walking (SwingPhysics Controls.indoors).
+var indoors := false
 ## A scripted move (HomeSystem: window grab/climb/vault) is placing the body:
 ## the physics step is skipped while it does.
 var scripted := false
@@ -292,7 +294,8 @@ func _read_input(dt: float) -> Dictionary:
 	var mv := Input.get_vector("move_left", "move_right", "move_back", "move_forward")
 	# Response curve: most of the stick's travel is a walk-to-jog range, so
 	# walking is easy to hold; only full deflection sprints.
-	mv = mv.normalized() * pow(mv.length(), 2.8) if mv.length() > 0.001 else Vector2.ZERO
+	# Indoors the curve is gentler: a small push already walks.
+	mv = mv.normalized() * pow(mv.length(), 1.5 if indoors else 2.8) if mv.length() > 0.001 else Vector2.ZERO
 	var basis := view.global_transform.basis if view else global_transform.basis
 	var fwd := -basis.z
 	fwd.y = 0.0
@@ -365,6 +368,7 @@ func _physics_process(dt: float) -> void:
 	# review script can opt in with `human_steer` to move like a player).
 	controls.turn_assist = bot == null or bot.get("human_steer") == true
 	controls.human = controls.turn_assist
+	controls.indoors = indoors and controls.human
 	targeting.human_assist = controls.human
 	# Trains are solid (ride them!) for people only: bots and recorded
 	# courses must not depend on where a train happens to be.

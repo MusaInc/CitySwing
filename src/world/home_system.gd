@@ -152,6 +152,7 @@ func _physics_process(dt: float) -> void:
 			fwd = Vector3(fwd.x, 0.0, fwd.z).normalized()
 			camera.look_down = _tilt(hm) * smoothstep(0.2, 0.8, fwd.dot(Apartments.outward(hm)))
 		camera.indoor_ceiling = ceiling(home_by_id(id)) if id != "" else INF
+	player.indoors = state == "" and inside() != ""
 	if state != "":
 		_run(dt)
 		return

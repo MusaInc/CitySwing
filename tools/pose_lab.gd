@@ -8,7 +8,7 @@ extends SceneTree
 ##   land jumpclose tricks freefall dive knockout drop chain ledgedive bump turns
 ##   airturn swingwing
 
-const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble", "hands", "closeup"]
+const ALL := ["idle", "run", "steps", "tricks", "freefall", "dive", "knockout", "jump", "swing", "swing34", "swingfast", "release", "wallrun", "crash", "land", "jumpclose", "drop", "chain", "ledgedive", "bump", "turns", "airturn", "swingwing", "fastfly", "groundweb", "idlelife", "edge", "winded", "idleacts", "stumble", "hands", "closeup"]
 
 var player: Player
 var rig: CharacterRig
@@ -18,6 +18,7 @@ var out_dir := ""
 var _cam_off := Vector3(0, 0.4, 4.5)
 var _cam_pos := Vector3.ZERO
 var _look_y := 0.1  # aim point above the capsule centre
+var _cam_lerp := 0.25  # 1.0 = locked on (fast scenarios)
 
 
 class Script_:
@@ -90,7 +91,7 @@ func _film(name: String, secs: float, shots: Array, events := {}) -> void:
 		var target := player.global_position + Vector3(0, _look_y, 0)
 		if rig.ragdolling:
 			target = rig.global_position
-		_cam_pos = _cam_pos.lerp(target + _cam_off, 0.25)
+		_cam_pos = _cam_pos.lerp(target + _cam_off, _cam_lerp)
 		cam.global_position = _cam_pos
 		cam.look_at(target, Vector3.UP)
 		if k < shots.size() and t >= shots[k]:
@@ -340,6 +341,20 @@ func _sc_release() -> void:
 	_cam_off = Vector3(3.5, 0.8, 3.5)  # three-quarter view: arm depth reads
 	player.fire_at(Vector3(0, 72, -32.0), 1)
 	await _film("release34", 3.0, [1.7, 1.9, 2.1, 2.4, 2.7, 2.9], {1.6: func(): player.release_web()})
+
+
+## Flying fast between webs (~120 km/h, level then dropping): the speed
+## streamline (arms swept back, legs together) instead of wings at speed.
+func _sc_fastfly() -> void:
+	# Off a fast web at ~120 km/h: a short pull, release, then the arc –
+	# rising, over the top, falling away.
+	_cam_lerp = 1.0
+	for view in [["fastfly", Vector3(4.5, 0.4, 0.0)], ["fastfly_chase", Vector3(1.0, 1.4, 4.2)]]:
+		_reset(Vector3(0, 140, 0), Vector3(0, 4, -33))
+		_cam_off = view[1]
+		player.fire_at(Vector3(0, 185, -70), 1)
+		await _film(view[0], 2.6, [0.6, 0.9, 1.2, 1.5, 1.8, 2.1, 2.4], {0.45: func(): player.release_web()})
+	_cam_lerp = 0.25
 
 
 ## Release into a glide, then steer hard to one side: the bank into the turn.

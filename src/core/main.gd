@@ -220,6 +220,12 @@ func _ready() -> void:
 		get_tree().paused = false
 		state = State.PLAYING
 		hud.visible = true
+		# The pause menu hid the touch controls: bring them back (this path
+		# skips unpause(), so they stayed hidden – no controls at home).
+		touch.visible = DisplayServer.is_touchscreen_available() or args.has("touch")
+		touch.release_all()
+		player.input_enabled = true
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if not hud.touch_mode else Input.MOUSE_MODE_VISIBLE
 		spawn_at_home(id, true)
 		if not Homes.owns(id):
 			hud.flash("VISITING  ·  %s" % String(homes.home_by_id(id).get("name", "")).to_upper(), 2.6))

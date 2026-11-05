@@ -92,6 +92,49 @@ func test_spawn_inside_and_run_out_of_the_window(t) -> void:
 	player.bot = null
 
 
+class _HumanDrive:
+	extends _Drive
+	var human_steer := true  # moves like the player (Controls.human)
+
+
+func test_walking_indoors_is_calm_and_precise(t) -> void:
+	# Indoors a player walks/jogs (capped, immediate turns, quick stop) instead
+	# of city sprinting – and can still run out of the window.
+	var h := hs.home_by_id("loft") if not hs.home_by_id("loft").is_empty() else hs.home_by_id("starter")
+	hs.spawn_in(h, world, null)
+	var d := _HumanDrive.new()
+	player.bot = d
+	for i in 20:
+		await get_tree().physics_frame
+	t.check(player.indoors, "player knows it is indoors")
+	d.move = -Apartments.outward(h)  # into the room
+	var top := 0.0
+	for i in 30:
+		await get_tree().physics_frame
+		var v := player.s.velocity
+		top = maxf(top, Vector2(v.x, v.z).length())
+	t.check(top > 3.5 and top <= SwingPhysics.INDOOR_SPEED + 0.2, "indoor jog speed %.1f m/s (≤ %.1f)" % [top, SwingPhysics.INDOOR_SPEED])
+	d.move = Vector3.ZERO
+	var stop_t := -1.0
+	for i in 30:
+		await get_tree().physics_frame
+		var v := player.s.velocity
+		if Vector2(v.x, v.z).length() < 0.3:
+			stop_t = (i + 1) / 60.0
+			break
+	t.check(stop_t > 0.0 and stop_t <= 0.3, "stops within a step (%.2f s)" % stop_t)
+	d.move = Apartments.outward(h)
+	var out := false
+	for i in 360:
+		await get_tree().physics_frame
+		if Apartments.to_face(h, player.global_position).y > 1.0:
+			out = true
+			break
+	t.check(out, "still runs out of the window")
+	t.check(not player.indoors, "outdoors once out")
+	player.bot = null
+
+
 func test_catch_the_sill_and_climb_in(t) -> void:
 	var h := hs.home_by_id("city")
 	var n := Apartments.outward(h)

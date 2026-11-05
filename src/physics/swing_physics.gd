@@ -22,6 +22,9 @@ class State:
 	var snap_speed := 0.0
 
 
+const INDOOR_SPEED := 4.6  # m/s top speed walking about inside a home
+
+
 class Controls:
 	extends RefCounted
 	## Desired direction in world space, horizontal, length 0..1.
@@ -36,6 +39,9 @@ class Controls:
 	var turn_assist := false
 	## A human is running (player_run_speed). Bots and the model tests leave it off.
 	var human := false
+	## Inside a home: a calm, precise walk/jog (rooms are ~15 m across –
+	## city sprint speed and wide momentum turns overshoot the furniture).
+	var indoors := false
 
 
 static func attach(s: State, anchor: Vector3, p: SwingParams) -> bool:
@@ -247,6 +253,13 @@ static func _turn(v: Vector3, move: Vector3, rate_deg: float, h: float) -> Vecto
 static func _ground_move(v: Vector3, c: Controls, p: SwingParams, h: float) -> Vector3:
 	var vh := Vector3(v.x, 0.0, v.z)
 	var m := Vector3(c.move.x, 0.0, c.move.z).limit_length(1.0)
+	if c.indoors:
+		# Indoors: speed follows the stick directly (top 4.6 m/s, a brisk
+		# jog), turns are immediate and letting go stops within a step.
+		var goal := m * INDOOR_SPEED
+		var rate := 34.0 if m.length_squared() > 0.01 else 30.0
+		vh = vh.move_toward(goal, rate * h)
+		return Vector3(vh.x, minf(v.y, 0.0), vh.z)
 	var speed := vh.length()
 	var run_speed := p.player_run_speed if c.human else p.run_speed
 	var run_accel := p.player_run_accel if c.human else p.run_accel
