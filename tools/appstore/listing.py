@@ -203,32 +203,27 @@ def main():
     except urllib.error.HTTPError:
         print("CONTENT RIGHTS not set")
 
-    # --- age rating: every content descriptor "none" ---------------------------
+    # --- age rating: the honest answers for CitySwing (all "none"/no) ---------------
+    # No fighting or weapons (crashes knock the hero down; they get up), no
+    # ads, chat, user content, web browsing, loot boxes or gambling.
+    STR = ["alcoholTobaccoOrDrugUseOrReferences", "contests", "gamblingSimulated", "gunsOrOtherWeapons",
+           "horrorOrFearThemes", "matureOrSuggestiveThemes", "medicalOrTreatmentInformation", "profanityOrCrudeHumor",
+           "sexualContentGraphicAndNudity", "sexualContentOrNudity", "violenceCartoonOrFantasy", "violenceRealistic",
+           "violenceRealisticProlongedGraphicOrSadistic"]
+    BOOL = ["advertising", "gambling", "healthOrWellnessTopics", "lootBox", "messagingAndChat", "parentalControls",
+            "ageAssurance", "unrestrictedWebAccess", "userGeneratedContent", "socialMedia"]
     try:
         ar = get(f"/v1/appInfos/{info['id']}/ageRatingDeclaration")["data"]
-        attrs = {}
-        for k, v in ar["attributes"].items():
-            if k in ("kidsAgeBand", "ageRatingOverride", "ageRatingOverrideV2", "koreaAgeRatingOverride",
-                     "developerAgeRatingInfoUrl"):
-                continue
-            if isinstance(v, bool) or (v is None and k in BOOL_HINTS):
-                attrs[k] = False
-            elif isinstance(v, str) or v is None:
-                attrs[k] = "NONE"
+        have = ar["attributes"]
+        attrs = {k: "NONE" for k in STR if k in have}
+        attrs.update({k: False for k in BOOL if k in have})
         try:
             patch("ageRatingDeclarations", ar["id"], attrs)
         except urllib.error.HTTPError:
-            # Unknown enum for some new field: retry one key at a time.
-            for k, v in attrs.items():
-                try:
-                    patch("ageRatingDeclarations", ar["id"], {k: v})
-                except urllib.error.HTTPError:
-                    try:
-                        patch("ageRatingDeclarations", ar["id"], {k: not v if isinstance(v, bool) else False})
-                    except urllib.error.HTTPError:
-                        print("AGE RATING could not set", k)
+            attrs["socialMediaAgeRestricted"] = False
+            patch("ageRatingDeclarations", ar["id"], attrs)
         now = get(f"/v1/appInfos/{info['id']}/ageRatingDeclaration")["data"]["attributes"]
-        print("AGE RATING", json.dumps(now))
+        print("AGE RATING set:", ", ".join(f"{k}={now.get(k)}" for k in sorted(attrs)))
     except urllib.error.HTTPError:
         print("AGE RATING not set (fill the questionnaire in App Store Connect)")
 
