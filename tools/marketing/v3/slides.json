@@ -1,0 +1,20 @@
+[
+ {"slug": "swing_the_whole_city", "shot": "canyon_14_dive", "hero": true, "kicker": "Web-swinging action",
+  "h1": ["Swing the", "whole city"], "sub": "Physics-driven swinging across a living island city.",
+  "chips": ["One price", "No ads", "No in-app purchases"]},
+ {"slug": "feel_every_swing", "shot": "gold_16_low34", "kicker": "Momentum is everything",
+  "h1": ["Feel every", "swing"], "sub": "Perfect releases, wall runs and air tricks. Build speed and keep it.",
+  "chips": ["Perfect release", "Wall runs", "Air tricks"]},
+ {"slug": "light_up_the_night", "shot": "dusk_18_low34", "kicker": "Day to night",
+  "h1": ["Light up", "the night"], "sub": "A full day-night cycle, with neon billboards towering over Lumen Circus.",
+  "chips": ["Day-night cycle", "Neon district"]},
+ {"slug": "rain_or_shine", "shot": "rain_22_chase", "kicker": "Live weather",
+  "h1": ["Rain or", "shine"], "sub": "Clear skies, rain and storms. Traffic, trains and crowds keep the city alive.",
+  "chips": ["Rain & storms", "Traffic", "Trains"]},
+ {"slug": "the_city_is_yours", "shot": "perch_gold_2_back", "kicker": "Open city",
+  "h1": ["The city", "is yours"], "sub": "Districts, bridges and waterfronts to explore, and Time Trials across the skyline.",
+  "chips": ["Open City", "Time Trials"]},
+ {"slug": "make_it_yours", "shot": "neon_18_side", "lineup": ["look_0", "look_1", "look_2", "look_3", "look_4"], "kicker": "Your style",
+  "h1": ["Make it", "yours"], "sub": "Earn coins as you swing. Unlock outfits, masks, hats, webs and gadgets.",
+  "chips": ["Outfits", "Webs", "Gadgets"]}
+]
