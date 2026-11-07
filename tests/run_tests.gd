@@ -18,7 +18,10 @@ func _run() -> void:
 	# Never touch the player's real records.
 	var save_data := root.get_node_or_null("SaveData")
 	if save_data:
-		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://test_save.json"))
+		# Start from a clean save: SaveData recovers from .bak when the main
+		# file is missing, so a previous run's backup must go too.
+		for suffix in ["", ".bak", ".tmp"]:
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("user://test_save.json" + suffix))
 		save_data.use_file("user://test_save.json")
 	var filter := ""
 	var args := OS.get_cmdline_user_args()
