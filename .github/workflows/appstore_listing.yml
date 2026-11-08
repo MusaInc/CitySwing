@@ -1,5 +1,6 @@
 # Fills in the App Store listing for a version as a DRAFT (text, categories,
-# review notes, build, screenshots) from store/. Never submits for review.
+# review notes, build, screenshots) from store/. Never submits for review –
+# except review_reply+submit, which answers App Review and resubmits.
 # Price, App Privacy, age rating, review contact phone and Submit stay manual.
 name: App Store listing
 
@@ -16,6 +17,17 @@ on:
         description: "Upload store/screenshots (replaces the sets)"
         type: boolean
         default: true
+      review_reply:
+        description: "Only answer App Review: notes + attachment (+ resubmit) – skips the listing"
+        type: boolean
+        default: false
+      attachment:
+        description: "Repo path of the App Review attachment (screen recording)"
+        default: ""
+      submit:
+        description: "With review_reply: resubmit the version for review"
+        type: boolean
+        default: false
 
 jobs:
   listing:
@@ -24,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Update the draft listing
+        if: ${{ !inputs.review_reply }}
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER: ${{ secrets.ASC_ISSUER_ID }}
@@ -34,3 +47,15 @@ jobs:
         run: |
           python3 -m pip install --quiet pyjwt cryptography
           python3 tools/appstore/listing.py
+      - name: Answer App Review (notes, attachment, resubmit)
+        if: ${{ inputs.review_reply }}
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+          KEY: ${{ secrets.ASC_KEY_P8 }}
+          VERSION: ${{ inputs.version }}
+          ATTACHMENT: ${{ inputs.attachment }}
+          SUBMIT: ${{ inputs.submit && '1' || '0' }}
+        run: |
+          python3 -m pip install --quiet pyjwt cryptography
+          python3 tools/appstore/review_reply.py
