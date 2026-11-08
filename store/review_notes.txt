@@ -1,7 +1,7 @@
 Response to Guideline 2.1 (Information Needed), submission 5f3041e4-2e3b-4ba3-8124-f447e2ffd6de:
 
 1. SCREEN RECORDING
-A screen recording captured on a physical iPhone running the latest iOS is attached in App Review Information > Attachment. It starts at app launch and shows the typical flow: title screen, Training, swinging in Open City, a Time Trial, pause, Settings and Character credits. CitySwing has no accounts, no user-generated content and no in-app purchases, so there are no login, deletion, reporting or paid-content flows to show.
+A screen recording captured on a physical iPhone (iOS screen recording) is attached in App Review Information > Attachment. It shows the core gameplay: swinging through Open City with the touch controls (movement stick, SWING and JUMP buttons), the coin multiplier, the minimap and the HUD. Please note that it was recorded on an earlier TestFlight build of this same app and begins mid-session rather than at launch; the launch and menu flow are described step by step in section 3. CitySwing has no accounts, no user-generated content and no in-app purchases, so there are no login, deletion, reporting or paid-content flows to show.
 
 2. PURPOSE AND AUDIENCE
 CitySwing is a single-player, skill-based movement game. The player fires a rope ("web") at buildings and swings through a fictional coastal city, building momentum, chaining swings and landing on rooftops. It is for anyone who enjoys movement, parkour and racing games (rated 4+; there is no blood, gore, combat or online interaction). Its value is a physics-driven traversal game that is fully playable offline, with no ads, no accounts and no in-app purchases. It is a paid app.
