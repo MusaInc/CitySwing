@@ -22,7 +22,10 @@ from listing import BUNDLE, NOTES, ROOT, call, get, patch  # noqa: E402
 
 def upload_attachment(rd_id, path):
     blob = open(path, "rb").read()
-    old = get(f"/v1/appStoreReviewDetails/{rd_id}/appStoreReviewAttachments")["data"]
+    # Apple allows ONE attachment: remove the old one first.
+    for o in get(f"/v1/appStoreReviewDetails/{rd_id}/appStoreReviewAttachments")["data"]:
+        call("DELETE", f"/v1/appStoreReviewAttachments/{o['id']}")
+        print("ATTACHMENT removed old", o["attributes"].get("fileName"), o["attributes"].get("fileSize"))
     att = call("POST", "/v1/appStoreReviewAttachments", {"data": {"type": "appStoreReviewAttachments",
         "attributes": {"fileName": os.path.basename(path), "fileSize": len(blob)},
         "relationships": {"appStoreReviewDetail": {"data": {"type": "appStoreReviewDetails", "id": rd_id}}}}})["data"]
@@ -42,9 +45,6 @@ def upload_attachment(rd_id, path):
             break
     if state != "COMPLETE":
         raise SystemExit("attachment not accepted by Apple: %s" % state)
-    for o in old:  # only after the new one is safely in
-        call("DELETE", f"/v1/appStoreReviewAttachments/{o['id']}")
-        print("ATTACHMENT removed old", o["attributes"].get("fileName"))
 
 
 def resubmit(app_id, vid):
@@ -88,7 +88,10 @@ def main():
     print("REVIEW NOTES set")
     if os.environ.get("ATTACHMENT"):
         upload_attachment(rd["id"], os.path.join(ROOT, os.environ["ATTACHMENT"]))
-    if os.environ.get("SUBMIT") == "1":
+    state = ver["attributes"].get("appStoreState")
+    if os.environ.get("SUBMIT") == "1" and state in ("WAITING_FOR_REVIEW", "IN_REVIEW"):
+        print("ALREADY SUBMITTED (" + state + ") – the update applies to the open submission")
+    elif os.environ.get("SUBMIT") == "1":
         resubmit(app_id, vid)
     else:
         print("NOT SUBMITTED (submit=false)")
