@@ -58,6 +58,7 @@ occlusion_culling/use_occlusion_culling=true
 occlusion_culling/use_occlusion_culling.web=false
 lights_and_shadows/directional_shadow/size=2048
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile=2
 
 [shader_globals]
 

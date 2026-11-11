@@ -123,6 +123,12 @@ func _open_city() -> void:
 		return
 	get_tree().root.add_child(game)
 	get_tree().current_scene = game
+	# Late-appearing shaders compile under this screen, not mid-swing.
+	# Bounded: never hold the boot screen more than ~2 s for it.
+	var waited := 0
+	while game.get("warmed") == false and waited < 120:
+		await get_tree().process_frame
+		waited += 1
 	status.text = ""
 	# Includes Main._ready and deferred city work. Input stays covered until
 	# the loaded world has had a chance to render beneath the fade.

@@ -26,12 +26,12 @@ extends Node3D
 ##    and walls ahead-side turn the view a little (≤10°) toward the open
 ##    street, so a tower never fills half the frame.
 
-@export var base_fov := 70.0
-@export var max_fov := 86.0  # restrained: wide enough to sell speed, no fish-eye
+@export var base_fov := 72.0
+@export var max_fov := 88.0  # the lens moved ~28% closer (2026-11-11): a little wider keeps the city ahead in view
 @export var fov_speed_full := 50.0
-@export var follow_smooth := 0.12
+@export var follow_smooth := 0.09
 @export var aim_smooth := 0.08
-@export var yaw_follow_rate := 2.6        # 1/s, exponential approach to the travel heading
+@export var yaw_follow_rate := 3.2        # 1/s, exponential approach to the travel heading
 @export var steer_follow_rate := 5.5      # 1/s, the same while the player steers in the air
 @export var max_yaw_speed := deg_to_rad(120.0)
 @export var reversal_hold := 1.0          # s a >110° heading change must persist before following
@@ -87,6 +87,12 @@ var _shake_t := 0.0
 var _body: Node3D          # the character, hidden if the lens gets inside it
 ## Overrides for close-up captures (--closeup).
 var distance_scale := 1.0
+## Gameplay follow distance relative to the pre-2026-11-11 framing: ~27%
+## closer in flight (measured, incl. follow lag) makes the hero bigger; the wider FOV and lens fisheye (LensFx) keep
+## the street ahead visible. Indoors keeps its own, already tight, distances.
+const CLOSE := 0.65
+## Screen-space fisheye/edge layer (LensFx), driven by speed like the FOV.
+var lens: Node
 ## Title-screen drone shot: callable(pos) -> [point on the avenue's centre
 ## line, unit direction of travel]. The camera faces down the avenue and
 ## stays near its middle (never against a facade). Empty = normal follow.
@@ -281,6 +287,7 @@ func _process(dt: float) -> void:
 		want_dist += 1.6 * smoothstep(24.0, 45.0, spd)
 	if target.wall_run:
 		want_dist += 1.0
+	want_dist *= CLOSE
 	var indoors := indoor_ceiling < INF
 	_indoor = move_toward(_indoor, 1.0 if indoors else 0.0, dt * 1.5)
 	_mask = 1 | (1 << 1) | (CityWorld.HUMAN_LAYER if indoors else 0)
@@ -292,15 +299,17 @@ func _process(dt: float) -> void:
 	if target.s.attached and target.s.taut:
 		# Long lines swing big arcs: frame more of them.
 		var rope := target.s.rope_length
-		want_dist += clampf((rope - 15.0) * 0.045, 0.0, 1.3)
-		lift_goal = clampf(rope * 0.04, 0.0, 1.4)
+		want_dist += clampf((rope - 15.0) * 0.045, 0.0, 1.3) * CLOSE
+		lift_goal = clampf(rope * 0.04, 0.0, 1.4) * CLOSE  # same framing angle at the closer distance
 	_lift = lerpf(_lift, lift_goal, 1.0 - exp(-2.5 * dt))
-	_dist = lerpf(_dist, want_dist * distance_scale, 1.0 - exp(-2.0 * dt))
+	_dist = lerpf(_dist, want_dist * distance_scale, 1.0 - exp(-2.6 * dt))
 	# Running: the lens rises a little with pace so the hero sits lower in frame
 	# and more of the street ahead shows.
 	var run_h := 1.4 + 0.25 * clampf(vh.length() / 11.0, 0.0, 1.0)
 	run_h = lerpf(run_h, 1.3, _indoor)
-	_height = lerpf(_height, (run_h if grounded else 1.6) * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
+	# Lower in step with the closer lens, so the look-down angle stays the same.
+	var close_h := lerpf(0.76, 1.0, _indoor)
+	_height = lerpf(_height, (run_h if grounded else 1.6) * close_h * minf(distance_scale * 1.2, 1.0), 1.0 - exp(-3.0 * dt))
 	var ahead := (vh * 0.12).limit_length(minf(3.5, _dist * 0.35))
 	# In flight, lean the framing a little toward the web you'd get next.
 	var bias_goal := Vector3.ZERO
@@ -429,8 +438,12 @@ func _process(dt: float) -> void:
 	# Bank into sustained turns at speed (never during reversals).
 	_turn_rate = lerpf(_turn_rate, wrapf(_heading - _prev_heading, -PI, PI) / maxf(dt, 1e-4), 1.0 - exp(-3.0 * dt))
 	_prev_heading = _heading
-	var roll_goal := clampf(-_turn_rate * vh.length() * 0.003, -deg_to_rad(2.5), deg_to_rad(2.5)) if not grounded else 0.0
-	_roll = lerpf(_roll, roll_goal, 1.0 - exp(-1.8 * dt))
+	# Smooth bank: a soft-limited lean (tanh, no hard stop at the cap) eased
+	# in slowly and out a bit faster, so turns lean in and straighten cleanly.
+	var bank_cap := deg_to_rad(4.0)
+	var roll_goal := bank_cap * tanh(-_turn_rate * vh.length() * 0.004 / bank_cap) if not grounded else 0.0
+	var bank_rate := 1.6 if absf(roll_goal) > absf(_roll) else 2.4
+	_roll = lerpf(_roll, roll_goal, 1.0 - exp(-bank_rate * dt))
 	rotate_object_local(Vector3.FORWARD, _roll)
 
 	_fov_kick = move_toward(_fov_kick, 0.0, 5.0 * dt / maxf(Engine.time_scale, 0.05))
@@ -438,6 +451,8 @@ func _process(dt: float) -> void:
 	var fov_goal := lerpf(base_fov, max_fov, t * t * (3.0 - 2.0 * t)) + _fov_kick
 	cam.fov = lerpf(cam.fov, fov_goal, 1.0 - exp(-(3.0 + 9.0 * _punch) * dt))
 	look.set_speed(clampf((spd - 22.0) / 30.0, 0.0, 1.0) + _punch * 0.5, dt)
+	if lens:
+		lens.set_speed(t * t * (3.0 - 2.0 * t) + _punch * 0.4, dt)
 
 
 ## Hugging a facade (wall runs, swings close to a tower) the lens used to sit

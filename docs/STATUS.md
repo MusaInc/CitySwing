@@ -1103,3 +1103,16 @@ Headless x86 vCPU, no GPU. Indicative of gameplay CPU cost only:
 5. Godot logs a Jolt "job system exceeded the maximum number of jobs" warning
    when several city worlds are built in one process (the course recorder);
    it did not appear in a 40 s headless Free Swing session (0 occurrences). Watch for it on device.
+
+## 2026-11-11 — App Review 2.1 crash follow-up: performance + camera pass
+
+Apple rejected 1.0.0 (52) on 9 Nov: "The app crashed after the initial launch" (no crash log). A fresh install on the owner's iPhone loaded but was laggy and froze. Gameplay CPU is cheap (uncapped headless, expert bot: mean 3.2–3.7 ms, max 16–25 ms, no spikes; `--hitchprobe=<s>`, tools/hitch_probe.gd), so the work is on the render side:
+
+- **Resolution budget** (`Settings.render_scale_cap()`): 3D scale is the preset's scale capped by a pixel budget (LOW 0.8 MP, MEDIUM 1.3 MP, HIGH 2.0 MP). A ~3 MP iPhone panel at MEDIUM went from ~2.2 MP to 1.3 MP of 3D per frame. Upscaling: MetalFX spatial on Metal (FSR 1 is Forward+-only); bilinear elsewhere. HUD stays native.
+- **FrameGovernor** (`src/core/frame_governor.gd`, mobile only, off in the Performance test): lowers 3D scale in 8% steps (floor 62% of the cap) when frames miss the budget and the GPU is the bottleneck, and restores it after 4 s of GPU headroom.
+- **ShaderPrewarm** (`src/core/shader_prewarm.gd`): compiles late-appearing shaders (rain, beacons, homes, ads, traffic, hero, common StandardMaterial3D variants, impact dust) under the boot screen. Boot waits for it, but never more than 120 frames.
+- Mobile soft-shadow filter 3 → 2 (`soft_shadow_filter_quality.mobile`).
+
+Camera (owner brief): follow distance ×0.65 (`SwingCamera.CLOSE`), measured in flight incl. follow lag: median 7.86 → 5.91 m and 6.90 → 4.90 m (−25…−29%, seeds 3/4). Height ×0.76 and rope lift ×CLOSE keep the hero framed. FOV 72→88 (was 70→86) with speed; bank soft-capped at 4° (tanh, eases in slower than out); tighter follow (smooth 0.09, yaw 3.2/s). **LensFx** (`src/ui/lens_fx.gd` + `lens.gdshader`): edge-weighted barrel on CanvasLayer −1, so it bends the 3D image only (HUD/menus are ≥ 0); strength 0.045 → 0.095 with speed; corners stay filled.
+
+Tests 160/161: the failure is the known `test_city` expert street-touch case (2.11/100 m, player-only, unchanged). Packaged selftest OK. Not yet measured on a device.

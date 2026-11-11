@@ -26,6 +26,10 @@ var touch: TouchControls
 var menus: Menus
 var audio: AudioDirector
 var impact_fx: ImpactFx
+var governor: FrameGovernor
+## Emitted once the shader prewarm has drawn (the boot screen waits for it).
+signal warmed_up
+var warmed := false
 var atmosphere: Atmosphere
 var world: Node3D
 var mode: GameMode
@@ -108,6 +112,10 @@ func _ready() -> void:
 	camera = SwingCamera.new()
 	camera.name = "CameraRig"
 	add_child(camera)
+	var lens := LensFx.new()
+	lens.name = "LensFx"
+	add_child(lens)
+	camera.lens = lens
 	camera.set_target(player)
 	homes.camera = camera
 	refresh_home_markers.call_deferred()
@@ -122,6 +130,13 @@ func _ready() -> void:
 	add_child(audio)
 	audio.attach_player(player)
 	audio.attach_weather(atmosphere)
+
+	# Dynamic resolution on phones/tablets only: desktop captures and tests
+	# keep a fixed, reproducible render scale.
+	governor = FrameGovernor.new()
+	governor.name = "FrameGovernor"
+	governor.enabled = OS.has_feature("mobile") and not args.has("fixedscale")
+	add_child(governor)
 
 	ui = CanvasLayer.new()
 	add_child(ui)
@@ -330,6 +345,18 @@ func _ready() -> void:
 		probe.set("player", player)
 		probe.set("secs", float(args["camaudit"]))
 		add_child(probe)
+	# Compile late-appearing shaders now, under the boot screen (see ShaderPrewarm).
+	var prewarm := ShaderPrewarm.new()
+	prewarm.name = "ShaderPrewarm"
+	prewarm.cam = camera.cam
+	prewarm.done.connect(func(): warmed = true; warmed_up.emit())
+	add_child(prewarm)
+	if camera.cam:
+		ImpactFx.dust(self, camera.cam.global_position - camera.cam.global_basis.z * 3.0, 8.0)
+	if args.has("hitchprobe"):
+		var hp: Node = load("res://tools/hitch_probe.gd").new()
+		hp.set("duration", float(args["hitchprobe"]))
+		add_child(hp)
 	if args.has("selftest"):
 		_selftest.call_deferred()
 	if args.has("shot"):
@@ -402,6 +429,12 @@ func start_mode(kind: String, arg: String) -> void:
 	mode.finished.connect(_on_finished)
 	mode.start()
 	menus.jobs = (mode as FreeSwingMode).jobs if mode is FreeSwingMode else null
+	# The performance test measures the device at the chosen quality.
+	if governor:
+		governor.enabled = kind != "benchmark" and OS.has_feature("mobile") and not args.has("fixedscale")
+		if kind == "benchmark":
+			governor._reset()
+			get_viewport().scaling_3d_scale = governor.scale
 	if kind != "benchmark":
 		coins.start_run()
 		near_miss.run_count = 0

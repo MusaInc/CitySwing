@@ -9,15 +9,15 @@ enum Quality { LOW, MEDIUM, HIGH }
 
 const PRESETS := {
 	Quality.LOW: {
-		"fps": 30, "render_scale": 0.7, "shadows": false, "view_distance": 650.0,
+		"fps": 30, "render_scale": 0.7, "pixels": 0.8e6, "shadows": false, "view_distance": 650.0,
 		"msaa": Viewport.MSAA_DISABLED, "fog": true, "props": 0.5, "traffic": 0.4, "glow": false,
 	},
 	Quality.MEDIUM: {
-		"fps": 30, "render_scale": 0.85, "shadows": true, "view_distance": 900.0,
+		"fps": 30, "render_scale": 0.85, "pixels": 1.3e6, "shadows": true, "view_distance": 900.0,
 		"msaa": Viewport.MSAA_2X, "fog": true, "props": 0.8, "traffic": 0.7, "glow": true,
 	},
 	Quality.HIGH: {
-		"fps": 60, "render_scale": 1.0, "shadows": true, "view_distance": 1300.0,
+		"fps": 60, "render_scale": 1.0, "pixels": 2.0e6, "shadows": true, "view_distance": 1300.0,
 		"msaa": Viewport.MSAA_4X, "fog": true, "props": 1.0, "traffic": 1.0, "glow": true,
 	},
 }
@@ -72,12 +72,30 @@ func preset() -> Dictionary:
 	return PRESETS[quality]
 
 
+## 3D render scale for this screen: the preset's scale, capped so the 3D
+## image never exceeds the preset's pixel budget. Phone panels are ~3 MP at
+## 460 ppi, where 85% of native cost ~2.2 MP per frame for no visible gain
+## once FSR upscales it; FrameGovernor lowers it further only under load.
+func render_scale_cap() -> float:
+	var p := preset()
+	var size := Vector2(DisplayServer.window_get_size())
+	var px := maxf(size.x * size.y, 1.0)
+	return clampf(minf(p["render_scale"], sqrt(p["pixels"] / px)), 0.5, 1.0)
+
+
 func apply() -> void:
 	var p := preset()
 	Engine.max_fps = 60 if (fps_60 or p["fps"] == 60) else 30
 	var vp := get_viewport()
 	if vp:
-		vp.scaling_3d_scale = p["render_scale"]
+		vp.scaling_3d_scale = render_scale_cap()
+		# On iPhone/iPad (Metal) MetalFX upscales the 3D image sharply; FSR 1
+		# is Forward+-only, so elsewhere it stays bilinear. The HUD always
+		# draws at native resolution.
+		if RenderingServer.get_current_rendering_driver_name() == "metal":
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_METALFX_SPATIAL
+		else:
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		# Stylised looks read the depth buffer, which MSAA leaves unresolved on
 		# the Mobile/Compatibility renderers: swap MSAA for FXAA (it smooths the
 		# ink lines too).
