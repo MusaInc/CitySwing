@@ -295,7 +295,8 @@ jobs:
 
   simulator-smoke:
     if: ${{ inputs.simulator_smoke }}
-    runs-on: macos-15
+    # Godot 4.5.1's iOS simulator template is x86_64 only, so the simulator must run on Intel
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
