@@ -22,7 +22,7 @@ mkdir -p build/ios
 "$godot" --headless --export-release iOS build/ios/CitySwing.ipa > "$out/export.log" 2>&1
 xcodebuild -project build/ios/CitySwing.xcodeproj -scheme CitySwing -configuration Release \
  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
- -derivedDataPath "$RUNNER_TEMP/cityswing-derived" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+ -derivedDataPath "$RUNNER_TEMP/cityswing-derived" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO EXCLUDED_ARCHS= \
  build > "$out/build.log" 2>&1
 app="$RUNNER_TEMP/cityswing-derived/Build/Products/Release-iphonesimulator/CitySwing.app"
 test -d "$app"
