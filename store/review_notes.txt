@@ -1,22 +1,27 @@
-Response to Guideline 2.1 (Information Needed), submission 5f3041e4-2e3b-4ba3-8124-f447e2ffd6de:
+Response to Guideline 2.1 (Performance: App Completeness – the app crashed after the initial launch), submission 5f3041e4-2e3b-4ba3-8124-f447e2ffd6de:
+
+WHAT WE FIXED IN BUILD 56
+On a fresh install, build 52 compiled its graphics shaders the first time each effect appeared during play and drew the 3D city at close to full panel resolution. On some devices this produced long stalls shortly after launch, which the system could end as a crash. Build 56 (version 1.0.0):
+- compiles those shaders while the loading screen is still showing, so nothing stalls during play;
+- renders the 3D view at a fixed pixel budget with MetalFX upscaling (the HUD stays at native resolution), and lowers 3D resolution automatically if a device cannot hold its frame rate;
+- uses cheaper shadow filtering on iPhone and iPad.
+We re-tested a fresh install of build 56 on a physical iPhone running the latest iOS: it launches, loads and plays smoothly, including relaunching the app. The camera was also brought closer to the player.
+
+The answers to the earlier information request (6 November) follow and still apply. The attached screen recording was made with an earlier build; the launch flow, menus and controls are unchanged.
+
+EARLIER RESPONSE – Guideline 2.1 (Information Needed):
 
 1. SCREEN RECORDING
-A screen recording captured on a physical iPad (iPadOS screen recording, about 53 seconds) is attached in App Review Information > Attachment (cityswing-ipad-screen-recording.mp4). It starts from the home screen and shows: launching CitySwing from the App Library, the loading splash, the title screen ("Tap to start"), the main menu (Training, PLAY, Time Trial, Endurance, Shop, Homes, Progress, Settings), then PLAY (Open City) with the touch controls in use (movement stick on the left, SWING and JUMP on the right), swinging through the city with the coin multiplier, chain counter, minimap and HUD, and finally the pause menu (Resume, Job Board, End session, Homes, Settings, Title). The same build runs on iPhone with the same controls. CitySwing has no accounts, no user-generated content and no in-app purchases, so there are no login, account deletion, reporting or paid-content flows to show.
+Attached (cityswing-ipad-screen-recording.mp4, physical iPad, ~53 s): launch from the home screen, loading splash, title, main menu, PLAY with the touch controls, swinging through the city, pause menu. No accounts, user-generated content or in-app purchases, so there are no login, deletion, reporting or paid flows to show.
 
 2. PURPOSE AND AUDIENCE
 CitySwing is a single-player, skill-based movement game. The player fires a rope ("web") at buildings and swings through a fictional coastal city, building momentum, chaining swings and landing on rooftops. It is for anyone who enjoys movement, parkour and racing games (rated 4+; there is no blood, gore, combat or online interaction). Its value is a physics-driven traversal game that is fully playable offline, with no ads, no accounts and no in-app purchases. It is a paid app.
 
 3. HOW TO ACCESS THE MAIN FEATURES
-No login, demo account or sample file is needed. Launch the app; after the splash, the main menu offers:
-- PLAY (Open City): free swinging across the whole city, with optional Job Board contracts, collectible tokens and Homes.
-- Training: a step-by-step tutorial (recommended first).
-- Time Trial: checkpoint courses with medals.
-- Endurance: stay airborne as long as possible.
-- Shop, Homes, Progress, Settings.
-Controls (landscape, iPhone and iPad): the left half of the screen is a movement stick. On the right, hold the large SWING button to fire and hold a web; lift your finger to let go. JUMP jumps. Drag elsewhere on the right side to look around. The pause button is at the top right. Coins are earned only by playing and are spent in the Shop and Homes; they cannot be bought with real money. Progress saves automatically on the device.
+No login or sample files. After the splash, the main menu offers PLAY (Open City), Training (tutorial, recommended first), Time Trial, Endurance, Shop, Homes, Progress and Settings. Controls (landscape): left half = movement stick; hold SWING to fire and hold a web, release to let go; JUMP jumps; drag on the right to look; pause at top right. Coins are earned only by playing (no real-money purchases). Progress saves on the device.
 
 4. EXTERNAL SERVICES
-None. CitySwing makes no network requests and includes no analytics, advertising, authentication, payment or AI services, and no third-party SDKs. It is built with the open-source Godot Engine and Jolt Physics (both MIT licensed), compiled into the app. The only external action is two optional links in Settings > Character credits, which open public licence pages in Safari.
+None. CitySwing makes no network requests and includes no analytics, advertising, authentication, payment or AI services, and no third-party SDKs. Built with the open-source Godot Engine and Jolt Physics (MIT). Settings > Character credits has two optional links to public licence pages.
 
 5. REGIONAL DIFFERENCES
 None. The app's features and content are identical in every region. The game is in English.
