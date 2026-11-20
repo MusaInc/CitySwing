@@ -56,7 +56,24 @@ func load_data() -> void:
 				data[k] = parsed[k]
 			if p != path:
 				push_warning("SaveData: %s unreadable, recovered from backup" % path)
+			_sanitise()
 			return
+
+
+## A readable file can still hold nonsense: wrong-typed fields go back to
+## their defaults, the rest of the progress is kept (SH-03).
+func _sanitise() -> void:
+	SafeSave.repair(data, DEFAULTS)
+	data["coins"] = maxi(0, int(data["coins"]))
+	for k in ["owned", "homes"]:
+		data[k] = (data[k] as Array).filter(func(x): return x is String)
+	data["tokens"] = (data["tokens"] as Array).filter(func(x): return x is float or x is int)
+	var best: Dictionary = data["best_trial_times"]
+	for c in best.keys():
+		if not ((best[c] is float or best[c] is int) and is_finite(float(best[c])) and float(best[c]) > 0.0):
+			best.erase(c)
+	if not (data["home"] is String) or (data["home"] != "starter" and not (data["home"] in data["homes"])):
+		data["home"] = "starter"
 
 
 static func _read(p: String):
@@ -73,23 +90,16 @@ static func _read(p: String):
 ## as .bak, then move the new one into place. A crash or the OS killing the
 ## app at any point leaves a complete save (or its backup) on disk.
 func save() -> void:
-	var tmp := path + ".tmp"
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	if f == null:
-		push_warning("SaveData: cannot write %s" % tmp)
-		return
-	f.store_string(JSON.stringify(data, "  "))
-	f.flush()
-	f.close()
-	if _read(tmp) == null:
-		push_warning("SaveData: temp save did not read back; keeping the old save")
-		return
-	var dir := DirAccess.open(path.get_base_dir())
-	if dir:
-		if FileAccess.file_exists(path):
-			dir.copy(path, path + ".bak")
-		dir.rename(tmp, path)
+	# (SafeSave: read-back check, only a valid file becomes .bak, every rename
+	# and copy checked.)
+	last_error = SafeSave.write(path, data)
+	if last_error != "":
+		push_warning("SaveData: save failed – %s; keeping the old save" % last_error)
 	changed.emit()
+
+
+## "" after a good save, else why it failed.
+var last_error := ""
 
 
 ## Returns true if `seconds` is a new best for the course.

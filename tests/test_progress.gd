@@ -113,3 +113,21 @@ func test_save_survives_a_corrupt_file(t) -> void:
 		if FileAccess.file_exists(g):
 			DirAccess.remove_absolute(g)
 	sd.use_file(old_path)
+
+
+func test_save_repairs_wrong_types_and_keeps_the_rest(t) -> void:
+	var f := FileAccess.open("user://unit_bad_cs.json", FileAccess.WRITE)
+	f.store_string(JSON.stringify({"coins": 420, "owned": 7, "best_trial_times": {"canyon": 61.5, "uptown": "fast"},
+		"suit": 3, "home": "palace", "total_swings": 88}))
+	f.close()
+	var other: Node = load("res://src/core/save_data.gd").new()
+	other.use_file("user://unit_bad_cs.json")
+	t.check(other.data["owned"] is Array, "owned repaired to a list")
+	t.check(int(other.data["coins"]) == 420 and int(other.data["total_swings"]) == 88, "good fields kept")
+	t.check(float(other.data["best_trial_times"].get("canyon", 0)) == 61.5 and not other.data["best_trial_times"].has("uptown"), "bad best time dropped, good one kept")
+	t.check(other.data["suit"] is String and other.data["home"] == "starter", "suit and home back to valid values")
+	other.save()
+	t.check(other.last_error == "", "repaired profile saves")
+	other.free()
+	for sfx in ["", ".bak", ".tmp"]:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://unit_bad_cs.json" + sfx))
