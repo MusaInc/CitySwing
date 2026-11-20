@@ -285,6 +285,15 @@ func _viaduct(pts: PackedVector3Array) -> void:
 				# (No pier over the strait, nor in a junction's mouth: the span
 				# carries across it.)
 				var junction := p.x > CityLayout.RIVER_EDGE and L.roads.field_at(Vector2(p.x, p.z)).w < 2.0
+				# Nor in a roundabout or its mouths: the road field stops boulevards
+				# at the ring (shared roads, 2026-11-20), so those texels no longer
+				# read as junction – 8 piers landed in the carriageway there, across
+				# swing lines (Uptown/Riverside trials) and lanes (SH-04).
+				# (Measured: all 8 stood 6-30 m inside a ring's outer kerb; every
+				# pier from before stands 2.5 m or more outside one.)
+				for rb in L.roads.roundabouts:
+					if Vector2(p.x, p.z).distance_to(rb["c"]) < float(rb["r"]) + float(rb["w"]) * 0.5 + 1.0:
+						junction = true
 				if not _over_water(Vector2(p.x, p.z)) and not junction:
 					var dir := _at(pts, sp + 2.0) - _at(pts, sp - 2.0)
 					dir.y = 0.0

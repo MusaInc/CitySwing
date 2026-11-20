@@ -104,6 +104,32 @@ func test_recorded_flights_clear_every_gate(t) -> void:
 		t.check(next == c["gates"].size(), "%s: recorded flight clears %d/%d gates" % [id, next, c["gates"].size()])
 
 
+## Deterministic world check (the bot runs below are chaotic: any change to
+## the world reorders the physics solver and moves their result): every
+## recorded flight line must still be clear of the CURRENT world's collision.
+## Rail piers that the shared roads put inside roundabouts (2026-11-20) cut
+## Uptown's line between rings 1 and 2; this catches that kind of change.
+func test_recorded_paths_are_clear_of_the_world(t) -> void:
+	var space := world.get_world_3d().direct_space_state
+	var mask := 1 | (1 << 1) | (1 << 3) | CityWorld.PROPS_LAYER
+	for id in CourseBuilder.COURSES:
+		var c := CourseBuilder.load_course(id)
+		var path: Array = c.get("path", [])
+		var pts: Array[Vector3] = []
+		for q in path:
+			pts.append(Vector3(float(q[0]), float(q[1]), float(q[2])))
+		for i in range(0, pts.size(), 25):
+			world.build_all_near(pts[i], 160.0)
+		await get_tree().physics_frame
+		var hits: Array = []
+		for i in range(1, pts.size()):
+			var rq := PhysicsRayQueryParameters3D.create(pts[i - 1], pts[i], mask)
+			var hit := space.intersect_ray(rq)
+			if not hit.is_empty():
+				hits.append((hit["position"] as Vector3).snapped(Vector3.ONE * 0.5))
+		t.check(hits.is_empty(), "%s: recorded line clear of the world (%d blocked: %s)" % [id, hits.size(), hits.slice(0, 4)])
+
+
 func test_course_canyon_flyable(t) -> void:
 	await _run_course(t, "canyon", 120.0)
 
