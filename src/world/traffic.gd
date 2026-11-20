@@ -38,6 +38,7 @@ enum { EV_NONE, EV_EXIT, EV_DECIDE, EV_END, EV_JOIN, EV_LOOP, EV_FOLLOW }
 var layout: CityLayout
 var density := 1.0
 var near_range := 260.0
+var mid_range := 360.0
 var far_range := 520.0
 
 # Lanes (parallel arrays). Connector lanes have l_next >= 0.
@@ -76,17 +77,17 @@ var now := 0.0
 var _rng := RandomNumberGenerator.new()
 var _tex: ImageTexture
 var _groups: Array = []      # per kind: [near MultiMesh, far MultiMesh]
-var _drawn: Array = []       # per group index (kind * 2 + far): car ids
+var _drawn: Array = []       # per group index (kind * 3 + band): car ids
 var _cull_t := 0.0
 
 
-func setup(p_layout: CityLayout, meshes: Array, far_meshes: Array, p_density: float) -> void:
+func setup(p_layout: CityLayout, meshes: Array, far_meshes: Array, p_density: float, mid_meshes: Array = []) -> void:
 	layout = p_layout
 	density = p_density
 	_rng.seed = layout.seed ^ 0x7aff1c
 	build_network()
 	_spawn_cars(meshes)
-	_make_groups(meshes, far_meshes)
+	_make_groups(meshes, far_meshes, mid_meshes if not mid_meshes.is_empty() else meshes)
 
 
 # ------------------------------------------------------------- the network
@@ -880,11 +881,11 @@ func _reserve(conn: int, t: float) -> void:
 
 
 # --------------------------------------------------------------- drawing
-func _make_groups(meshes: Array, far_meshes: Array) -> void:
+func _make_groups(meshes: Array, far_meshes: Array, mid_meshes: Array) -> void:
 	for k in meshes.size():
 		var pair: Array = []
-		for far in [false, true]:
-			var src: Mesh = far_meshes[k] if far else meshes[k]
+		for band in 3:
+			var src: Mesh = [meshes[k], mid_meshes[k], far_meshes[k]][band]
 			if src == null:
 				pair.append(null)
 				continue
@@ -905,14 +906,14 @@ func _make_groups(meshes: Array, far_meshes: Array) -> void:
 			mm.mesh = m
 			mm.instance_count = 0
 			var mmi := MultiMeshInstance3D.new()
-			mmi.name = "Cars_%s%s" % [CityWorld.CAR_KINDS[k][0], "_far" if far else ""]
+			mmi.name = "Cars_%s%s" % [CityWorld.CAR_KINDS[k][0], ["", "_mid", "_far"][band]]
 			mmi.multimesh = mm
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			add_child(mmi)
 			pair.append(mm)
 		_groups.append(pair)
-		_drawn.append([])
-		_drawn.append([])
+		for band in 3:
+			_drawn.append([])
 
 
 ## Which cars are drawn (and at which LOD): in range and roughly in view.
@@ -929,9 +930,10 @@ func _cull() -> void:
 		var half := atan(tan(deg_to_rad(cam.fov) * 0.5) * sqrt(1.0 + aspect * aspect))
 		cos_lim = cos(minf(half + deg_to_rad(18.0), PI * 0.5 - 0.01))
 	var lists: Array = []
-	for g in _groups.size() * 2:
+	for g in _groups.size() * 3:
 		lists.append([])
 	var nr2 := near_range * near_range
+	var mr2 := mid_range * mid_range
 	var fr2 := far_range * far_range
 	for id in c_lane.size():
 		var p := car_position(id)
@@ -941,7 +943,7 @@ func _cull() -> void:
 		if d2 < fr2:
 			var dist := sqrt(d2)
 			if dist < 35.0 or d.dot(fw) > dist * cos_lim:
-				g = c_kind[id] * 2 + (0 if d2 < nr2 else 1)
+				g = c_kind[id] * 3 + (0 if d2 < nr2 else (1 if d2 < mr2 else 2))
 		if g >= 0:
 			c_grp[id] = g
 			c_slot[id] = (lists[g] as Array).size()
@@ -951,7 +953,7 @@ func _cull() -> void:
 			c_slot[id] = -1
 	var box := AABB(cp - Vector3(far_range, far_range, far_range), Vector3.ONE * far_range * 2.0)
 	for g in lists.size():
-		var mm: MultiMesh = _groups[g / 2][g % 2]
+		var mm: MultiMesh = _groups[g / 3][g % 3]
 		if mm == null:
 			continue
 		var ids: Array = lists[g]
@@ -990,7 +992,7 @@ func _dirty(id: int) -> void:
 	var g := c_grp[id]
 	if g < 0 or c_slot[id] < 0:
 		return
-	var mm: MultiMesh = _groups[g / 2][g % 2]
+	var mm: MultiMesh = _groups[g / 3][g % 3]
 	if mm == null or c_slot[id] >= mm.instance_count:
 		return
 	mm.set_instance_transform(c_slot[id], _motion(id))

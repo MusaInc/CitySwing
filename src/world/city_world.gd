@@ -55,10 +55,16 @@ var ground_mat: ShaderMaterial
 var water_mat: ShaderMaterial
 var prop_meshes := {}
 var car_meshes: Array[Mesh] = []  # CAR_KINDS order; null where the model is missing
+var car_mid_meshes: Array[Mesh] = []  # fleet "_lod1" bodies between CAR_NEAR and CAR_MID
 var car_far_meshes: Array[Mesh] = []  # two-box stand-ins (24 tris) for chunks past CAR_NEAR
 ## Full car models only in chunks this close (centre distance); 1 650 tris each
 ## is wasted on a car a few pixels long.
-const CAR_NEAR := 260.0
+## Traffic LOD bands (WorldState's): full Blender car to CAR_NEAR, the
+## fleet's LOD1 body to CAR_MID, two-box stand-ins to CAR_FAR.
+const CAR_NEAR := 80.0
+const CAR_MID := 260.0
+const MID_BODIES := {"car_sedan": "civ_sedan", "car_hatch": "civ_compact", "car_suv": "civ_suv",
+	"car_taxi": "civ_taxi", "car_van": "civ_van"}
 const CAR_FAR := 520.0
 var walker_mesh: Mesh
 var walker_meshes: Array = []   # one per body type
@@ -142,7 +148,8 @@ func _ready() -> void:
 		traffic.near_range = CAR_NEAR
 		traffic.far_range = CAR_FAR
 		add_child(traffic)
-		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density)
+		traffic.mid_range = CAR_MID
+		traffic.setup(layout, car_meshes, car_far_meshes, traffic_density, car_mid_meshes)
 	trains = Trains.new()
 	trains.name = "Trains"
 	add_child(trains)
@@ -649,6 +656,91 @@ func _load_meshes(name: String) -> Array:
 	return out
 
 
+## Traffic shader materials on a car mesh, by its Blender material names.
+func _traffic_materials(cm: Mesh, shader: Shader) -> Mesh:
+	for i in cm.get_surface_count():
+		var src := cm.surface_get_material(i)
+		var sm := ShaderMaterial.new()
+		sm.shader = shader
+		var name := String(src.resource_name) if src else ""
+		if src is BaseMaterial3D:
+			sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
+		sm.set_shader_parameter("use_instance_color", name == "paint")
+		sm.set_shader_parameter("emission", 2.0 if name.begins_with("lamp") else 0.0)
+		sm.set_shader_parameter("roughness", 0.25 if name == "car_glass" else 0.45)
+		cm.surface_set_material(i, sm)
+	return cm
+
+
+## Mid-distance traffic car (WorldState's LOD tiers): the fleet's ~1.1k-tri
+## "_lod1" body plus four light 16-sided wheels where the full model's tyres
+## are (~1.4k tris instead of ~5.4k). Falls back to the full mesh.
+func _car_mid_mesh(full: Mesh, body: String, shader: Shader) -> Mesh:
+	var path := "res://assets/vehicles/%s_lod1.glb" % body
+	if body == "" or not ResourceLoader.exists(path):
+		return full
+	var n := (load(path) as PackedScene).instantiate()
+	var mis := n.find_children("*", "MeshInstance3D", true, false)
+	if mis.is_empty():
+		n.free()
+		return full
+	var lod := ((mis[0] as MeshInstance3D).mesh as ArrayMesh).duplicate() as ArrayMesh
+	n.free()
+	# Scale the LOD body onto the full model's footprint (same fleet body).
+	var fa := full.get_aabb()
+	var la := lod.get_aabb()
+	var k := Vector3(fa.size.x / maxf(la.size.x, 0.01), fa.size.y / maxf(la.size.y, 0.01), fa.size.z / maxf(la.size.z, 0.01))
+	var st_all := ArrayMesh.new()
+	for i in lod.get_surface_count():
+		var arr := lod.surface_get_arrays(i)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		for j in v.size():
+			v[j] = fa.position + (v[j] - la.position) * k
+		arr[Mesh.ARRAY_VERTEX] = v
+		arr[Mesh.ARRAY_TANGENT] = null
+		st_all.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		st_all.surface_set_material(i, lod.surface_get_material(i))
+	# Wheels: one cylinder per tyre surface of the full model.
+	var wheel := SurfaceTool.new()
+	wheel.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var tyre_mat: Material = null
+	for i in full.get_surface_count():
+		var m := full.surface_get_material(i)
+		var nm := String(m.resource_name) if m else ""
+		if not nm.begins_with("tyre"):
+			continue
+		tyre_mat = m
+		var tv: PackedVector3Array = full.surface_get_arrays(i)[Mesh.ARRAY_VERTEX]
+		var bb := AABB(tv[0], Vector3.ZERO)
+		for q in tv:
+			bb = bb.expand(q)
+		var c := bb.get_center()
+		var r := maxf(bb.size.y, bb.size.z) * 0.5
+		var hw := bb.size.x * 0.5
+		for sgi in 16:
+			var a0 := TAU * sgi / 16.0
+			var a1 := TAU * (sgi + 1) / 16.0
+			var p0 := Vector3(0, sin(a0) * r, cos(a0) * r)
+			var p1 := Vector3(0, sin(a1) * r, cos(a1) * r)
+			var nrm := Vector3(0, sin((a0 + a1) * 0.5), cos((a0 + a1) * 0.5))
+			var l0 := c + p0 - Vector3(hw, 0, 0)
+			var r0 := c + p0 + Vector3(hw, 0, 0)
+			var l1 := c + p1 - Vector3(hw, 0, 0)
+			var r1 := c + p1 + Vector3(hw, 0, 0)
+			for q in [l0, r0, r1, l0, r1, l1]:
+				wheel.set_normal(nrm)
+				wheel.add_vertex(q)
+			for sd: float in [-1.0, 1.0]:
+				var cc := c + Vector3(hw * sd, 0, 0)
+				for q in ([cc, c + p1 + Vector3(hw * sd, 0, 0), c + p0 + Vector3(hw * sd, 0, 0)] if sd > 0 else [cc, c + p0 + Vector3(hw * sd, 0, 0), c + p1 + Vector3(hw * sd, 0, 0)]):
+					wheel.set_normal(Vector3(sd, 0, 0))
+					wheel.add_vertex(q)
+	if tyre_mat:
+		wheel.commit(st_all)
+		st_all.surface_set_material(st_all.get_surface_count() - 1, tyre_mat)
+	return _traffic_materials(st_all, shader) if st_all.get_surface_count() > 0 else full
+
+
 func _load_props() -> void:
 	for k in ["streetlight", "tree", "tree_tall", "water_tower", "ac_unit", "antenna", "crane", "viaduct", "clock_crown",
 			"harbour_dome", "beacon", "cathedral_top", "traffic_light", "roof_hut", "cooling_tower"]:
@@ -685,19 +777,9 @@ func _load_props() -> void:
 		var car := _load_mesh(kind[0])
 		var cm: Mesh = null
 		if car:
-			cm = car.duplicate()
-			for i in cm.get_surface_count():
-				var src := cm.surface_get_material(i)
-				var sm := ShaderMaterial.new()
-				sm.shader = shader
-				var name := String(src.resource_name) if src else ""
-				if src is BaseMaterial3D:
-					sm.set_shader_parameter("tint", (src as BaseMaterial3D).albedo_color)
-				sm.set_shader_parameter("use_instance_color", name == "paint")
-				sm.set_shader_parameter("emission", 2.0 if name.begins_with("lamp") else 0.0)
-				sm.set_shader_parameter("roughness", 0.25 if name == "car_glass" else 0.45)
-				cm.surface_set_material(i, sm)
+			cm = _traffic_materials(car.duplicate(), shader)
 		car_meshes.append(cm)
+		car_mid_meshes.append(_car_mid_mesh(cm, String(MID_BODIES.get(kind[0], "")), shader) if cm else null)
 		car_far_meshes.append(_car_far_mesh(cm) if cm else null)
 	# Four body types (WorldState's Blender crowd, tools/blender/build_street.py),
 	# one surface each; pedestrian.gdshader colours and poses them from
@@ -1551,7 +1633,10 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 		mmi.multimesh = mm
 		mmi.visibility_range_end = PROP_RANGES.get(kind, 320.0 if is_tree else 300.0)
 		mmi.visibility_range_end_margin = 20.0
-		var near: Mesh = TreeKit.near_mesh(kind.trim_prefix("tree_")) if is_tree else null
+		# Blender trees only within a range set by the quality preset
+		# (mobile budget): none on Low, ~66 m on Medium, 110 m on High.
+		var near_r := TREE_NEAR * clampf((prop_density - 0.5) * 2.0, 0.0, 1.0)
+		var near: Mesh = TreeKit.near_mesh(kind.trim_prefix("tree_")) if is_tree and near_r > 20.0 else null
 		if near:
 			# Blender tree up close, the procedural one from TREE_NEAR on
 			# (same instances, transforms and tints: one buffer).
@@ -1564,10 +1649,10 @@ func _add_props(root: Node3D, key: Vector2i) -> void:
 			var nmi := MultiMeshInstance3D.new()
 			nmi.name = "Props_" + kind + "_near"
 			nmi.multimesh = nm
-			nmi.visibility_range_end = TREE_NEAR
+			nmi.visibility_range_end = near_r
 			nmi.visibility_range_end_margin = 10.0
 			root.add_child(nmi)
-			mmi.visibility_range_begin = TREE_NEAR
+			mmi.visibility_range_begin = near_r
 			mmi.visibility_range_begin_margin = 10.0
 		if kind in ["ac_unit", "streetlight", "traffic_light"]:
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1640,23 +1725,20 @@ func _add_traffic(root: Node3D, key: Vector2i) -> void:
 		# One packed buffer for both LODs (much cheaper than per-instance setters
 		# on the main thread while chunks stream in).
 		var buf := _instance_buffer(g)
-		for far in [false, true]:
+		for band in 3:
 			var mm := MultiMesh.new()
 			mm.transform_format = MultiMesh.TRANSFORM_3D
 			mm.use_colors = true
 			mm.use_custom_data = true
-			mm.mesh = car_far_meshes[k] if far else car_meshes[k]
+			mm.mesh = [car_meshes[k], car_mid_meshes[k], car_far_meshes[k]][band]
 			mm.instance_count = g.size()
 			mm.buffer = buf
 			mm.custom_aabb = bounds
 			var mmi := MultiMeshInstance3D.new()
-			mmi.name = "Traffic_" + CAR_KINDS[k][0] + ("_far" if far else "")
+			mmi.name = "Traffic_" + CAR_KINDS[k][0] + ["", "_mid", "_far"][band]
 			mmi.multimesh = mm
-			if far:
-				mmi.visibility_range_begin = CAR_NEAR
-				mmi.visibility_range_end = CAR_FAR
-			else:
-				mmi.visibility_range_end = CAR_NEAR
+			mmi.visibility_range_begin = [0.0, CAR_NEAR, CAR_MID][band]
+			mmi.visibility_range_end = [CAR_NEAR, CAR_MID, CAR_FAR][band]
 			mmi.visibility_range_begin_margin = 20.0
 			mmi.visibility_range_end_margin = 20.0
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
