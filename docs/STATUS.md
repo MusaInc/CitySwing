@@ -1,3 +1,11 @@
+# Status: 2026-11-20 (cross-game branch, TestFlight 1.1.0 build 57; 1.0.0 still in review)
+
+- Time Trials: the shared roads put 8 rail piers inside roundabouts; two cut Uptown's line. Piers inside a ring are skipped (collision = pre-merge city except one Westbank pier). New deterministic check `test_recorded_paths_are_clear_of_the_world` (fails on a22e605, passes now). The fresh-bot course runs are chaotic (identical for ~10 s, then any world change moves them): Riverside's bot run is 5/10 (bar 6) with its line clear – needs a human run on a device.
+- Readability: hero-only fill light (charcoal suit separates from towers), touch controls with dark halos/shadowed labels; title opens on the clear-sky orbit.
+- Saves: shared SafeSave + field repair of wrong-typed profiles. Prop buffers packed once; tests updated for 3 traffic LOD bands and roundabout road-field flags.
+- CS-04 (no hero at 10 fps in the audit): not reproduced with the audit's arguments.
+- Uncommitted store/marketing files in this checkout belong to earlier work – left untouched.
+
 # Status: 2026-11-05 (1.0.0 release pass)
 
 - **Version 1.0.0**, display name **CitySwing** (iOS keeps saves in the app's
