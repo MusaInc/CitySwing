@@ -767,6 +767,7 @@ func show_settings(back: Callable) -> void:
 		Settings.save())
 	box.add_child(_row("Quality", q))
 	box.add_child(_row("60 FPS", _check(Settings.fps_60, func(v): Settings.fps_60 = v; Settings.save())))
+	box.add_child(_row("Crisp image", _check(Settings.look == "crisp", func(v): Settings.look = "crisp" if v else "clean"; Settings.save())))
 	if OS.is_debug_build():
 		box.add_child(_row("Performance overlay", _check(Settings.show_perf, func(v): Settings.show_perf = v; Settings.save())))
 	box.add_child(_label("Draw-distance changes apply on next launch.", 15, FAINT, "semibold", HORIZONTAL_ALIGNMENT_RIGHT))
