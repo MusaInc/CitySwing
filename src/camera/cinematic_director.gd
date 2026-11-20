@@ -30,16 +30,19 @@ const SHOT_LEN := 12.0  # long, unhurried shots
 ## the camera move, "hour" the light. Routes: canyon = the Central Spine
 ## 150 m up through the towers, waterfront = down the Grand Diagonal to the
 ## clock towers and the strait, grand_tour = round the skyscraper ring.
+## Order (2026-11-20, rechecked on the WorldState-lit city): the first frame a
+## player sees is the clear-sky orbit with the skyline behind the hero; the
+## flat-grey "rooftops" view (small hero, mostly sky) moved to the end.
 const SHOTS := [
-	{"name": "skyline", "course": "canyon", "k": 45, "hour": 18.3, "slow": 1.0},
-	{"name": "rooftops", "course": "waterfront", "k": 200, "hour": 17.9, "slow": 1.0},
 	{"name": "orbit", "course": "grand_tour", "k": 200, "hour": 17.2, "slow": 1.0},
 	{"name": "golden", "course": "waterfront", "k": 45, "hour": 18.5, "slow": 1.0},
+	{"name": "skyline", "course": "canyon", "k": 45, "hour": 18.3, "slow": 1.0},
 	{"name": "crane", "course": "canyon", "k": 45, "hour": 8.8, "slow": 1.0},
 	{"name": "bluehour", "course": "grand_tour", "k": 330, "hour": 20.3, "slow": 1.0},
 	{"name": "momentum", "course": "grand_tour", "k": 70, "hour": 17.6, "slow": 0.7},
 	{"name": "drone", "course": "waterfront", "k": 200, "hour": 10.2, "slow": 1.0},
 	{"name": "canyon", "course": "canyon", "k": 215, "hour": 15.6, "slow": 0.6},
+	{"name": "rooftops", "course": "waterfront", "k": 200, "hour": 17.9, "slow": 1.0},
 ]
 
 var main: Node
