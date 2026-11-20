@@ -277,12 +277,15 @@ func _draw() -> void:
 		draw_circle(nub, 23.0, Color(1, 1, 1, 0.42))
 	else:
 		var hint := Vector2(_safe.position.x + 150, _safe.end.y - 150)
-		draw_circle(hint, STICK_DRAW_RADIUS, Color(1, 1, 1, 0.025))
-		draw_arc(hint, STICK_DRAW_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.14), 1.5, true)
-		draw_circle(hint, 26.0, Color(1, 1, 1, 0.08))  # resting thumb nub
-		draw_arc(hint, 26.0, 0, TAU, 32, Color(1, 1, 1, 0.2), 1.5, true)
+		# (Readable over pale facades and bright sky alike: a light ring on a
+		# dark halo, an ink wash inside, shadowed label – still see-through.)
+		draw_circle(hint, STICK_DRAW_RADIUS, Color(UiStyle.INK, 0.16))
+		draw_arc(hint, STICK_DRAW_RADIUS, 0, TAU, 48, Color(UiStyle.INK, 0.35), 4.0, true)
+		draw_arc(hint, STICK_DRAW_RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.42), 1.5, true)
+		draw_circle(hint, 26.0, Color(UiStyle.INK, 0.25))  # resting thumb nub
+		draw_arc(hint, 26.0, 0, TAU, 32, Color(1, 1, 1, 0.5), 1.5, true)
 		var lw := _font.get_string_size("MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(_font, hint + Vector2(-lw / 2.0, STICK_DRAW_RADIUS - 14.0), "MOVE · STEER", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.26))
+		_shadow_text(hint + Vector2(-lw / 2.0, STICK_DRAW_RADIUS - 14.0), "MOVE · STEER", 12, Color(1, 1, 1, 0.72))
 	var web_down := _has_kind("web")
 	var jump_down := false
 	for t in touches.values():
@@ -299,20 +302,21 @@ func _draw() -> void:
 		# Drawn smaller than the touch target and faint at rest: the city
 		# behind stays readable; a press or "a web will land" brings it up.
 		var visual_r: float = 54.0 if action == "grapple" else 38.0
-		var fill := Color(UiStyle.INK, 0.46 if down else 0.12)
+		var fill := Color(UiStyle.INK, 0.46 if down else 0.24)
 		if down and action == "grapple":
 			fill = Color(UiStyle.GOLD, 0.5)
 		draw_circle(c, visual_r, fill)
-		var ring := Color(UiStyle.WEB, 0.9 if down else 0.26)
+		var ring := Color(UiStyle.WEB, 0.9 if down else 0.5)
 		if hot:
 			ring = Color(UiStyle.GOLD, 0.95)
 			draw_arc(c, visual_r + 7.0, -PI * 0.75, -PI * 0.25, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
 			draw_arc(c, visual_r + 7.0, PI * 0.25, PI * 0.75, 20, Color(UiStyle.GOLD, 0.55), 3.0, true)
+		draw_arc(c, visual_r, 0, TAU, 48, Color(UiStyle.INK, 0.35), 4.0, true)  # dark halo
 		draw_arc(c, visual_r, 0, TAU, 48, ring, 1.5 if not hot else 2.0, true)
 		var fs := 15 if action == "grapple" else 12
 		var tw := _font.get_string_size(b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var label_col := UiStyle.GOLD if hot and not down else (white if down else Color(1, 1, 1, 0.55))
-		draw_string(_font, c + Vector2(-tw / 2.0, fs * 0.35), b["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, label_col)
+		var label_col := UiStyle.GOLD if hot and not down else (white if down else Color(1, 1, 1, 0.82))
+		_shadow_text(c + Vector2(-tw / 2.0, fs * 0.35), b["label"], fs, label_col)
 	if _gadget_shown():
 		_draw_gadget(_safe.end + GADGET_POS, white, shade)
 	if use_label != "":
@@ -322,6 +326,11 @@ func _draw() -> void:
 	draw_arc(pp, 24, 0, TAU, 32, Color(UiStyle.WEB, 0.3), 1.5, true)
 	draw_rect(Rect2(pp + Vector2(-8, -9), Vector2(5, 18)), white)
 	draw_rect(Rect2(pp + Vector2(3, -9), Vector2(5, 18)), white)
+
+
+func _shadow_text(at: Vector2, t: String, fs: int, col: Color) -> void:
+	draw_string(_font, at + Vector2(0, 1.5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(UiStyle.INK, 0.6 * col.a))
+	draw_string(_font, at, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 ## The gadget button: its icon, a ring that fills as it recharges, gold when

@@ -887,10 +887,48 @@ func _publish_web_state(dt: float) -> void:
 	JavaScriptBridge.eval("window.__cs = %s" % JSON.stringify(st), true)
 
 
+## The hero read as a black cut-out against sunlit facades (audit CS-04/05:
+## dark suit, the sun usually behind the camera's subject). A soft light from
+## the camera's side that lights only the hero's own render layer (WorldState's
+## HeroFill): limbs and pose separate from the city, the world is untouched.
+const HERO_LAYER := 1 << 19
+var _fill: OmniLight3D
+var _fill_tagged := 0
+
+
+func _hero_fill() -> void:
+	if rig == null or rig.skeleton == null or camera == null or camera.cam == null:
+		return
+	if _fill == null:
+		_fill = OmniLight3D.new()
+		_fill.name = "HeroFill"
+		_fill.light_cull_mask = HERO_LAYER
+		_fill.shadow_enabled = false
+		_fill.omni_range = 8.0
+		_fill.omni_attenuation = 0.5
+		_fill.light_color = Color(1.0, 0.95, 0.88)
+		_fill.light_specular = 0.35
+		add_child(_fill)
+	# (Garments are swapped by the shop/homes: retag when the mesh count changes.)
+	var mis := rig.skeleton.find_children("*", "MeshInstance3D", true, false)
+	if mis.size() != _fill_tagged:
+		_fill_tagged = mis.size()
+		for mi in mis:
+			(mi as MeshInstance3D).layers |= HERO_LAYER
+	var h := player.global_position + Vector3.UP * 0.9
+	var c := camera.cam.global_position
+	var to_c := c - h
+	to_c.y = 0.0
+	to_c = to_c.normalized() if to_c.length() > 0.01 else Vector3.BACK
+	_fill.global_position = h + to_c * 2.2 + to_c.cross(Vector3.UP) * 0.8 + Vector3.UP * 1.2
+	_fill.light_energy = 1.6
+
+
 func _process(dt: float) -> void:
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
 	_update_pursuit()
+	_hero_fill()
 	# Things to use at home: a prompt within reach, F / B / the USE button.
 	var sp := homes.near_spot() if homes != null and state == State.PLAYING else {}
 	var lbl: String = sp.get("label", "")
