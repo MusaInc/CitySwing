@@ -1226,6 +1226,9 @@ func _page(id: String, title: String, back: Callable, width := 640, dim := 0.0, 
 	_brand(root)
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 10)
+	# A frosted glass sheet behind the page (shared Musa design language):
+	# the city stays visible, blurred, so text never fights the scene.
+	root.add_child(GlassSheet.new(col, Color(UiStyle.INK, 0.46)))
 	root.add_child(col)
 	var place := func():
 		var sa := _safe_rect()

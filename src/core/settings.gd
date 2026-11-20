@@ -24,7 +24,7 @@ const PRESETS := {
 
 var quality: int = Quality.MEDIUM
 var fps_60 := true  # swinging needs it; Settings can drop to 30 for battery
-const VERSION := 3  # bump to migrate saved settings to new defaults
+const VERSION := 4  # bump to migrate saved settings to new defaults
 var haptics := true
 var show_perf := false
 var look_sensitivity := 1.0
@@ -33,9 +33,10 @@ var invert_y := false
 var aim_mode := "assist"
 var music_volume := 0.6
 var sfx_volume := 1.0
-## Post-process style, a LookFilter.STYLES key. Clean (no filter) since 0.5:
-## the unfiltered render reads better; others stay for `--look=` comparisons.
-var look := "clean"
+## Post-process style, a LookFilter.STYLES key. "crisp" (WorldState's subtle
+## clean-up pass) since 1.1; "clean" = no filter; cartoon styles stay for
+## `--look=` comparisons.
+var look := "crisp"
 ## Sky: "cycle" (day → night → day, ~16 min) or a fixed "day" / "sunset" / "night".
 var time_of_day := "cycle"
 ## Weather: "changing" (drifts between clear, cloudy, rain, storm, fog) or one fixed state.
@@ -63,6 +64,8 @@ func _ready() -> void:
 			fps_60 = true  # 0.1.x saved the old 30 fps default
 		if cfg.get_value("meta", "version", 1) < 3:
 			look = "clean"  # cartoon filters removed from Settings
+		if cfg.get_value("meta", "version", 1) < 4:
+			look = "crisp"  # new default filter (shared with WorldState)
 		if not OS.is_debug_build():
 			tuning_overrides = {}  # the tuning panel is a developer tool
 	apply()

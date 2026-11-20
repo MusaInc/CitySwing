@@ -37,6 +37,9 @@ var ui: CanvasLayer
 var args := {}
 var _last_mode := ["free", ""]
 var _suits_before := []  # unlocked suit ids when the current run started
+var pursuit: StreetPursuit
+var _net_thread: Thread
+const PURSUIT_COINS := 150
 
 
 func _ready() -> void:
@@ -73,6 +76,13 @@ func _ready() -> void:
 	add_child(player)
 	if world is CityWorld:
 		player.ground_fn = (world as CityWorld).layout.ground_y
+		# Road graph for the emergent police chases (StreetPursuit, shared
+		# with WorldState), built off the main thread.
+		if not args.has("no-pursuit"):
+			var lay: CityLayout = (world as CityWorld).layout
+			Car.water_check = lay.is_water
+			_net_thread = Thread.new()
+			_net_thread.start(func(): return RoadNet.new().build(lay))
 	player.global_position = world.spawn_point()
 	player.last_safe_position = player.global_position
 	if world.has_method("build_all_near"):
@@ -880,6 +890,7 @@ func _publish_web_state(dt: float) -> void:
 func _process(dt: float) -> void:
 	if Input.is_action_just_pressed("toggle_debug"):
 		Settings.show_perf = not Settings.show_perf
+	_update_pursuit()
 	# Things to use at home: a prompt within reach, F / B / the USE button.
 	var sp := homes.near_spot() if homes != null and state == State.PLAYING else {}
 	var lbl: String = sp.get("label", "")
@@ -901,6 +912,42 @@ func _process(dt: float) -> void:
 				director.enter_shop()
 			else:
 				director.exit_shop()
+
+
+## Emergent police chases in Open City: a getaway car with police on its
+## tail, now and then, somewhere near. Drop onto it to stop it.
+func _update_pursuit() -> void:
+	if pursuit == null:
+		if _net_thread == null or _net_thread.is_alive():
+			return
+		var net: RoadNet = _net_thread.wait_to_finish()
+		_net_thread = null
+		if net == null:
+			return
+		pursuit = StreetPursuit.new()
+		pursuit.name = "StreetPursuit"
+		add_child(pursuit)
+		pursuit.setup(net, func(): return player.global_position, func(): return get_viewport().get_camera_3d())
+		pursuit.interval = Vector2(60.0, 130.0)
+		pursuit.started.connect(func(_at: Vector3):
+			if hud:
+				hud.flash("POLICE CHASE NEARBY", 2.5))
+		pursuit.ended.connect(_on_pursuit_ended)
+		if args.has("pursuit"):
+			pursuit.debug_log = true
+			pursuit.debug_cam = args.has("pursuit-cam")
+			pursuit.force_start.call_deferred()
+	pursuit.enabled = state == State.PLAYING and mode is FreeSwingMode \
+		and (homes == null or homes.inside() == "")
+
+
+func _on_pursuit_ended(why: String, _at: Vector3) -> void:
+	if why == "takedown":
+		coins.bonus(PURSUIT_COINS)
+		if hud:
+			hud.flash("GETAWAY STOPPED  +%d" % PURSUIT_COINS, 2.8)
+		audio.play("knockout", -2.0, 0.9)
+		Settings.haptic(60, 0.8)
 
 
 func _unhandled_input(event: InputEvent) -> void:
