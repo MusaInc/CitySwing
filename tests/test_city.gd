@@ -181,13 +181,19 @@ func test_road_field_matches_the_roads(t) -> void:
 		var i := pts.size() / 2
 		var d := (pts[i + 1] - pts[i]).normalized()
 		var n := Vector2(-d.y, d.x)
+		# A roundabout's ring carries +0.25 m on its half width (the one-way
+		# flag, CityRoads._bake_field); boulevards stop at the ring, so a
+		# probe inside a roundabout reads the ring's texel by design.
+		var hw := float(r["w"]) * 0.5 + (0.25 if r.get("ring", false) else 0.0)
 		for off: float in [0.0, float(r["w"]) * 0.25]:
 			var p := pts[i] + n * off
 			var f := R.field_at(p)
 			if f.w < 2.0:
 				continue  # (a junction: another road owns the texel)
+			if not r.get("ring", false) and R.roundabouts.any(func(rb): return p.distance_to(rb["c"]) < float(rb["r"]) + float(rb["w"]) * 0.5 + R.field_cell):
+				continue  # (inside a roundabout: the ring owns the texel)
 			probes += 1
-			if absf(absf(f.x) - off) > R.field_cell or absf(absf(f.y) - float(r["w"]) * 0.5) > 0.01:
+			if absf(absf(f.x) - off) > R.field_cell or absf(absf(f.y) - hw) > 0.01:
 				bad += 1
 	t.note("%d road-field probes" % probes)
 	t.check(probes > 60, "probed most roads")
@@ -234,6 +240,7 @@ func test_traffic_lod_and_tight_culling(t) -> void:
 	await get_tree().process_frame
 	w.build_all_near(Vector3(386, 0, -200), 250.0)
 	var near := 0
+	var mid := 0
 	var far := 0
 	var loose := 0
 	for c in w.get_children():
@@ -247,9 +254,13 @@ func test_traffic_lod_and_tight_culling(t) -> void:
 				for s in mm.mesh.get_surface_count():
 					tris += (mm.mesh.surface_get_arrays(s)[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
 				t.check(tris <= 24, "far car stand-in is %d triangles" % tris)
+			elif mmi.name.ends_with("_mid"):
+				mid += 1
 			else:
 				near += 1
-	t.check(near > 0 and far == near, "every car group has a far LOD (%d near, %d far)" % [near, far])
+	# Three bands per car group (WorldState's): full model, fleet LOD1, two-box.
+	t.check(near > 0 and mid == near and far == near,
+		"every car group has a mid and a far LOD (%d near, %d mid, %d far)" % [near, mid, far])
 	t.check(loose == 0, "%d traffic groups without a chunk-sized culling box" % loose)
 	w.queue_free()
 	await get_tree().process_frame
